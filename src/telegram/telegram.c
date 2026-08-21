@@ -966,41 +966,82 @@ static int parse_json_string_field(const char *json, const char *key, char *outp
     return len > 0;
 }
 
-static int parse_json_chat_id(const char *json, char *output, size_t capacity)
+static int parse_json_field_in_range(const char *start, const char *end, const char *key, char *output, size_t capacity)
 {
-    if (!json || !output || capacity == 0) return 0;
+    if (!start || !end || start >= end || !key || !output || capacity == 0) return 0;
     output[0] = '\0';
 
-    const char *chat_pos = strstr(json, "\"chat\"");
-    if (!chat_pos) chat_pos = strstr(json, "\"from\"");
-    if (!chat_pos) chat_pos = json;
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    size_t pat_len = strlen(pattern);
 
-    const char *id_pos = strstr(chat_pos, "\"id\"");
+    const char *pos = start;
+    while (pos + pat_len <= end) {
+        if (memcmp(pos, pattern, pat_len) == 0) {
+            pos += pat_len;
+            while (pos < end && (*pos == ' ' || *pos == ':')) pos++;
+            if (pos < end && *pos == '"') {
+                pos++;
+                size_t len = 0;
+                while (pos < end && *pos != '"' && len + 1 < capacity) {
+                    if (*pos == '\\' && pos + 1 < end) {
+                        pos++;
+                    }
+                    output[len++] = *pos++;
+                }
+                output[len] = '\0';
+                return len > 0;
+            }
+            break;
+        }
+        pos++;
+    }
+    return 0;
+}
+
+static int parse_json_chat_id_in_range(const char *start, const char *end, char *output, size_t capacity)
+{
+    if (!start || !end || start >= end || !output || capacity == 0) return 0;
+    output[0] = '\0';
+
+    const char *chat_pos = NULL;
+    char chat_pattern[] = "\"chat\"";
+    for (const char *p = start; p + 6 <= end; p++) {
+        if (memcmp(p, chat_pattern, 6) == 0) {
+            chat_pos = p;
+            break;
+        }
+    }
+    if (!chat_pos) {
+        char from_pattern[] = "\"from\"";
+        for (const char *p = start; p + 6 <= end; p++) {
+            if (memcmp(p, from_pattern, 6) == 0) {
+                chat_pos = p;
+                break;
+            }
+        }
+    }
+    if (!chat_pos) chat_pos = start;
+
+    const char *id_pos = NULL;
+    char id_pattern[] = "\"id\"";
+    for (const char *p = chat_pos; p + 4 <= end; p++) {
+        if (memcmp(p, id_pattern, 4) == 0) {
+            id_pos = p + 4;
+            break;
+        }
+    }
     if (!id_pos) return 0;
 
-    id_pos += 4;
-    while (*id_pos == ' ' || *id_pos == ':') id_pos++;
-
-    if (*id_pos == '"') id_pos++;
+    while (id_pos < end && (*id_pos == ' ' || *id_pos == ':')) id_pos++;
+    if (id_pos < end && *id_pos == '"') id_pos++;
 
     size_t len = 0;
-    while (*id_pos && ((*id_pos >= '0' && *id_pos <= '9') || *id_pos == '-') && len + 1 < capacity) {
+    while (id_pos < end && ((*id_pos >= '0' && *id_pos <= '9') || *id_pos == '-') && len + 1 < capacity) {
         output[len++] = *id_pos++;
     }
     output[len] = '\0';
     return len > 0;
-}
-
-static int parse_json_update_id(const char *json, int64_t *update_id_out)
-{
-    if (!json || !update_id_out) return 0;
-    const char *pos = strstr(json, "\"update_id\"");
-    if (!pos) return 0;
-
-    pos += 11;
-    while (*pos == ' ' || *pos == ':') pos++;
-    *update_id_out = strtoll(pos, NULL, 10);
-    return 1;
 }
 
 int telegram_get_bot_username(const char *token, char *username_out, size_t capacity)
@@ -1024,10 +1065,8 @@ int telegram_get_bot_username(const char *token, char *username_out, size_t capa
     return parse_json_string_field(response, "username", username_out, capacity);
 }
 
-int telegram_poll_updates_timeout(const char *token, int64_t *offset, int timeout_seconds,
-                                 char *chat_id_out, size_t chat_id_capacity,
-                                 char *username_out, size_t username_capacity,
-                                 char *text_out, size_t text_capacity)
+int telegram_poll_updates_callback(const char *token, int64_t *offset, int timeout_seconds,
+                                   telegram_update_callback_t callback, void *user_data)
 {
     if (!token) return 0;
 
@@ -1044,35 +1083,98 @@ int telegram_poll_updates_timeout(const char *token, int64_t *offset, int timeou
         snprintf(query, sizeof(query), "getUpdates?timeout=%d", timeout_seconds);
     }
 
-    char response[4096] = {0};
+    char response[32768] = {0};
     int res = telegram_http_get(token, query, response, sizeof(response));
     if (temp_http && !initialized) {
-        /* Keep initialized state if caller needs it, or leave as is */
+        telegram_http_cleanup();
     }
 
     if (!res || !strstr(response, "\"ok\":true")) {
         return 0;
     }
 
-    int64_t update_id = 0;
-    if (parse_json_update_id(response, &update_id)) {
-        if (offset) *offset = update_id + 1;
+    const char *result_pos = strstr(response, "\"result\"");
+    if (!result_pos) return 0;
+
+    int updates_found = 0;
+    int64_t max_update_id = -1;
+    const char *curr = strstr(result_pos, "\"update_id\"");
+
+    while (curr) {
+        const char *id_ptr = curr + 11;
+        while (*id_ptr == ' ' || *id_ptr == ':') id_ptr++;
+        int64_t uid = strtoll(id_ptr, NULL, 10);
+        if (uid > max_update_id) max_update_id = uid;
+
+        const char *next = strstr(curr + 11, "\"update_id\"");
+        const char *block_end = next ? next : (response + strlen(response));
+
+        char item_chat_id[128] = {0};
+        char item_username[128] = {0};
+        char item_text[512] = {0};
+
+        parse_json_chat_id_in_range(curr, block_end, item_chat_id, sizeof(item_chat_id));
+        parse_json_field_in_range(curr, block_end, "username", item_username, sizeof(item_username));
+        parse_json_field_in_range(curr, block_end, "text", item_text, sizeof(item_text));
+
+        if (callback) {
+            callback(uid, item_chat_id, item_username, item_text, user_data);
+        }
+        updates_found++;
+
+        curr = next;
     }
 
-    int found = 0;
-    if (chat_id_out && parse_json_chat_id(response, chat_id_out, chat_id_capacity)) {
-        found = 1;
+    if (max_update_id >= 0 && offset) {
+        *offset = max_update_id + 1;
     }
 
-    if (username_out) {
-        parse_json_string_field(response, "username", username_out, username_capacity);
-    }
+    return updates_found;
+}
 
-    if (text_out) {
-        parse_json_string_field(response, "text", text_out, text_capacity);
-    }
+typedef struct {
+    char *chat_id_out;
+    size_t chat_id_capacity;
+    char *username_out;
+    size_t username_capacity;
+    char *text_out;
+    size_t text_capacity;
+    int found;
+} single_poll_ctx_t;
 
-    return found;
+static void single_poll_callback(int64_t update_id, const char *chat_id,
+                                 const char *username, const char *text,
+                                 void *user_data)
+{
+    (void)update_id;
+    single_poll_ctx_t *ctx = (single_poll_ctx_t *)user_data;
+    if (ctx->found) return;
+
+    if (ctx->chat_id_out && chat_id && *chat_id) {
+        snprintf(ctx->chat_id_out, ctx->chat_id_capacity, "%s", chat_id);
+    }
+    if (ctx->username_out && username && *username) {
+        snprintf(ctx->username_out, ctx->username_capacity, "%s", username);
+    }
+    if (ctx->text_out && text && *text) {
+        snprintf(ctx->text_out, ctx->text_capacity, "%s", text);
+    }
+    ctx->found = 1;
+}
+
+int telegram_poll_updates_timeout(const char *token, int64_t *offset, int timeout_seconds,
+                                 char *chat_id_out, size_t chat_id_capacity,
+                                 char *username_out, size_t username_capacity,
+                                 char *text_out, size_t text_capacity)
+{
+    single_poll_ctx_t ctx = {
+        chat_id_out, chat_id_capacity,
+        username_out, username_capacity,
+        text_out, text_capacity,
+        0
+    };
+    telegram_poll_updates_callback(token, offset, timeout_seconds, single_poll_callback, &ctx);
+    return ctx.found;
 }
 
 int telegram_poll_updates(const char *token, int64_t *offset,
@@ -1147,7 +1249,7 @@ int telegram_pair(const char *token, const char *expected_code,
                 chat_id = c2t_config_get()->telegram_chat_id;
 
                 /* Send confirmation message to Telegram chat */
-                char confirm_msg[256];
+                char confirm_msg[512];
                 snprintf(confirm_msg, sizeof(confirm_msg),
                          "✅ c2t paired successfully!\nDevice connected to %s (Chat ID: %s).",
                          found_username[0] ? found_username : "user", found_chat_id);

@@ -32,6 +32,14 @@ int telegram_send_file(const void *data, size_t length, const char *mime_type,
 int telegram_send_html(const char *html_text);
 int telegram_send_text_message(const char *text);
 int telegram_get_bot_username(const char *token, char *username_out, size_t capacity);
+typedef void (*telegram_update_callback_t)(int64_t update_id,
+                                          const char *chat_id,
+                                          const char *username,
+                                          const char *text,
+                                          void *user_data);
+
+int telegram_poll_updates_callback(const char *token, int64_t *offset, int timeout_seconds,
+                                   telegram_update_callback_t callback, void *user_data);
 int telegram_poll_updates(const char *token, int64_t *offset,
                          char *chat_id_out, size_t chat_id_capacity,
                          char *username_out, size_t username_capacity,

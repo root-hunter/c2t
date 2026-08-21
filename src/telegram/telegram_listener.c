@@ -143,6 +143,19 @@ static void handle_command(const char *text, const char *chat_id, const char *us
     }
 }
 
+static void on_telegram_command_received(int64_t update_id,
+                                        const char *chat_id,
+                                        const char *username,
+                                        const char *text,
+                                        void *user_data)
+{
+    (void)update_id;
+    (void)user_data;
+    if (text && *text) {
+        handle_command(text, chat_id ? chat_id : "", username ? username : "");
+    }
+}
+
 #ifdef _WIN32
 static DWORD WINAPI telegram_listener_worker_func(void *context)
 #else
@@ -151,12 +164,21 @@ static void *telegram_listener_worker_func(void *context)
 {
     (void)context;
     int64_t offset = 0;
-    char chat_id_buf[128];
-    char username_buf[128];
-    char text_buf[512];
 
     c2t_log_info("listener", "Telegram command listener started (long-polling timeout=%ds)",
                  POLL_TIMEOUT_SECONDS);
+
+    /* Fast initial check: drain and advance offset so all pending / initial updates are processed immediately */
+    const c2t_config_t *init_config = c2t_config_get();
+    if (init_config->telegram_enabled && init_config->telegram_bot_token && init_config->telegram_chat_id) {
+        telegram_poll_updates_callback(
+            init_config->telegram_bot_token,
+            &offset,
+            0,
+            on_telegram_command_received,
+            NULL
+        );
+    }
 
     while (!stopping) {
         const c2t_config_t *config = c2t_config_get();
@@ -169,25 +191,13 @@ static void *telegram_listener_worker_func(void *context)
             continue;
         }
 
-        chat_id_buf[0] = '\0';
-        username_buf[0] = '\0';
-        text_buf[0] = '\0';
-
-        int found = telegram_poll_updates_timeout(
+        telegram_poll_updates_callback(
             config->telegram_bot_token,
             &offset,
             POLL_TIMEOUT_SECONDS,
-            chat_id_buf, sizeof(chat_id_buf),
-            username_buf, sizeof(username_buf),
-            text_buf, sizeof(text_buf)
+            on_telegram_command_received,
+            NULL
         );
-
-        if (stopping)
-            break;
-
-        if (found && text_buf[0] != '\0') {
-            handle_command(text_buf, chat_id_buf, username_buf);
-        }
     }
 
     c2t_log_info("listener", "Telegram command listener stopped");

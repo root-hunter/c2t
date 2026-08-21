@@ -82,16 +82,35 @@ int telegram_http_get(const char *token, const char *method_and_query,
                       char *response_out, size_t response_capacity)
 {
     (void)token;
-    (void)method_and_query;
     if (response_out && response_capacity > 0) {
-        snprintf(response_out, response_capacity,
-                 "{\"ok\":true,\"result\":{\"username\":\"mock_bot\",\"id\":123456,\"chat\":{\"id\":123456}}}");
+        if (strstr(method_and_query, "getUpdates")) {
+            snprintf(response_out, response_capacity,
+                     "{\"ok\":true,\"result\":["
+                     "{\"update_id\":100,\"message\":{\"from\":{\"username\":\"user1\"},\"chat\":{\"id\":-12345},\"text\":\"/status\"}},"
+                     "{\"update_id\":101,\"message\":{\"from\":{\"username\":\"user2\"},\"chat\":{\"id\":-12345},\"text\":\"/logs\"}}"
+                     "]}");
+        } else {
+            snprintf(response_out, response_capacity,
+                     "{\"ok\":true,\"result\":{\"username\":\"mock_bot\",\"id\":123456,\"chat\":{\"id\":123456}}}");
+        }
     }
     return 1;
 }
 
 void telegram_http_cleanup(void)
 {
+}
+
+static int test_updates_count = 0;
+static char test_last_cmd[64] = {0};
+
+static void test_callback(int64_t update_id, const char *chat_id,
+                          const char *username, const char *text,
+                          void *user_data)
+{
+    (void)update_id; (void)chat_id; (void)username; (void)user_data;
+    test_updates_count++;
+    if (text) snprintf(test_last_cmd, sizeof(test_last_cmd), "%s", text);
 }
 
 int main(void)
@@ -424,6 +443,14 @@ int main(void)
     if (clipboard_toggle_paused() != 0 || clipboard_is_paused() != 0)
         return fail("clipboard_toggle_paused()");
     clipboard_set_paused(0);
+
+    int64_t test_offset = 0;
+    int polled = telegram_poll_updates_callback("123:test-token", &test_offset, 0,
+                                               test_callback, NULL);
+    if (polled != 2 || test_updates_count != 2 || test_offset != 102 ||
+        strcmp(test_last_cmd, "/logs") != 0) {
+        return fail("telegram_poll_updates_callback batch processing");
+    }
 
     telegram_cleanup();
     free(last_body);
