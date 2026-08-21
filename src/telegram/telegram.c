@@ -50,6 +50,8 @@ static void telegram_unlock(void) { LeaveCriticalSection(&telegram_mutex); }
 
 #define TELEGRAM_MAX_CHARACTERS 4096
 #define TELEGRAM_MAX_CAPTION_BYTES 1023
+#define TELEGRAM_DEDUP_TABLE_SIZE 2048
+#define TELEGRAM_DEDUP_TABLE_MASK (TELEGRAM_DEDUP_TABLE_SIZE - 1)
 #define TELEGRAM_DEDUPLICATION_CAPACITY 1024
 
 static const char *bot_token;
@@ -63,9 +65,10 @@ typedef struct sent_content {
     int valid;
 } sent_content_t;
 
-static sent_content_t sent_contents[TELEGRAM_DEDUPLICATION_CAPACITY];
-static size_t sent_content_count;
-static size_t next_sent_content;
+static sent_content_t sent_contents_table[TELEGRAM_DEDUP_TABLE_SIZE];
+static uint32_t sent_order[TELEGRAM_DEDUPLICATION_CAPACITY];
+static size_t sent_order_head;
+static size_t sent_order_count;
 
 static size_t bounded_length(const char *text, size_t capacity)
 {
@@ -184,12 +187,23 @@ static void content_hash(const void *data, size_t length,
     const unsigned char *bytes = data;
     hash[0] = UINT64_C(14695981039346656037);
     hash[1] = UINT64_C(7809847782465536322);
-    for (size_t index = 0; index < length; ++index) {
-        hash[0] ^= bytes[index];
+
+    size_t words = length / 8;
+    for (size_t w = 0; w < words; ++w) {
+        uint64_t word_val;
+        memcpy(&word_val, bytes + w * 8, sizeof(word_val));
+        hash[0] ^= word_val;
         hash[0] *= UINT64_C(1099511628211);
-        hash[1] ^= bytes[index];
+        hash[1] ^= word_val;
         hash[1] *= UINT64_C(14029467366897019727);
     }
+    for (size_t rem = words * 8; rem < length; ++rem) {
+        hash[0] ^= bytes[rem];
+        hash[0] *= UINT64_C(1099511628211);
+        hash[1] ^= bytes[rem];
+        hash[1] *= UINT64_C(14029467366897019727);
+    }
+
     char source_text[TELEGRAM_MAX_CAPTION_BYTES + 1];
     size_t source_length = format_source(source, source_text);
     for (size_t index = 0; index < source_length; ++index) {
@@ -200,7 +214,7 @@ static void content_hash(const void *data, size_t length,
     }
 }
 
-/* Returns 1 for a duplicate and 0 when the send may proceed. */
+/* Returns 1 for a duplicate and 0 when the send may proceed (O(1) table lookup). */
 static int prepare_send(const void *data, size_t length,
                         const c2t_clipboard_source_t *source,
                         sent_content_t *pending)
@@ -213,10 +227,14 @@ static int prepare_send(const void *data, size_t length,
     content_hash(data, length, source, hash);
 
     telegram_lock();
-    for (size_t index = 0; index < sent_content_count; ++index) {
-        const sent_content_t *entry = &sent_contents[index];
-        if (entry->length == length && entry->hash[0] == hash[0] &&
-            entry->hash[1] == hash[1]) {
+    size_t slot = (size_t)(hash[0] & TELEGRAM_DEDUP_TABLE_MASK);
+    for (size_t probe = 0; probe < 32; ++probe) {
+        size_t idx = (slot + probe) & TELEGRAM_DEDUP_TABLE_MASK;
+        if (!sent_contents_table[idx].valid)
+            break;
+        if (sent_contents_table[idx].length == length &&
+            sent_contents_table[idx].hash[0] == hash[0] &&
+            sent_contents_table[idx].hash[1] == hash[1]) {
             telegram_unlock();
             return 1;
         }
@@ -238,22 +256,41 @@ static int finish_send(sent_content_t *pending, int result)
         return 0;
 
     telegram_lock();
-    sent_contents[next_sent_content] = *pending;
-    next_sent_content =
-        (next_sent_content + 1) % TELEGRAM_DEDUPLICATION_CAPACITY;
-    if (sent_content_count < TELEGRAM_DEDUPLICATION_CAPACITY)
-        ++sent_content_count;
+    /* Evict oldest entry if at capacity */
+    if (sent_order_count >= TELEGRAM_DEDUPLICATION_CAPACITY) {
+        uint32_t old_slot = sent_order[sent_order_head];
+        sent_contents_table[old_slot].valid = 0;
+        sent_order_head = (sent_order_head + 1) % TELEGRAM_DEDUPLICATION_CAPACITY;
+        --sent_order_count;
+    }
+
+    size_t slot = (size_t)(pending->hash[0] & TELEGRAM_DEDUP_TABLE_MASK);
+    size_t target_idx = slot;
+    for (size_t probe = 0; probe < 32; ++probe) {
+        size_t idx = (slot + probe) & TELEGRAM_DEDUP_TABLE_MASK;
+        if (!sent_contents_table[idx].valid) {
+            target_idx = idx;
+            break;
+        }
+    }
+
+    sent_contents_table[target_idx] = *pending;
+    sent_contents_table[target_idx].valid = 1;
+    size_t next_order_slot = (sent_order_head + sent_order_count) % TELEGRAM_DEDUPLICATION_CAPACITY;
+    sent_order[next_order_slot] = (uint32_t)target_idx;
+    ++sent_order_count;
     telegram_unlock();
 
-    c2t_log_debug("telegram", "Content hash stored after successful delivery");
+    c2t_log_debug("telegram", "Content hash stored in O(1) table after successful delivery");
     return 1;
 }
 
 static void clear_sent_contents(void)
 {
     telegram_lock();
-    sent_content_count = 0;
-    next_sent_content = 0;
+    memset(sent_contents_table, 0, sizeof(sent_contents_table));
+    sent_order_head = 0;
+    sent_order_count = 0;
     telegram_unlock();
 }
 
@@ -737,13 +774,17 @@ static int send_file(const void *data, size_t length, const char *mime_type,
         "\r\n\r\n%s\r\n--%s\r\nContent-Disposition: form-data; "
         "name=\"%s\"; filename=\"%s\"\r\nContent-Type: %s\r\n\r\n";
     const char *prefix_format = source_length ? caption_format : first_format;
+    char prefix_buf[2048];
     int prefix_length = source_length
-        ? snprintf(NULL, 0, prefix_format, boundary, chat_id, boundary,
+        ? snprintf(prefix_buf, sizeof(prefix_buf), prefix_format, boundary, chat_id, boundary,
                    source_text, boundary, field, safe_filename, mime_type)
-        : snprintf(NULL, 0, prefix_format, boundary, chat_id, boundary, field,
+        : snprintf(prefix_buf, sizeof(prefix_buf), prefix_format, boundary, chat_id, boundary, field,
                    safe_filename, mime_type);
-    int suffix_length = snprintf(NULL, 0, "\r\n--%s--\r\n", boundary);
-    if (prefix_length < 0 || suffix_length < 0)
+
+    char suffix_buf[64];
+    int suffix_length = snprintf(suffix_buf, sizeof(suffix_buf), "\r\n--%s--\r\n", boundary);
+    if (prefix_length < 0 || (size_t)prefix_length >= sizeof(prefix_buf) ||
+        suffix_length < 0 || (size_t)suffix_length >= sizeof(suffix_buf))
         return 0;
 
     size_t body_length = (size_t)prefix_length;
@@ -760,16 +801,11 @@ static int send_file(const void *data, size_t length, const char *mime_type,
         c2t_log_error("telegram", "Not enough memory for upload body");
         return 0;
     }
-    if (source_length)
-        snprintf((char *)body, (size_t)prefix_length + 1, prefix_format,
-                 boundary, chat_id, boundary, source_text, boundary, field,
-                 safe_filename, mime_type);
-    else
-        snprintf((char *)body, (size_t)prefix_length + 1, prefix_format,
-                 boundary, chat_id, boundary, field, safe_filename, mime_type);
-    memcpy(body + prefix_length, data, length);
-    snprintf((char *)body + prefix_length + length, (size_t)suffix_length + 1,
-             "\r\n--%s--\r\n", boundary);
+    memcpy(body, prefix_buf, (size_t)prefix_length);
+    if (length)
+        memcpy(body + prefix_length, data, length);
+    memcpy(body + prefix_length + length, suffix_buf, (size_t)suffix_length);
+    body[body_length] = '\0';
 
     char content_type[96];
     snprintf(content_type, sizeof(content_type),

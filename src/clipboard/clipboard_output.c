@@ -92,10 +92,19 @@ static uint64_t content_hash(const void *data, size_t length,
 {
     const unsigned char *bytes = data;
     uint64_t hash = UINT64_C(14695981039346656037);
-    for (size_t index = 0; index < length; ++index) {
-        hash ^= bytes[index];
+
+    size_t words = length / 8;
+    for (size_t w = 0; w < words; ++w) {
+        uint64_t word_val;
+        memcpy(&word_val, bytes + w * 8, sizeof(word_val));
+        hash ^= word_val;
         hash *= UINT64_C(1099511628211);
     }
+    for (size_t rem = words * 8; rem < length; ++rem) {
+        hash ^= bytes[rem];
+        hash *= UINT64_C(1099511628211);
+    }
+
     while (*mime_type) {
         hash ^= (unsigned char)*mime_type++;
         hash *= UINT64_C(1099511628211);

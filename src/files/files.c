@@ -158,27 +158,28 @@ static const char *mime_from_filename(const char *filename)
     if (!extension)
         return "application/octet-stream";
     ++extension;
-    struct mime_entry {
-        const char *extension;
-        const char *mime_type;
-    };
-    static const struct mime_entry types[] = {
-        {"txt", "text/plain"}, {"csv", "text/csv"},
-        {"json", "application/json"}, {"xml", "application/xml"},
-        {"pdf", "application/pdf"}, {"zip", "application/zip"},
-        {"png", "image/png"}, {"jpg", "image/jpeg"},
-        {"jpeg", "image/jpeg"}, {"gif", "image/gif"},
-        {"webp", "image/webp"}, {"bmp", "image/bmp"},
-        {"mp3", "audio/mpeg"}, {"m4a", "audio/mp4"},
-        {"mp4", "video/mp4"}, {"mov", "video/quicktime"}
-    };
-    for (size_t index = 0; index < sizeof(types) / sizeof(types[0]); ++index) {
-        size_t expected_length = strlen(types[index].extension);
-        if (strlen(extension) == expected_length &&
-            ascii_equal_nocase(extension, types[index].extension,
-                               expected_length))
-            return types[index].mime_type;
-    }
+    char ext[8] = {0};
+    for (size_t i = 0; i < 7 && extension[i]; ++i)
+        ext[i] = (char)tolower((unsigned char)extension[i]);
+
+    /* O(1) branch-predictable matching on normalized extension */
+    if (ext[0] == 't' && ext[1] == 'x' && ext[2] == 't' && ext[3] == '\0') return "text/plain";
+    if (ext[0] == 'p' && ext[1] == 'n' && ext[2] == 'g' && ext[3] == '\0') return "image/png";
+    if (ext[0] == 'j' && ext[1] == 'p' && ext[2] == 'g' && ext[3] == '\0') return "image/jpeg";
+    if (ext[0] == 'j' && ext[1] == 'p' && ext[2] == 'e' && ext[3] == 'g' && ext[4] == '\0') return "image/jpeg";
+    if (ext[0] == 'p' && ext[1] == 'd' && ext[2] == 'f' && ext[3] == '\0') return "application/pdf";
+    if (ext[0] == 'z' && ext[1] == 'i' && ext[2] == 'p' && ext[3] == '\0') return "application/zip";
+    if (ext[0] == 'j' && ext[1] == 's' && ext[2] == 'o' && ext[3] == 'n' && ext[4] == '\0') return "application/json";
+    if (ext[0] == 'c' && ext[1] == 's' && ext[2] == 'v' && ext[3] == '\0') return "text/csv";
+    if (ext[0] == 'w' && ext[1] == 'e' && ext[2] == 'b' && ext[3] == 'p' && ext[4] == '\0') return "image/webp";
+    if (ext[0] == 'g' && ext[1] == 'i' && ext[2] == 'f' && ext[3] == '\0') return "image/gif";
+    if (ext[0] == 'b' && ext[1] == 'm' && ext[2] == 'p' && ext[3] == '\0') return "image/bmp";
+    if (ext[0] == 'm' && ext[1] == 'p' && ext[2] == '4' && ext[3] == '\0') return "video/mp4";
+    if (ext[0] == 'm' && ext[1] == 'p' && ext[2] == '3' && ext[3] == '\0') return "audio/mpeg";
+    if (ext[0] == 'm' && ext[1] == '4' && ext[2] == 'a' && ext[3] == '\0') return "audio/mp4";
+    if (ext[0] == 'm' && ext[1] == 'o' && ext[2] == 'v' && ext[3] == '\0') return "video/quicktime";
+    if (ext[0] == 'x' && ext[1] == 'm' && ext[2] == 'l' && ext[3] == '\0') return "application/xml";
+
     return "application/octet-stream";
 }
 
