@@ -259,10 +259,31 @@ static uint64_t last_duplicate_hash;
 static size_t last_duplicate_length;
 static uint64_t last_duplicate_time_ms;
 static int has_duplicate_previous;
+static volatile int clipboard_paused;
+
+int clipboard_is_paused(void)
+{
+    return clipboard_paused;
+}
+
+void clipboard_set_paused(int paused)
+{
+    clipboard_paused = paused ? 1 : 0;
+}
+
+int clipboard_toggle_paused(void)
+{
+    clipboard_paused = !clipboard_paused;
+    return clipboard_paused;
+}
 
 void clipboard_output(const void *data, size_t length, const char *mime_type,
                       const c2t_clipboard_source_t *source)
 {
+    if (clipboard_paused) {
+        c2t_log_debug("clipboard", "Ignoring clipboard event: monitoring paused");
+        return;
+    }
     if ((!data && length != 0) || !mime_type || !*mime_type) {
         c2t_log_warning("clipboard", "Ignoring invalid clipboard payload");
         return;

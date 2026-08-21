@@ -17,6 +17,7 @@
 
 #include "telegram_listener.h"
 #include "../config/config.h"
+#include "../clipboard/clipboard_output.h"
 #include "../logging/logging.h"
 #include "../logging/log_sender.h"
 #include "telegram.h"
@@ -68,19 +69,39 @@ static void handle_command(const char *text, const char *chat_id, const char *us
         return;
     }
 
-    if (match_command(text, "/logs") || match_command(text, "/log")) {
+    if (match_command(text, "/pause") || match_command(text, "/mute") || match_command(text, "/stop_listen") || match_command(text, "/disable")) {
+        clipboard_set_paused(1);
+        c2t_log_info("listener", "Clipboard monitoring paused by Telegram command from %s", chat_id);
+        telegram_send_html("⏸️ <b>Clipboard Monitoring Paused</b>\n<i>c2t will ignore clipboard changes until resumed with /resume or /toggle.</i>");
+    } else if (match_command(text, "/resume") || match_command(text, "/unmute") || match_command(text, "/start_listen") || match_command(text, "/enable")) {
+        clipboard_set_paused(0);
+        c2t_log_info("listener", "Clipboard monitoring resumed by Telegram command from %s", chat_id);
+        telegram_send_html("▶️ <b>Clipboard Monitoring Resumed</b>\n<i>c2t is now capturing and forwarding clipboard changes.</i>");
+    } else if (match_command(text, "/toggle")) {
+        int is_now_paused = clipboard_toggle_paused();
+        c2t_log_info("listener", "Clipboard monitoring toggled to %s by Telegram command from %s",
+                     is_now_paused ? "paused" : "active", chat_id);
+        if (is_now_paused) {
+            telegram_send_html("⏸️ <b>Clipboard Monitoring Paused</b>\n<i>c2t will ignore clipboard changes until resumed.</i>");
+        } else {
+            telegram_send_html("▶️ <b>Clipboard Monitoring Resumed</b>\n<i>c2t is now capturing and forwarding clipboard changes.</i>");
+        }
+    } else if (match_command(text, "/logs") || match_command(text, "/log")) {
         c2t_log_info("listener", "Processing /logs command from authorized chat %s", chat_id);
         c2t_log_sender_dispatch_now();
     } else if (match_command(text, "/status") || match_command(text, "/ping")) {
         c2t_log_info("listener", "Processing /status command from chat %s", chat_id);
+        int paused = clipboard_is_paused();
         char status_msg[1024];
         snprintf(status_msg, sizeof(status_msg),
                  "🤖 <b>c2t Daemon Status</b>\n\n"
                  "• <b>Status:</b> 🟢 Active &amp; Running\n"
+                 "• <b>Clipboard Monitoring:</b> %s\n"
                  "• <b>Periodic Logs:</b> %s (Interval: %llu s)\n"
                  "• <b>File Uploads:</b> %s\n"
                  "• <b>Window Info:</b> %s\n"
                  "• <b>Delivery Queue:</b> %llu items / %llu bytes",
+                 paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)",
                  config->telegram_send_logs ? "Enabled" : "On-demand only (/logs)",
                  (unsigned long long)config->telegram_log_interval_sec,
                  config->telegram_send_files ? "Enabled" : "Disabled",
@@ -90,12 +111,15 @@ static void handle_command(const char *text, const char *chat_id, const char *us
         telegram_send_html(status_msg);
     } else if (match_command(text, "/help") || match_command(text, "/start")) {
         c2t_log_info("listener", "Processing /help command from chat %s", chat_id);
-        char help_msg[512];
+        char help_msg[768];
         snprintf(help_msg, sizeof(help_msg),
                  "💡 <b>c2t Telegram Commands</b>\n\n"
-                 "• <code>/logs</code> - Flush and retrieve execution logs (code block or .log file)\n"
-                 "• <code>/status</code> - View daemon status &amp; configuration\n"
-                 "• <code>/help</code> - Show this help message");
+                 "• <code>/pause</code> - Pause clipboard monitoring (mute copies)\n"
+                 "• <code>/resume</code> - Resume clipboard monitoring\n"
+                 "• <code>/toggle</code> - Toggle pause / resume monitoring\n"
+                 "• <code>/logs</code> - Flush and retrieve execution logs\n"
+                 "• <code>/status</code> - View daemon status &amp; monitoring state\n"
+                 "• <code>/help</code> - Show this help guide");
         telegram_send_html(help_msg);
     }
 }

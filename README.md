@@ -178,10 +178,11 @@ C2T_DELIVERY_ATTEMPTS=5 C2T_RETRY_DELAY_MS=1000 c2t
 
 ## Telegram remote bot commands
 
-When Telegram integration is active, `c2t` listens for commands from your authorized `TELEGRAM_CHAT_ID` using ultra-low-overhead long-polling:
-
+- `/pause` (or `/mute`, `/stop_listen`, `/disable`): Temporarily pauses clipboard monitoring and delivery. Any newly copied content is discarded.
+- `/resume` (or `/unmute`, `/start_listen`, `/enable`): Resumes active clipboard monitoring and delivery.
+- `/toggle`: Toggles between paused and active clipboard monitoring states.
 - `/logs` (or `/log`): Drains and retrieves all buffered execution logs since the last check. If logs are concise, they are returned formatted directly in a monospace code block; if larger, they are automatically delivered as an attached `.log` file.
-- `/status` (or `/ping`): Returns daemon status, queue state, and active configuration settings.
+- `/status` (or `/ping`): Returns daemon status (including clipboard monitoring state: Active vs Paused), queue state, and active configuration settings.
 - `/help`: Displays available commands.
 
 All commands from unauthorized chat IDs or unknown sources are discarded.

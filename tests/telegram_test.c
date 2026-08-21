@@ -418,6 +418,13 @@ int main(void)
     if (strcmp(last_method, "sendMessage") != 0 || !body_contains("parse_mode=HTML", 15))
         return fail("telegram_send_html payload");
 
+    clipboard_set_paused(1);
+    if (!clipboard_is_paused())
+        return fail("clipboard_set_paused(1)");
+    if (clipboard_toggle_paused() != 0 || clipboard_is_paused() != 0)
+        return fail("clipboard_toggle_paused()");
+    clipboard_set_paused(0);
+
     telegram_cleanup();
     free(last_body);
     return 0;

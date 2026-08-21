@@ -24,6 +24,9 @@
 int clipboard_output_init(void);
 void clipboard_output(const void *data, size_t length, const char *mime_type,
                       const c2t_clipboard_source_t *source);
+int clipboard_is_paused(void);
+void clipboard_set_paused(int paused);
+int clipboard_toggle_paused(void);
 void clipboard_output_cleanup(void);
 
 #endif
