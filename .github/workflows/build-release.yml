@@ -225,9 +225,9 @@ jobs:
           version="$(sed -nE 's/^project\(c2t VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
           package="c2t-v${version}-macos-${{ matrix.arch }}"
           codesign --force --sign - build/macos/c2t
+          mkdir -p "stage/${package}" dist
           install -m755 build/macos/c2t "stage/${package}/c2t"
           install -m644 README.md "stage/${package}/README.md"
-          mkdir -p dist
           tar -C stage -czf "dist/${package}.tar.gz" "${package}"
 
       - name: Verify Linux package permissions
