@@ -607,7 +607,7 @@ int c2t_runtime_start_background(int argc, char **argv,
 const char *c2t_runtime_log_path(void)
 {
     return (prepare_paths() &&
-            (c2t_config_get()->log_file || c2t_config_get()->telegram_send_logs || c2t_config_get()->telegram_enabled))
+            (c2t_config_get()->log_file || c2t_config_get()->telegram_send_logs))
         ? log_path
         : NULL;
 }

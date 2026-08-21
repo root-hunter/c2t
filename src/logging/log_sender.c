@@ -113,98 +113,116 @@ static char *escape_html(const char *input, size_t input_len, size_t *out_len)
     return escaped;
 }
 
-static int send_log_payload(int on_demand)
+#define LOG_TEXT_MAX_THRESHOLD (25 * 1024)
+#define LOG_CHUNK_TARGET_CHARS 3200
+
+static int send_log_text_chunks(const char *buffer, size_t length)
 {
-    const char *path = c2t_runtime_log_path();
-    if (!path) {
-        if (on_demand) {
-            telegram_send_html("ℹ️ <b>c2t Logs</b>\n<i>Log system is not active or no log file path configured.</i>");
+    size_t offset = 0;
+    int chunk_index = 0;
+    while (offset < length) {
+        size_t remaining = length - offset;
+        size_t chunk_len = remaining;
+        if (chunk_len > LOG_CHUNK_TARGET_CHARS) {
+            chunk_len = LOG_CHUNK_TARGET_CHARS;
+            for (size_t i = chunk_len; i > LOG_CHUNK_TARGET_CHARS / 2; --i) {
+                if (buffer[offset + i - 1] == '\n') {
+                    chunk_len = i;
+                    break;
+                }
+            }
         }
-        return 0;
-    }
 
-    FILE *stream = fopen(path, "rb");
-    if (!stream) {
-        if (on_demand) {
-            telegram_send_html("ℹ️ <b>c2t Logs</b>\n<i>Log file is currently empty or unavailable.</i>");
-        }
-        return 0;
-    }
-
-    if (fseek(stream, 0, SEEK_END) != 0) {
-        fclose(stream);
-        return 0;
-    }
-
-    long file_size = ftell(stream);
-    if (file_size < 0) {
-        fclose(stream);
-        return 0;
-    }
-
-    size_t current_size = (size_t)file_size;
-    if (current_size < last_sent_offset) {
-        /* File was truncated or reset */
-        last_sent_offset = 0;
-    }
-
-    if (current_size <= last_sent_offset) {
-        fclose(stream);
-        if (on_demand) {
-            telegram_send_html("ℹ️ <b>c2t Logs</b>\n<i>No new logs since last dispatch.</i>");
-        }
-        return 1;
-    }
-
-    size_t unread_bytes = current_size - last_sent_offset;
-    if (unread_bytes > MAX_LOG_READ_BYTES)
-        unread_bytes = MAX_LOG_READ_BYTES;
-
-    if (fseek(stream, (long)last_sent_offset, SEEK_SET) != 0) {
-        fclose(stream);
-        return 0;
-    }
-
-    char *buffer = malloc(unread_bytes + 1);
-    if (!buffer) {
-        c2t_log_error("log_sender", "Unable to allocate memory for log dispatch");
-        fclose(stream);
-        return 0;
-    }
-
-    size_t read_bytes = fread(buffer, 1, unread_bytes, stream);
-    fclose(stream);
-
-    if (read_bytes == 0) {
-        free(buffer);
-        if (on_demand) {
-            telegram_send_html("ℹ️ <b>c2t Logs</b>\n<i>No new logs available.</i>");
-        }
-        return 1;
-    }
-    buffer[read_bytes] = '\0';
-
-    int sent = 0;
-
-    /* If log chunk is small enough (<= 3000 bytes), format nicely in HTML code block */
-    if (read_bytes <= 3000) {
         size_t escaped_len = 0;
-        char *escaped = escape_html(buffer, read_bytes, &escaped_len);
-        if (escaped) {
+        char *escaped = escape_html(buffer + offset, chunk_len, &escaped_len);
+        if (!escaped)
+            return 0;
+
+        char *msg = NULL;
+        if (chunk_index == 0) {
             static const char prefix[] = "📋 <b>c2t Execution Logs</b>\n<pre><code class=\"language-log\">";
             static const char suffix[] = "</code></pre>";
             size_t total_len = strlen(prefix) + escaped_len + strlen(suffix) + 1;
-            char *msg = malloc(total_len);
-            if (msg) {
+            msg = malloc(total_len);
+            if (msg)
                 snprintf(msg, total_len, "%s%s%s", prefix, escaped, suffix);
-                sent = telegram_send_html(msg);
-                free(msg);
-            }
-            free(escaped);
+        } else {
+            static const char prefix[] = "<pre><code class=\"language-log\">";
+            static const char suffix[] = "</code></pre>";
+            size_t total_len = strlen(prefix) + escaped_len + strlen(suffix) + 1;
+            msg = malloc(total_len);
+            if (msg)
+                snprintf(msg, total_len, "%s%s%s", prefix, escaped, suffix);
         }
+        free(escaped);
+
+        if (!msg)
+            return 0;
+
+        int ok = telegram_send_html(msg);
+        free(msg);
+        if (!ok)
+            return 0;
+
+        offset += chunk_len;
+        chunk_index++;
+    }
+    return 1;
+}
+
+static int send_log_payload(int on_demand)
+{
+    const char *path = c2t_runtime_log_path();
+    char *buffer = NULL;
+    size_t unread_bytes = 0;
+    int is_file_source = 0;
+
+    if (path) {
+        is_file_source = 1;
+        FILE *stream = fopen(path, "rb");
+        if (stream) {
+            if (fseek(stream, 0, SEEK_END) == 0) {
+                long file_size = ftell(stream);
+                if (file_size >= 0) {
+                    size_t current_size = (size_t)file_size;
+                    if (current_size < last_sent_offset)
+                        last_sent_offset = 0;
+                    if (current_size > last_sent_offset) {
+                        size_t to_read = current_size - last_sent_offset;
+                        if (to_read > MAX_LOG_READ_BYTES)
+                            to_read = MAX_LOG_READ_BYTES;
+                        if (fseek(stream, (long)last_sent_offset, SEEK_SET) == 0) {
+                            buffer = malloc(to_read + 1);
+                            if (buffer) {
+                                unread_bytes = fread(buffer, 1, to_read, stream);
+                                buffer[unread_bytes] = '\0';
+                            }
+                        }
+                    }
+                }
+            }
+            fclose(stream);
+        }
+    } else {
+        buffer = c2t_log_get_unread(&unread_bytes);
     }
 
-    /* If sending as code block failed or buffer was larger than 3000 bytes, send as .log document file */
+    if (unread_bytes == 0 || !buffer) {
+        free(buffer);
+        if (on_demand) {
+            telegram_send_html("ℹ️ <b>c2t Logs</b>\n<i>No new logs since last check.</i>");
+        }
+        return 1;
+    }
+
+    int sent = 0;
+
+    /* Up to 25 KB: format in HTML code block chunks */
+    if (unread_bytes <= LOG_TEXT_MAX_THRESHOLD) {
+        sent = send_log_text_chunks(buffer, unread_bytes);
+    }
+
+    /* If sending as text chunks failed or buffer was larger than threshold: send as .log file */
     if (!sent) {
         char filename[64];
         time_t now = time(NULL);
@@ -219,21 +237,24 @@ static int send_log_payload(int on_demand)
                  utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec);
 
         c2t_log_info("log_sender", "Sending log file to Telegram (%llu bytes, name=%s)",
-                     (unsigned long long)read_bytes, filename);
+                     (unsigned long long)unread_bytes, filename);
 
-        sent = telegram_send_file(buffer, read_bytes, "text/plain", filename, NULL);
+        sent = telegram_send_file(buffer, unread_bytes, "text/plain", filename, NULL);
     }
 
-    free(buffer);
-
     if (sent) {
-        last_sent_offset += read_bytes;
+        if (is_file_source)
+            last_sent_offset += unread_bytes;
+        else
+            c2t_log_advance_read_offset(unread_bytes);
+
         c2t_log_info("log_sender", "Logs successfully delivered to Telegram (%llu bytes)",
-                     (unsigned long long)read_bytes);
+                     (unsigned long long)unread_bytes);
     } else {
         c2t_log_warning("log_sender", "Failed to send logs to Telegram; will retry");
     }
 
+    free(buffer);
     return sent;
 }
 

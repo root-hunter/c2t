@@ -230,6 +230,7 @@ static int run_service(void)
     clipboard_output_cleanup();
     telegram_cleanup();
     c2t_log_info("main", "Shutdown complete");
+    c2t_log_cleanup();
     c2t_runtime_release();
     return result;
 }
