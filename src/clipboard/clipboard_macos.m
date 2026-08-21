@@ -22,9 +22,11 @@ static void copy_utf8(NSString *value, char *output, size_t capacity)
     NSData *encoded = [value dataUsingEncoding:NSUTF8StringEncoding];
     if (!encoded)
         return;
-    size_t copied = MIN((size_t)encoded.length, capacity - 1);
+    size_t encoded_length = (size_t)encoded.length;
+    size_t copied = encoded_length < capacity - 1
+        ? encoded_length : capacity - 1;
     const unsigned char *bytes = encoded.bytes;
-    while (copied > 0 && copied < (size_t)encoded.length &&
+    while (copied > 0 && copied < encoded_length &&
            (bytes[copied] & 0xc0) == 0x80)
         --copied;
     memcpy(output, bytes, copied);

@@ -92,7 +92,7 @@ elseif(PLATFORM STREQUAL "Darwin")
         message(FATAL_ERROR
             "${EXECUTABLE} has no __DATA,__c2tcfg configuration section")
     endif()
-    if(NOT load_commands MATCHES "path /usr/lib/libSystem.B.dylib")
+    if(NOT load_commands MATCHES "name /usr/lib/libSystem.B.dylib")
         message(FATAL_ERROR "${EXECUTABLE} has no macOS system runtime load command")
     endif()
     message(STATUS "macOS executable verified with native system dependencies and configuration section")
