@@ -71,7 +71,6 @@ function collectConfig() {
   const token = tokenInput.value.trim();
   const chatId = document.querySelector("#chat-id").value.trim();
   if (telegramEnabled && !token) throw new Error("Enter the Telegram bot token");
-  if (telegramEnabled && !chatId) throw new Error("Enter the Telegram chat ID");
   if (token) config.TELEGRAM_BOT_TOKEN = token;
   if (chatId) config.TELEGRAM_CHAT_ID = chatId;
   return config;
