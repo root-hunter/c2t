@@ -52,12 +52,30 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - linux
+          - linux-musl
+          - linux-glibc
           - windows
 
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install glibc build dependencies
+        if: matrix.platform == 'linux-glibc'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            cmake \
+            gcc \
+            libssl-dev \
+            libxau-dev \
+            libxcb1-dev \
+            libxdmcp-dev \
+            libzstd-dev \
+            ninja-build \
+            nodejs \
+            python3
 
       - name: Install Windows build dependencies
         if: matrix.platform == 'windows'
@@ -72,14 +90,14 @@ jobs:
             zip
 
       - name: Build and test Linux with musl
-        if: matrix.platform == 'linux'
+        if: matrix.platform == 'linux-musl'
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/linux
+          mkdir -p build/linux-musl
           docker run --rm \
             --volume "${GITHUB_WORKSPACE}:/src:ro" \
-            --volume "${GITHUB_WORKSPACE}/build/linux:/build" \
+            --volume "${GITHUB_WORKSPACE}/build/linux-musl:/build" \
             --workdir /src \
             alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d \
             sh -euxc '
@@ -106,6 +124,14 @@ jobs:
               ctest --test-dir /build --output-on-failure
             '
 
+      - name: Configure Linux with glibc
+        if: matrix.platform == 'linux-glibc'
+        run: >-
+          cmake -S . -B build/linux-glibc -G Ninja
+          -DCMAKE_BUILD_TYPE=MinSizeRel
+          -DBUILD_TESTING=ON
+          -DC2T_STANDALONE_LINUX=OFF
+
       - name: Configure Windows
         if: matrix.platform == 'windows'
         run: >-
@@ -115,24 +141,41 @@ jobs:
           -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake
 
       - name: Build
-        if: matrix.platform == 'windows'
+        if: matrix.platform != 'linux-musl'
         run: cmake --build build/${{ matrix.platform }} --parallel 2
+
+      - name: Test Linux with glibc
+        if: matrix.platform == 'linux-glibc'
+        run: ctest --test-dir build/linux-glibc --output-on-failure
 
       - name: Test browser provisioner on Windows binary
         if: matrix.platform == 'windows'
         run: node tests/browser_provision_test.mjs build/windows/c2t.exe
 
-      - name: Package Linux
-        if: matrix.platform == 'linux'
+      - name: Package Linux with musl
+        if: matrix.platform == 'linux-musl'
         shell: bash
         run: |
           set -euo pipefail
           version="$(sed -nE 's/^project\(c2t VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
-          package="c2t-v${version}-linux-x86_64"
-          install -Dm755 build/linux/c2t "stage/${package}/c2t"
+          package="c2t-v${version}-linux-musl-x86_64"
+          install -Dm755 build/linux-musl/c2t "stage/${package}/c2t"
           install -Dm644 README.md "stage/${package}/README.md"
           mkdir -p dist
-          install -Dm755 build/linux/c2t dist/c2t-linux-x86_64
+          install -Dm755 build/linux-musl/c2t dist/c2t-linux-x86_64
+          tar -C stage -czf "dist/${package}.tar.gz" "${package}"
+
+      - name: Package Linux with glibc
+        if: matrix.platform == 'linux-glibc'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -nE 's/^project\(c2t VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
+          package="c2t-v${version}-linux-glibc-x86_64"
+          install -Dm755 build/linux-glibc/c2t "stage/${package}/c2t"
+          install -Dm644 README.md "stage/${package}/README.md"
+          mkdir -p dist
+          install -Dm755 build/linux-glibc/c2t dist/c2t-linux-glibc-x86_64
           tar -C stage -czf "dist/${package}.tar.gz" "${package}"
 
       - name: Package Windows

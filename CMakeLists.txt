@@ -43,18 +43,22 @@ if(WIN32)
         target_link_options(c2t PRIVATE -static -static-libgcc)
     endif()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    include(CheckCSourceCompiles)
-    check_c_source_compiles([[
-        #include <features.h>
-        #ifdef __GLIBC__
-        #error "glibc static binaries may load incompatible host NSS modules"
-        #endif
-        int main(void) { return 0; }
-    ]] C2T_STATIC_LIBC_IS_PORTABLE)
-    if(NOT C2T_STATIC_LIBC_IS_PORTABLE)
-        message(FATAL_ERROR
-            "The standalone Linux build requires musl. Static glibc binaries "
-            "can load incompatible host NSS modules during DNS resolution.")
+    option(C2T_STANDALONE_LINUX
+        "Build a fully static Linux executable (requires musl)" ON)
+    if(C2T_STANDALONE_LINUX)
+        include(CheckCSourceCompiles)
+        check_c_source_compiles([[
+            #include <features.h>
+            #ifdef __GLIBC__
+            #error "glibc static binaries may load incompatible host NSS modules"
+            #endif
+            int main(void) { return 0; }
+        ]] C2T_STATIC_LIBC_IS_PORTABLE)
+        if(NOT C2T_STATIC_LIBC_IS_PORTABLE)
+            message(FATAL_ERROR
+                "The standalone Linux build requires musl. For a dynamic "
+                "glibc build, configure with -DC2T_STANDALONE_LINUX=OFF.")
+        endif()
     endif()
 
     set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
@@ -124,7 +128,9 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         zstd jitterentropy
         "-Wl,--end-group"
     )
-    target_link_options(c2t PRIVATE -static)
+    if(C2T_STANDALONE_LINUX)
+        target_link_options(c2t PRIVATE -static)
+    endif()
 else()
     message(FATAL_ERROR "Unsupported system: only Linux and Windows are supported")
 endif()
@@ -140,8 +146,9 @@ add_custom_command(TARGET c2t POST_BUILD
         "-DPLATFORM=${CMAKE_SYSTEM_NAME}"
         "-DEXECUTABLE=$<TARGET_FILE:c2t>"
         "-DANALYZER=${C2T_BINARY_ANALYZER}"
+        "-DSTANDALONE=${C2T_STANDALONE_LINUX}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_single_file.cmake"
-    COMMENT "Verifying that c2t can be distributed as a single file"
+    COMMENT "Verifying the c2t binary layout"
     VERBATIM
 )
 

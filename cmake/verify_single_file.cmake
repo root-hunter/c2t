@@ -19,9 +19,12 @@ if(PLATFORM STREQUAL "Linux")
         message(FATAL_ERROR "Unable to analyze ${EXECUTABLE}: ${analyzer_error}")
     endif()
 
-    if(program_headers MATCHES "INTERP")
+    if(STANDALONE AND program_headers MATCHES "INTERP")
         message(FATAL_ERROR
             "${EXECUTABLE} uses a dynamic interpreter and is not self-contained")
+    elseif(NOT STANDALONE AND NOT program_headers MATCHES "INTERP")
+        message(FATAL_ERROR
+            "${EXECUTABLE} was expected to use the glibc dynamic interpreter")
     endif()
 
     execute_process(
@@ -35,7 +38,11 @@ if(PLATFORM STREQUAL "Linux")
             "${EXECUTABLE} has no post-link configuration section: ${section_error}")
     endif()
 
-    message(STATUS "Single file verified with embedded configuration section: no dynamic Linux dependencies")
+    if(STANDALONE)
+        message(STATUS "Standalone Linux binary verified: no dynamic dependencies")
+    else()
+        message(STATUS "Dynamic Linux binary verified: glibc interpreter present")
+    endif()
 elseif(PLATFORM STREQUAL "Windows")
     execute_process(
         COMMAND "${ANALYZER}" -p "${EXECUTABLE}"

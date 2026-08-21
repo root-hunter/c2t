@@ -130,11 +130,14 @@ C2T_DELIVERY_ATTEMPTS=5 C2T_RETRY_DELAY_MS=1000 c2t
 
 ## Build and release
 
-GitHub Actions builds and verifies Linux x86_64 and Windows x86_64 packages on
-every push and pull request. The Linux executable is built against musl in a
-pinned Alpine container and the Linux job also runs the automated tests. musl
-is required for standalone Linux builds: a static glibc executable can still
-load host NSS modules during DNS resolution and is therefore not portable.
+GitHub Actions builds and verifies Linux x86_64 with musl, Linux x86_64 with
+glibc, and Windows x86_64 on every push and pull request. The musl executable
+is completely static and is the portable default used by the web configurator.
+The glibc executable is dynamically linked and published separately for users
+who prefer their distribution's standard runtime. Static glibc builds are not
+supported because they can load incompatible host NSS modules during DNS
+resolution. Configure a local glibc build with
+`-DC2T_STANDALONE_LINUX=OFF`; standalone builds require musl.
 
 To publish a release, first update the version in the `project(c2t VERSION ...)`
 line of `CMakeLists.txt`, commit it, then create and push a matching SemVer tag:
@@ -146,8 +149,9 @@ git push origin v0.2.0
 
 Tags such as `v0.2.0-rc.1` create a GitHub pre-release. The workflow rejects a
 tag whose base version differs from the CMake project version. Each release
-contains the standalone Linux and Windows packages, generated release notes,
-uncompressed binaries for the web configurator, and a `SHA256SUMS` file.
+contains musl and glibc Linux packages, the standalone Windows package,
+generated release notes, uncompressed binaries, and a `SHA256SUMS` file. The
+web configurator selects only `c2t-linux-x86_64`, which is the musl build.
 Release packages contain an empty configuration area; provision a downloaded
 executable in the browser or locally with `tools/embed_config.py` when needed.
 Never put Telegram credentials in a GitHub release.
