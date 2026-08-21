@@ -7,6 +7,9 @@ on:
     paths:
       - "docs/**"
       - ".github/workflows/pages.yml"
+  release:
+    types:
+      - published
   workflow_dispatch:
 
 permissions:
@@ -34,10 +37,36 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
+      - name: Prepare site with release binaries
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p site/downloads
+          cp -a docs/. site/
+          gh release download \
+            --pattern c2t-linux-x86_64 \
+            --pattern c2t-windows-x86_64.exe \
+            --dir site/downloads
+
+          release_tag="$(gh release view --json tagName --jq .tagName)"
+          release_url="$(gh release view --json url --jq .url)"
+          printf '%s\n' \
+            '{' \
+            "  \"tag_name\": \"${release_tag}\"," \
+            "  \"html_url\": \"${release_url}\"," \
+            '  "assets": [' \
+            '    {"name":"c2t-linux-x86_64","browser_download_url":"downloads/c2t-linux-x86_64"},' \
+            '    {"name":"c2t-windows-x86_64.exe","browser_download_url":"downloads/c2t-windows-x86_64.exe"}' \
+            '  ]' \
+            '}' > site/release.json
+
       - name: Upload site
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: docs
+          path: site
 
       - name: Deploy site
         id: deployment

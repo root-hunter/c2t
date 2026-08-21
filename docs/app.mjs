@@ -1,7 +1,6 @@
 import { patchBinary } from "./provision.mjs";
 
-const REPOSITORY = "root-hunter/c2t";
-const API_URL = `https://api.github.com/repos/${REPOSITORY}/releases/latest`;
+const RELEASE_METADATA_URL = "./release.json";
 const ASSET_NAMES = {
   linux: "c2t-linux-x86_64",
   windows: "c2t-windows-x86_64.exe",
@@ -41,11 +40,10 @@ function updatePlatform() {
 
 async function loadRelease() {
   try {
-    const response = await fetch(API_URL, {
-      headers: { Accept: "application/vnd.github+json" },
+    const response = await fetch(RELEASE_METADATA_URL, {
       cache: "no-store",
     });
-    if (!response.ok) throw new Error(`GitHub API: ${response.status}`);
+    if (!response.ok) throw new Error(`Release metadata: ${response.status}`);
     latestRelease = await response.json();
     releaseLabel.textContent = latestRelease.tag_name;
     releaseLink.href = latestRelease.html_url;
