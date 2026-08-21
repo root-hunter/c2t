@@ -208,3 +208,10 @@ in Privacy & Security.
 Release packages contain an empty configuration area; provision a downloaded
 executable in the browser or locally with `tools/embed_config.py` when needed.
 Never put Telegram credentials in a GitHub release.
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0** (or later) - see the [LICENSE](LICENSE) file for details.
+
+Copyright (C) 2026 Antonio Ricciardi
+
