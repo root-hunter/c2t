@@ -896,5 +896,7 @@ void telegram_cleanup(void)
         telegram_http_cleanup();
     initialized = 0;
     deduplicate = 0;
+    bot_token = NULL;
+    chat_id = NULL;
     clear_sent_contents();
 }

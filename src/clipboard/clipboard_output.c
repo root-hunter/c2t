@@ -238,14 +238,14 @@ int clipboard_output_init(void)
     return worker_started;
 }
 
+static uint64_t last_duplicate_hash;
+static size_t last_duplicate_length;
+static uint64_t last_duplicate_time_ms;
+static int has_duplicate_previous;
+
 void clipboard_output(const void *data, size_t length, const char *mime_type,
                       const c2t_clipboard_source_t *source)
 {
-    static uint64_t last_hash;
-    static size_t last_length;
-    static uint64_t last_time_ms;
-    static int has_previous;
-
     if ((!data && length != 0) || !mime_type || !*mime_type) {
         c2t_log_warning("clipboard", "Ignoring invalid clipboard payload");
         return;
@@ -268,9 +268,9 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
 
     uint64_t hash = content_hash(data, length, mime_type, source);
 
-    if (has_previous && has_time && hash == last_hash &&
-        length == last_length && now_ms >= last_time_ms) {
-        if (now_ms - last_time_ms < DUPLICATE_WINDOW_MS) {
+    if (has_duplicate_previous && has_time && hash == last_duplicate_hash &&
+        length == last_duplicate_length && now_ms >= last_duplicate_time_ms) {
+        if (now_ms - last_duplicate_time_ms < DUPLICATE_WINDOW_MS) {
             c2t_log_debug("clipboard",
                           "Ignoring repeated platform event within %d ms",
                           DUPLICATE_WINDOW_MS);
@@ -283,7 +283,7 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
     int queue_full = stopping || queue_items >= maximum_queue_items ||
         allocation_size > maximum_queue_bytes -
             (queue_bytes < maximum_queue_bytes ? queue_bytes
-                                                : maximum_queue_bytes);
+                                                 : maximum_queue_bytes);
     queue_unlock();
     if (queue_full) {
         c2t_log_warning("clipboard",
@@ -313,7 +313,7 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
     queue_full = stopping || queue_items >= maximum_queue_items ||
         allocation_size > maximum_queue_bytes -
             (queue_bytes < maximum_queue_bytes ? queue_bytes
-                                                : maximum_queue_bytes);
+                                                 : maximum_queue_bytes);
     if (!queue_full) {
         if (queue_tail)
             queue_tail->next = event;
@@ -335,11 +335,11 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
     c2t_log_info("clipboard", "Queued content: type=%s, size=%llu bytes",
                  mime_type, (unsigned long long)length);
 
-    last_hash = hash;
-    last_length = length;
+    last_duplicate_hash = hash;
+    last_duplicate_length = length;
     if (has_time)
-        last_time_ms = now_ms;
-    has_previous = has_time;
+        last_duplicate_time_ms = now_ms;
+    has_duplicate_previous = has_time;
 }
 
 void clipboard_output_cleanup(void)
@@ -359,8 +359,22 @@ void clipboard_output_cleanup(void)
     (void)pthread_join(worker_thread, NULL);
 #endif
     worker_started = 0;
+    
+    queue_lock();
+    clipboard_event_t *current = queue_head;
+    while (current) {
+        clipboard_event_t *next = current->next;
+        free(current);
+        current = next;
+    }
     queue_head = NULL;
     queue_tail = NULL;
     queue_bytes = 0;
     queue_items = 0;
+    queue_unlock();
+
+    last_duplicate_hash = 0;
+    last_duplicate_length = 0;
+    last_duplicate_time_ms = 0;
+    has_duplicate_previous = 0;
 }

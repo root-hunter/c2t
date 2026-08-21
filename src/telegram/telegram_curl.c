@@ -43,6 +43,8 @@ static void sanitize_response(response_buffer_t *response)
 
 int telegram_http_init(void)
 {
+    if (request)
+        return 1;
     CURLcode result = curl_global_init(CURL_GLOBAL_DEFAULT);
     if (result != CURLE_OK) {
         c2t_log_error("https", "Unable to initialize libcurl (error %d)",
@@ -64,6 +66,10 @@ int telegram_http_post(const char *token, const char *method,
                        const char *content_type, const void *body,
                        size_t body_length)
 {
+    if (!request) {
+        c2t_log_error("https", "Cannot perform HTTP request: transport handle is NULL");
+        return 0;
+    }
     c2t_log_debug("https", "POST %s (%llu-byte body, content-type=%s)",
                   method, (unsigned long long)body_length, content_type);
     char url[320];

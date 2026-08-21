@@ -117,29 +117,33 @@ static int capture_window(xcb_connection_t *connection,
     if (window_class && window_class->format == 8) {
         const char *value = xcb_get_property_value(window_class);
         size_t length = (size_t)xcb_get_property_value_length(window_class);
-        size_t first_length = 0;
-        while (first_length < length && value[first_length])
-            ++first_length;
-        const char *selected = value;
-        size_t selected_length = first_length;
-        if (first_length < length && first_length + 1 < length) {
-            selected = value + first_length + 1;
-            selected_length = length - first_length - 1;
-            while (selected_length > 0 &&
-                   selected[selected_length - 1] == '\0')
-                --selected_length;
+        if (value && length > 0) {
+            size_t first_length = 0;
+            while (first_length < length && value[first_length])
+                ++first_length;
+            const char *selected = value;
+            size_t selected_length = first_length;
+            if (first_length < length && first_length + 1 < length) {
+                selected = value + first_length + 1;
+                selected_length = length - first_length - 1;
+                while (selected_length > 0 &&
+                       selected[selected_length - 1] == '\0')
+                    --selected_length;
+            }
+            copy_property_text(selected, selected_length,
+                               source->application, sizeof(source->application));
         }
-        copy_property_text(selected, selected_length,
-                           source->application, sizeof(source->application));
     }
     free(window_class);
 
     xcb_get_property_reply_t *pid = window_property(
         connection, source_window, pid_atom, XCB_ATOM_CARDINAL);
     if (pid && pid->format == 32 &&
-        xcb_get_property_value_length(pid) >= (int)sizeof(uint32_t))
-        memcpy(&source->process_id, xcb_get_property_value(pid),
-               sizeof(source->process_id));
+        xcb_get_property_value_length(pid) >= (int)sizeof(uint32_t)) {
+        const void *pid_val = xcb_get_property_value(pid);
+        if (pid_val)
+            memcpy(&source->process_id, pid_val, sizeof(source->process_id));
+    }
     free(pid);
     return source->application[0] || source->title[0] || source->process_id;
 }
@@ -381,14 +385,16 @@ static xcb_atom_t select_target(xcb_connection_t *connection,
     }
 
     const xcb_atom_t *atoms = xcb_get_property_value(reply);
-    size_t count = (size_t)xcb_get_property_value_length(reply) /
-                   sizeof(xcb_atom_t);
+    size_t count = atoms ? (size_t)xcb_get_property_value_length(reply) /
+                   sizeof(xcb_atom_t) : 0;
     xcb_atom_t selected = XCB_ATOM_NONE;
-    for (size_t index = 0; index < supported_count; ++index) {
-        if (atom_is_available(atoms, count, supported[index].atom)) {
-            selected = supported[index].atom;
-            *mime_type = supported[index].mime_type;
-            break;
+    if (atoms && count > 0) {
+        for (size_t index = 0; index < supported_count; ++index) {
+            if (atom_is_available(atoms, count, supported[index].atom)) {
+                selected = supported[index].atom;
+                *mime_type = supported[index].mime_type;
+                break;
+            }
         }
     }
     free(reply);
