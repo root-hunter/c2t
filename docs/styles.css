@@ -88,6 +88,8 @@ h1 { margin: 0 0 18px; font-size: clamp(38px, 5vw, 56px); line-height: 1.02; let
 
 .option-list { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--border); }
 .option-row { display: flex; align-items: flex-start; gap: 11px; min-height: 72px; padding: 15px; cursor: pointer; }
+.platform-note { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.platform-note code { color: var(--ink); font: inherit; }
 .option-row:nth-child(odd) { border-right: 1px solid var(--border); }
 .option-row:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
 .option-row input { width: 15px; height: 15px; margin: 2px 0 0; accent-color: var(--accent); }

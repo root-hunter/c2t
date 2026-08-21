@@ -17,6 +17,12 @@ test("all published site assets have distinct names", () => {
   assert.equal(new Set(names).size, names.length);
 });
 
+test("Linux outputs are executable archives and Windows remains a direct executable", () => {
+  assert.equal(PLATFORMS["linux-x86_64"].archive, true);
+  assert.equal(PLATFORMS["linux-aarch64"].archive, true);
+  assert.equal(PLATFORMS["windows-x86_64"].archive, false);
+});
+
 test("ELF machine type selects x86_64 or ARM64", () => {
   assert.equal(inferPlatform(elf(62)), "linux-x86_64");
   assert.equal(inferPlatform(elf(183)), "linux-aarch64");

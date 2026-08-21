@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(c2t VERSION 0.1.7 LANGUAGES C)
+project(c2t VERSION 0.1.8 LANGUAGES C)
 
 include(FetchContent)
 include(CTest)
@@ -189,6 +189,11 @@ if(BUILD_TESTING AND NOT WIN32)
             NAME browser_platform_tests
             COMMAND "${C2T_NODE_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/platforms_test.mjs"
+        )
+        add_test(
+            NAME browser_archive_tests
+            COMMAND "${C2T_NODE_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/archive_test.mjs"
         )
     else()
         message(STATUS "Node.js is unavailable: browser provisioning test disabled")

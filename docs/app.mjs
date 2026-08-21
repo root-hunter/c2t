@@ -1,5 +1,6 @@
 import { patchBinary } from "./provision.mjs";
 import { inferPlatform, PLATFORMS } from "./platforms.mjs";
+import { createExecutableTarGz } from "./archive.mjs";
 
 const RELEASE_METADATA_URL = "./release.json";
 
@@ -101,8 +102,8 @@ async function downloadAsset(asset) {
   return result;
 }
 
-function saveBinary(binary, filename) {
-  const blob = new Blob([binary], { type: "application/octet-stream" });
+function saveDownload(binary, filename, type = "application/octet-stream") {
+  const blob = new Blob([binary], { type });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -159,9 +160,17 @@ form.addEventListener("submit", async (event) => {
     setStatus("Validating and writing the configuration…");
     const patched = patchBinary(source, config);
     const version = latestRelease?.tag_name ?? "custom";
-    const filename = `c2t-${version}-configured-${PLATFORMS[platform].filenameSuffix}`;
-    saveBinary(patched, filename);
-    setStatus(`Done · ${Object.keys(config).length} embedded values · download started`, "success");
+    const details = PLATFORMS[platform];
+    const executableName = `c2t-${version}-configured-${details.filenameSuffix}`;
+    if (details.archive) {
+      setStatus("Packaging the configured executable…");
+      const archive = await createExecutableTarGz(patched, executableName);
+      saveDownload(archive, `${executableName}.tar.gz`, "application/gzip");
+      setStatus(`Done · ${Object.keys(config).length} embedded values · extract the archive and run directly`, "success");
+    } else {
+      saveDownload(patched, executableName);
+      setStatus(`Done · ${Object.keys(config).length} embedded values · download started`, "success");
+    }
   } catch (error) {
     setStatus(error.message, "error");
   } finally {

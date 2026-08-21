@@ -3,16 +3,19 @@ export const PLATFORMS = Object.freeze({
     asset: "c2t-linux-x86_64",
     label: "Linux x86_64",
     filenameSuffix: "linux-x86_64",
+    archive: true,
   }),
   "linux-aarch64": Object.freeze({
     asset: "c2t-linux-aarch64",
     label: "Linux ARM64",
     filenameSuffix: "linux-aarch64",
+    archive: true,
   }),
   "windows-x86_64": Object.freeze({
     asset: "c2t-windows-x86_64.exe",
     label: "Windows x86_64",
     filenameSuffix: "windows-x86_64.exe",
+    archive: false,
   }),
 });
 
