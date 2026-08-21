@@ -79,7 +79,9 @@ async function downloadAsset(asset) {
   if (!response.ok) throw new Error(`Download GitHub: ${response.status}`);
   if (!response.body) return new Uint8Array(await response.arrayBuffer());
 
-  const total = Number(response.headers.get("content-length")) || 0;
+  const assetSize = Number(asset.size);
+  const responseSize = Number(response.headers.get("content-length"));
+  const total = assetSize > 0 ? assetSize : (responseSize > 0 ? responseSize : 0);
   const reader = response.body.getReader();
   const chunks = [];
   let received = 0;
@@ -88,7 +90,8 @@ async function downloadAsset(asset) {
     if (done) break;
     chunks.push(value);
     received += value.length;
-    const progress = total ? ` ${Math.round((received / total) * 100)}%` : "";
+    const percentage = total ? Math.min(100, Math.round((received / total) * 100)) : 0;
+    const progress = total ? ` ${percentage}%` : "";
     setStatus(`Downloading the official release binary…${progress}`);
   }
   const result = new Uint8Array(received);

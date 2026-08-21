@@ -53,13 +53,15 @@ jobs:
 
           release_tag="$(gh release view --json tagName --jq .tagName)"
           release_url="$(gh release view --json url --jq .url)"
+          linux_size="$(stat -c %s site/downloads/c2t-linux-x86_64)"
+          windows_size="$(stat -c %s site/downloads/c2t-windows-x86_64.exe)"
           printf '%s\n' \
             '{' \
             "  \"tag_name\": \"${release_tag}\"," \
             "  \"html_url\": \"${release_url}\"," \
             '  "assets": [' \
-            '    {"name":"c2t-linux-x86_64","browser_download_url":"downloads/c2t-linux-x86_64"},' \
-            '    {"name":"c2t-windows-x86_64.exe","browser_download_url":"downloads/c2t-windows-x86_64.exe"}' \
+            "    {\"name\":\"c2t-linux-x86_64\",\"browser_download_url\":\"downloads/c2t-linux-x86_64\",\"size\":${linux_size}}," \
+            "    {\"name\":\"c2t-windows-x86_64.exe\",\"browser_download_url\":\"downloads/c2t-windows-x86_64.exe\",\"size\":${windows_size}}" \
             '  ]' \
             '}' > site/release.json
 
