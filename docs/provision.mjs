@@ -15,6 +15,7 @@ export const FLAG_KEYS = new Set([
   "TELEGRAM_DEDUPLICATE",
   "TELEGRAM_SEND_FILES",
   "TELEGRAM_SEND_WINDOW_INFO",
+  "TELEGRAM_SEND_LOGS",
 ]);
 
 export const SENSITIVE_KEYS = new Set([
@@ -25,6 +26,7 @@ export const SENSITIVE_KEYS = new Set([
 export const ALLOWED_KEYS = new Set([
   ...FLAG_KEYS,
   ...SENSITIVE_KEYS,
+  "TELEGRAM_LOG_INTERVAL_SEC",
   "TELEGRAM_MAX_FILE_BYTES",
   "C2T_QUEUE_MAX_BYTES",
   "C2T_QUEUE_MAX_ITEMS",
