@@ -40,6 +40,7 @@ void c2t_config_load(const char *executable_path);
 /* Compatibility entry point for callers that do not need a macOS sidecar. */
 void c2t_config_load_environment(void);
 const char *c2t_config_apply_arguments(int argc, char **argv);
+void c2t_config_set_chat_id(const char *chat_id);
 const c2t_config_t *c2t_config_get(void);
 
 #endif

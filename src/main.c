@@ -35,6 +35,7 @@
 typedef enum {
     COMMAND_RUN,
     COMMAND_START,
+    COMMAND_PAIR,
     COMMAND_STATUS,
     COMMAND_STOP,
     COMMAND_RESTART,
@@ -51,6 +52,7 @@ static void print_usage(FILE *stream)
         "Commands:\n"
         "  start       Start c2t in the background\n"
         "  run         Run c2t in the foreground\n"
+        "  pair        Pair Telegram bot interactively via deep link\n"
         "  status      Show whether c2t is running\n"
         "  stop        Stop c2t gracefully\n"
         "  restart     Stop and start c2t\n"
@@ -85,6 +87,8 @@ static command_t parse_command(int argc, char **argv, int *option_offset)
         return COMMAND_RUN;
     if (strcmp(argv[1], "start") == 0)
         return COMMAND_START;
+    if (strcmp(argv[1], "pair") == 0)
+        return COMMAND_PAIR;
     if (strcmp(argv[1], "status") == 0)
         return COMMAND_STATUS;
     if (strcmp(argv[1], "stop") == 0)
@@ -241,6 +245,26 @@ int main(int argc, char **argv)
         c2t_log_error("main", "Unknown command or option: %s", invalid_option);
         print_usage(stderr);
         return 2;
+    }
+
+    if (command == COMMAND_PAIR) {
+        const char *token = c2t_config_get()->telegram_bot_token;
+        if ((!token || !*token) && argc >= 3 && argv[2][0] != '-') {
+            token = argv[2];
+        }
+        if (!token || !*token) {
+            fprintf(stderr, "Error: TELEGRAM_BOT_TOKEN is required for pairing.\n");
+            fprintf(stderr, "Usage: c2t pair [BOT_TOKEN]\n");
+            return 1;
+        }
+        char paired_chat_id[128] = {0};
+        if (telegram_pair(token, NULL, paired_chat_id, sizeof(paired_chat_id), 60)) {
+            printf("\n[SUCCESS] Pairing complete!\n");
+            printf("[CONFIG]  TELEGRAM_BOT_TOKEN=%s\n", token);
+            printf("[CONFIG]  TELEGRAM_CHAT_ID=%s\n\n", paired_chat_id);
+            return 0;
+        }
+        return 1;
     }
 
     if (command == COMMAND_RESTART) {

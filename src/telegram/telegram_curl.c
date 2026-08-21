@@ -145,6 +145,52 @@ int telegram_http_post(const char *token, const char *method,
     return 1;
 }
 
+int telegram_http_get(const char *token, const char *method_and_query,
+                      char *response_out, size_t response_capacity)
+{
+    if (!request || !response_out || response_capacity == 0) {
+        c2t_log_error("https", "Cannot perform HTTP GET: transport handle is NULL or invalid args");
+        return 0;
+    }
+    response_out[0] = '\0';
+    c2t_log_debug("https", "GET %s", method_and_query);
+
+    char url[512];
+    int url_length = snprintf(url, sizeof(url),
+                              "https://api.telegram.org/bot%s/%s",
+                              token, method_and_query);
+    if (url_length < 0 || (size_t)url_length >= sizeof(url))
+        return 0;
+
+    response_buffer_t response = {{0}, 0};
+    curl_easy_reset(request);
+    curl_easy_setopt(request, CURLOPT_URL, url);
+    curl_easy_setopt(request, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(request, CURLOPT_WRITEFUNCTION, capture_response);
+    curl_easy_setopt(request, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(request, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(request, CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(request, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(request, CURLOPT_USERAGENT, C2T_USER_AGENT);
+
+    CURLcode result = curl_easy_perform(request);
+    long status = 0;
+    if (result == CURLE_OK)
+        curl_easy_getinfo(request, CURLINFO_RESPONSE_CODE, &status);
+
+    if (result != CURLE_OK || status < 200 || status >= 300) {
+        sanitize_response(&response);
+        c2t_log_error("https", "Telegram GET request failed: query=%s, HTTP=%ld, curl_error=%d",
+                      method_and_query, status, (int)result);
+        return 0;
+    }
+
+    size_t copy_len = response.length < response_capacity - 1 ? response.length : response_capacity - 1;
+    memcpy(response_out, response.data, copy_len);
+    response_out[copy_len] = '\0';
+    return 1;
+}
+
 void telegram_http_cleanup(void)
 {
     c2t_log_debug("https", "Cleaning up libcurl transport");

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Download c2t with a local configuration.">
     <meta name="referrer" content="no-referrer">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://github.com https://objects.githubusercontent.com https://release-assets.githubusercontent.com; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://github.com https://objects.githubusercontent.com https://release-assets.githubusercontent.com https://api.telegram.org; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
     <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(), payment=()">
     <title>c2t configurator</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -113,8 +113,11 @@
             </label>
             <label class="field">
               <span>Chat ID</span>
-              <input id="chat-id" name="chat-id" type="text" inputmode="numeric" placeholder="1001234567890" spellcheck="false" autocomplete="off">
-              <small>User, group, or channel destination.</small>
+              <span class="input-with-action">
+                <input id="chat-id" name="chat-id" type="text" inputmode="numeric" placeholder="1001234567890" spellcheck="false" autocomplete="off">
+                <button id="pair-telegram" type="button" title="Auto-detect Chat ID by opening Telegram">Pair</button>
+              </span>
+              <small>User, group, or channel destination. Click <strong>Pair</strong> to auto-detect.</small>
             </label>
           </div>
         </section>

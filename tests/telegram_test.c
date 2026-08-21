@@ -77,6 +77,18 @@ int telegram_http_post(const char *token, const char *method,
     return http_post_result;
 }
 
+int telegram_http_get(const char *token, const char *method_and_query,
+                      char *response_out, size_t response_capacity)
+{
+    (void)token;
+    (void)method_and_query;
+    if (response_out && response_capacity > 0) {
+        snprintf(response_out, response_capacity,
+                 "{\"ok\":true,\"result\":{\"username\":\"mock_bot\",\"id\":123456,\"chat\":{\"id\":123456}}}");
+    }
+    return 1;
+}
+
 void telegram_http_cleanup(void)
 {
 }

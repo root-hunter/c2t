@@ -154,6 +154,74 @@ int telegram_http_post(const char *token, const char *method,
     return 1;
 }
 
+int telegram_http_get(const char *token, const char *method_and_query,
+                      char *response_out, size_t response_capacity)
+{
+    if (!response_out || response_capacity == 0)
+        return 0;
+    response_out[0] = '\0';
+    c2t_log_debug("https", "GET %s", method_and_query);
+
+    int token_length = MultiByteToWideChar(CP_UTF8, 0, token, -1, NULL, 0);
+    if (token_length <= 0 || token_length > 257)
+        return 0;
+
+    wchar_t path[512];
+    static const wchar_t prefix[] = L"/bot";
+    memcpy(path, prefix, sizeof(prefix) - sizeof(wchar_t));
+    wchar_t *position = path + (sizeof(prefix) / sizeof(wchar_t) - 1);
+    if (!MultiByteToWideChar(CP_UTF8, 0, token, -1, position,
+                             (int)(512 - (position - path))))
+        return 0;
+    position += token_length - 1;
+    *position++ = L'/';
+    int method_length = MultiByteToWideChar(
+        CP_UTF8, 0, method_and_query, -1, position, (int)(512 - (position - path)));
+    if (method_length <= 0)
+        return 0;
+
+    HINTERNET request = WinHttpOpenRequest(
+        connection, L"GET", path, NULL, WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+    if (!request)
+        return 0;
+
+    BOOL success = WinHttpSendRequest(
+        request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA,
+        0, 0, 0);
+    if (success)
+        success = WinHttpReceiveResponse(request, NULL);
+
+    DWORD status = 0;
+    DWORD status_size = sizeof(status);
+    if (success)
+        success = WinHttpQueryHeaders(
+            request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
+            WINHTTP_NO_HEADER_INDEX);
+
+    if (!success || status < 200 || status >= 300) {
+        WinHttpCloseHandle(request);
+        return 0;
+    }
+
+    DWORD available = 0;
+    DWORD total_read = 0;
+    while (WinHttpQueryDataAvailable(request, &available) && available > 0) {
+        DWORD read = 0;
+        if (total_read + available >= response_capacity)
+            available = (DWORD)(response_capacity - 1 - total_read);
+        if (available == 0)
+            break;
+        if (!WinHttpReadData(request, response_out + total_read, available, &read))
+            break;
+        total_read += read;
+    }
+    response_out[total_read] = '\0';
+    WinHttpCloseHandle(request);
+    return 1;
+}
+
 void telegram_http_cleanup(void)
 {
     c2t_log_debug("https", "Cleaning up WinHTTP transport");

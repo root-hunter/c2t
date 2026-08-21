@@ -20,6 +20,7 @@
 
 #include <errno.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -200,6 +201,16 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
         }
     }
     return NULL;
+}
+
+static char dynamic_chat_id[128];
+
+void c2t_config_set_chat_id(const char *chat_id)
+{
+    if (!chat_id)
+        return;
+    snprintf(dynamic_chat_id, sizeof(dynamic_chat_id), "%s", chat_id);
+    config.telegram_chat_id = dynamic_chat_id;
 }
 
 const c2t_config_t *c2t_config_get(void)

@@ -36,6 +36,14 @@ download the latest release and apply its Telegram settings locally in the
 browser. The page has no backend, analytics or persistent storage: values stay
 in browser memory and are written only to the configured download.
 
+## Interactive Telegram Pairing
+
+If `TELEGRAM_CHAT_ID` is missing or not yet configured, `c2t` offers an automatic pairing workflow:
+
+- **CLI Pairing command**: Run `c2t pair` (or `c2t pair [BOT_TOKEN]`). `c2t` outputs a Telegram deep link (`https://t.me/<bot_username>?start=c2t_<code_hex>`), waits for you to click **Start** in Telegram, automatically captures your Chat ID, and sends a confirmation message to your chat.
+- **Auto-pairing on startup**: If `c2t start` or `c2t run` is invoked with a valid `TELEGRAM_BOT_TOKEN` but no `TELEGRAM_CHAT_ID`, `c2t` automatically initiates pairing mode before starting clipboard delivery.
+- **Web Configurator pairing**: Enter your bot token on the [client-side configurator](https://root-hunter.github.io/c2t/) and click **Pair** next to Chat ID to auto-detect your destination chat with a single click.
+
 ## Post-compilation configuration
 
 Every Linux ELF, Windows PE and macOS Mach-O build contains a reserved

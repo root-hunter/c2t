@@ -133,6 +133,88 @@ document.querySelector("#reveal-token").addEventListener("click", (event) => {
   event.currentTarget.setAttribute("aria-label", revealing ? "Hide token" : "Show token");
 });
 
+const pairButton = document.querySelector("#pair-telegram");
+const chatIdInput = document.querySelector("#chat-id");
+
+if (pairButton) {
+  pairButton.addEventListener("click", async () => {
+    const token = tokenInput.value.trim();
+    if (!token) {
+      setStatus("Please enter your Telegram bot token first.", "error");
+      tokenInput.focus();
+      return;
+    }
+
+    try {
+      pairButton.disabled = true;
+      setStatus("Connecting to Telegram Bot API…");
+      
+      const meResp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+      if (!meResp.ok) throw new Error("Invalid bot token or network error");
+      const meData = await meResp.json();
+      if (!meData.ok || !meData.result?.username) {
+        throw new Error("Could not fetch bot username");
+      }
+
+      const botUsername = meData.result.username;
+      const code = `c2t_${Math.random().toString(36).substring(2, 10)}`;
+      const pairingUrl = `https://t.me/${botUsername}?start=${code}`;
+
+      setStatus(`Opening Telegram (@${botUsername})… Please click Start in Telegram.`, "success");
+      window.open(pairingUrl, "_blank");
+
+      let offset = 0;
+      let paired = false;
+      const maxAttempts = 30;
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        setStatus(`Waiting for Telegram pairing message (${maxAttempts - attempt}s)…`);
+        try {
+          const updatesResp = await fetch(`https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&timeout=2`);
+          if (updatesResp.ok) {
+            const updatesData = await updatesResp.json();
+            if (updatesData.ok && updatesData.result?.length > 0) {
+              for (const update of updatesData.result) {
+                offset = update.update_id + 1;
+                const msg = update.message;
+                if (msg?.chat?.id) {
+                  const chatId = String(msg.chat.id);
+                  const username = msg.chat.username ? `@${msg.chat.username}` : (msg.chat.first_name || "user");
+                  chatIdInput.value = chatId;
+                  paired = true;
+
+                  fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      chat_id: chatId,
+                      text: `✅ c2t Web Configurator paired successfully!\nDevice connected to ${username} (Chat ID: ${chatId}).`
+                    })
+                  }).catch(() => {});
+
+                  setStatus(`Successfully paired with ${username} (Chat ID: ${chatId})!`, "success");
+                  break;
+                }
+              }
+            }
+          }
+        } catch (_) {}
+
+        if (paired) break;
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+
+      if (!paired) {
+        setStatus("Pairing timed out. Please try again.", "error");
+      }
+    } catch (err) {
+      setStatus(`Pairing failed: ${err.message}`, "error");
+    } finally {
+      pairButton.disabled = false;
+    }
+  });
+}
+
 localBinaryInput.addEventListener("change", async () => {
   const file = localBinaryInput.files[0];
   if (!file) return;
