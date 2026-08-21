@@ -202,6 +202,11 @@ int c2t_runtime_stop_requested(void)
     return stop_event && WaitForSingleObject(stop_event, 0) == WAIT_OBJECT_0;
 }
 
+int c2t_runtime_stop_descriptor(void)
+{
+    return -1;
+}
+
 int c2t_runtime_get_status(c2t_runtime_status_t *status)
 {
     memset(status, 0, sizeof(*status));
@@ -364,6 +369,7 @@ int c2t_runtime_start_background(int argc, char **argv,
 #else
 
 static int lock_descriptor = -1;
+static int stop_pipe[2] = {-1, -1};
 static volatile sig_atomic_t stopping;
 
 static int secure_directory(const char *path)
@@ -412,7 +418,7 @@ static int prepare_paths(void)
     char log_directory[C2T_PATH_CAPACITY];
     if (state_home && *state_home == '/') {
         if (!format_path(log_directory, sizeof(log_directory), "%s/c2t",
-                         state_home))
+                          state_home))
             return 0;
     } else if (home && *home == '/') {
         char local[C2T_PATH_CAPACITY];
@@ -438,6 +444,11 @@ static void stop_handler(int signal_number)
 {
     (void)signal_number;
     stopping = 1;
+    if (stop_pipe[1] >= 0) {
+        char notify_byte = 1;
+        ssize_t written = write(stop_pipe[1], &notify_byte, 1);
+        (void)written;
+    }
 }
 
 int c2t_runtime_acquire(void)
@@ -455,6 +466,12 @@ int c2t_runtime_acquire(void)
     if (!state_write("starting", (unsigned long)getpid())) {
         c2t_runtime_release();
         return -1;
+    }
+    if (pipe(stop_pipe) == 0) {
+        fcntl(stop_pipe[0], F_SETFL, O_NONBLOCK | fcntl(stop_pipe[0], F_GETFL, 0));
+        fcntl(stop_pipe[1], F_SETFL, O_NONBLOCK | fcntl(stop_pipe[1], F_GETFL, 0));
+        fcntl(stop_pipe[0], F_SETFD, FD_CLOEXEC);
+        fcntl(stop_pipe[1], F_SETFD, FD_CLOEXEC);
     }
     struct sigaction action;
     memset(&action, 0, sizeof(action));
@@ -476,6 +493,14 @@ void c2t_runtime_mark_running(void)
 
 void c2t_runtime_release(void)
 {
+    if (stop_pipe[0] >= 0) {
+        close(stop_pipe[0]);
+        stop_pipe[0] = -1;
+    }
+    if (stop_pipe[1] >= 0) {
+        close(stop_pipe[1]);
+        stop_pipe[1] = -1;
+    }
     if (lock_descriptor >= 0) {
         unlink(state_path);
         flock(lock_descriptor, LOCK_UN);
@@ -487,6 +512,11 @@ void c2t_runtime_release(void)
 int c2t_runtime_stop_requested(void)
 {
     return stopping != 0;
+}
+
+int c2t_runtime_stop_descriptor(void)
+{
+    return stop_pipe[0];
 }
 
 int c2t_runtime_get_status(c2t_runtime_status_t *status)

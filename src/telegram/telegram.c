@@ -27,9 +27,25 @@
 #include <string.h>
 #include <time.h>
 #ifndef _WIN32
+#include <pthread.h>
 #include <unistd.h>
+static pthread_mutex_t telegram_mutex = PTHREAD_MUTEX_INITIALIZER;
+static void telegram_lock(void) { (void)pthread_mutex_lock(&telegram_mutex); }
+static void telegram_unlock(void) { (void)pthread_mutex_unlock(&telegram_mutex); }
 #else
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+static CRITICAL_SECTION telegram_mutex;
+static int telegram_mutex_initialized;
+static void telegram_lock(void)
+{
+    if (!telegram_mutex_initialized) {
+        InitializeCriticalSection(&telegram_mutex);
+        telegram_mutex_initialized = 1;
+    }
+    EnterCriticalSection(&telegram_mutex);
+}
+static void telegram_unlock(void) { LeaveCriticalSection(&telegram_mutex); }
 #endif
 
 #define TELEGRAM_MAX_CHARACTERS 4096
@@ -195,12 +211,17 @@ static int prepare_send(const void *data, size_t length,
 
     uint64_t hash[2];
     content_hash(data, length, source, hash);
+
+    telegram_lock();
     for (size_t index = 0; index < sent_content_count; ++index) {
         const sent_content_t *entry = &sent_contents[index];
         if (entry->length == length && entry->hash[0] == hash[0] &&
-            entry->hash[1] == hash[1])
+            entry->hash[1] == hash[1]) {
+            telegram_unlock();
             return 1;
+        }
     }
+    telegram_unlock();
 
     pending->hash[0] = hash[0];
     pending->hash[1] = hash[1];
@@ -215,19 +236,25 @@ static int finish_send(sent_content_t *pending, int result)
         return result;
     if (!result)
         return 0;
+
+    telegram_lock();
     sent_contents[next_sent_content] = *pending;
     next_sent_content =
         (next_sent_content + 1) % TELEGRAM_DEDUPLICATION_CAPACITY;
     if (sent_content_count < TELEGRAM_DEDUPLICATION_CAPACITY)
         ++sent_content_count;
+    telegram_unlock();
+
     c2t_log_debug("telegram", "Content hash stored after successful delivery");
     return 1;
 }
 
 static void clear_sent_contents(void)
 {
+    telegram_lock();
     sent_content_count = 0;
     next_sent_content = 0;
+    telegram_unlock();
 }
 
 static int token_is_valid(const char *token)
@@ -755,9 +782,11 @@ static int send_file(const void *data, size_t length, const char *mime_type,
 
 int telegram_init(void)
 {
+    telegram_lock();
     const c2t_config_t *config = c2t_config_get();
     deduplicate = config->telegram_deduplicate;
     if (!config->telegram_enabled) {
+        telegram_unlock();
         c2t_log_info("telegram", "Telegram integration is disabled");
         return 1;
     }
@@ -768,13 +797,16 @@ int telegram_init(void)
     bot_token = config->telegram_bot_token;
     chat_id = config->telegram_chat_id;
     if (!bot_token || !token_is_valid(bot_token)) {
+        telegram_unlock();
         c2t_log_error("telegram", "TELEGRAM_BOT_TOKEN is missing or invalid");
         return 0;
     }
     if (!chat_id || !chat_is_valid(chat_id)) {
+        telegram_unlock();
         c2t_log_info("telegram", "TELEGRAM_CHAT_ID is missing; entering auto-pairing mode...");
         char paired_chat_id[128] = {0};
         if (telegram_pair(bot_token, NULL, paired_chat_id, sizeof(paired_chat_id), 60)) {
+            telegram_lock();
             chat_id = config->telegram_chat_id;
         } else {
             c2t_log_error("telegram", "TELEGRAM_CHAT_ID is missing and auto-pairing failed");
@@ -784,9 +816,11 @@ int telegram_init(void)
     c2t_log_debug("telegram", "Initializing HTTPS transport");
     if (!initialized)
         initialized = telegram_http_init();
-    if (initialized)
+    int is_init = initialized;
+    telegram_unlock();
+    if (is_init)
         c2t_log_info("telegram", "Telegram transport initialized");
-    return initialized;
+    return is_init;
 }
 
 int telegram_send(const char *text, size_t length,
@@ -1279,11 +1313,13 @@ int telegram_pair(const char *token, const char *expected_code,
 void telegram_cleanup(void)
 {
     c2t_log_debug("telegram", "Cleaning up Telegram state");
+    telegram_lock();
     if (initialized)
         telegram_http_cleanup();
     initialized = 0;
     deduplicate = 0;
     bot_token = NULL;
     chat_id = NULL;
+    telegram_unlock();
     clear_sent_contents();
 }

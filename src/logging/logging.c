@@ -32,6 +32,9 @@
 #else
 #include <pthread.h>
 #include <unistd.h>
+#if defined(__GLIBC__) && !defined(_WIN32)
+#include <malloc.h>
+#endif
 #endif
 
 #define MEMORY_LOG_MAX_BYTES (256 * 1024)
@@ -40,8 +43,9 @@ static int verbose;
 static FILE *log_file_stream;
 
 static char *memory_log_buf;
-static size_t memory_log_len;
-static size_t memory_log_read_offset;
+static size_t ring_head;
+static size_t ring_total;
+static size_t ring_unread;
 
 #ifdef _WIN32
 static CRITICAL_SECTION log_mutex;
@@ -103,7 +107,7 @@ static void write_log(const char *level, const char *component,
     }
     va_end(arguments_copy);
 
-    /* Record in memory buffer for non-disk / instant retrieval */
+    /* Record in memory circular ring buffer for zero-fragmentation retrieval */
     char line_buf[2500];
     int line_len = snprintf(line_buf, sizeof(line_buf), "%s %-5s [%s] %s\n",
                             timestamp, level, component, message);
@@ -111,21 +115,27 @@ static void write_log(const char *level, const char *component,
         log_lock();
         if (!memory_log_buf) {
             memory_log_buf = malloc(MEMORY_LOG_MAX_BYTES);
-            memory_log_len = 0;
-            memory_log_read_offset = 0;
+            ring_head = 0;
+            ring_total = 0;
+            ring_unread = 0;
         }
         if (memory_log_buf) {
-            if (memory_log_len + (size_t)line_len > MEMORY_LOG_MAX_BYTES) {
-                size_t drop = MEMORY_LOG_MAX_BYTES / 2;
-                memmove(memory_log_buf, memory_log_buf + drop, memory_log_len - drop);
-                memory_log_len -= drop;
-                if (memory_log_read_offset > drop)
-                    memory_log_read_offset -= drop;
-                else
-                    memory_log_read_offset = 0;
+            size_t to_write = (size_t)line_len;
+            const char *src = line_buf;
+            if (to_write > MEMORY_LOG_MAX_BYTES) {
+                src += (to_write - MEMORY_LOG_MAX_BYTES);
+                to_write = MEMORY_LOG_MAX_BYTES;
             }
-            memcpy(memory_log_buf + memory_log_len, line_buf, (size_t)line_len);
-            memory_log_len += (size_t)line_len;
+            for (size_t i = 0; i < to_write; ++i) {
+                memory_log_buf[ring_head] = src[i];
+                ring_head = (ring_head + 1) % MEMORY_LOG_MAX_BYTES;
+            }
+            ring_total += to_write;
+            if (ring_total > MEMORY_LOG_MAX_BYTES)
+                ring_total = MEMORY_LOG_MAX_BYTES;
+            ring_unread += to_write;
+            if (ring_unread > MEMORY_LOG_MAX_BYTES)
+                ring_unread = MEMORY_LOG_MAX_BYTES;
         }
         log_unlock();
     }
@@ -140,16 +150,19 @@ static void log_message(const char *level, const char *component,
 char *c2t_log_get_unread(size_t *out_length)
 {
     log_lock();
-    if (!memory_log_buf || memory_log_len <= memory_log_read_offset) {
+    if (!memory_log_buf || ring_unread == 0) {
         log_unlock();
         if (out_length) *out_length = 0;
         return NULL;
     }
 
-    size_t unread = memory_log_len - memory_log_read_offset;
+    size_t unread = ring_unread;
     char *copy = malloc(unread + 1);
     if (copy) {
-        memcpy(copy, memory_log_buf + memory_log_read_offset, unread);
+        size_t start = (ring_head + MEMORY_LOG_MAX_BYTES - unread) % MEMORY_LOG_MAX_BYTES;
+        for (size_t i = 0; i < unread; ++i) {
+            copy[i] = memory_log_buf[(start + i) % MEMORY_LOG_MAX_BYTES];
+        }
         copy[unread] = '\0';
     }
     log_unlock();
@@ -160,9 +173,10 @@ char *c2t_log_get_unread(size_t *out_length)
 void c2t_log_advance_read_offset(size_t bytes_consumed)
 {
     log_lock();
-    memory_log_read_offset += bytes_consumed;
-    if (memory_log_read_offset > memory_log_len)
-        memory_log_read_offset = memory_log_len;
+    if (bytes_consumed >= ring_unread)
+        ring_unread = 0;
+    else
+        ring_unread -= bytes_consumed;
     log_unlock();
 }
 
@@ -175,9 +189,13 @@ void c2t_log_cleanup(void)
     }
     free(memory_log_buf);
     memory_log_buf = NULL;
-    memory_log_len = 0;
-    memory_log_read_offset = 0;
+    ring_head = 0;
+    ring_total = 0;
+    ring_unread = 0;
     log_unlock();
+#if defined(__GLIBC__) && !defined(_WIN32)
+    malloc_trim(0);
+#endif
 }
 
 void c2t_log_init(void)

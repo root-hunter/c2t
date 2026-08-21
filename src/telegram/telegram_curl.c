@@ -29,6 +29,16 @@
 
 static int curl_initialized;
 
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
+static _Thread_local CURL *thread_curl_handle = NULL;
+#elif defined(_MSC_VER)
+static __declspec(thread) CURL *thread_curl_handle = NULL;
+#elif defined(__GNUC__) || defined(__clang__)
+static __thread CURL *thread_curl_handle = NULL;
+#else
+static CURL *thread_curl_handle = NULL;
+#endif
+
 typedef struct {
     char data[TELEGRAM_RESPONSE_CAPACITY];
     size_t length;
@@ -58,6 +68,24 @@ static void sanitize_response(response_buffer_t *response)
     }
 }
 
+static CURL *acquire_curl_handle(void)
+{
+    if (!thread_curl_handle) {
+        thread_curl_handle = curl_easy_init();
+        if (thread_curl_handle) {
+            curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPALIVE, 1L);
+            curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPIDLE, 60L);
+            curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPINTVL, 60L);
+        }
+    } else {
+        curl_easy_reset(thread_curl_handle);
+        curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPALIVE, 1L);
+        curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPIDLE, 60L);
+        curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPINTVL, 60L);
+    }
+    return thread_curl_handle;
+}
+
 int telegram_http_init(void)
 {
     if (curl_initialized)
@@ -69,7 +97,7 @@ int telegram_http_init(void)
         return 0;
     }
     curl_initialized = 1;
-    c2t_log_debug("https", "libcurl transport ready");
+    c2t_log_debug("https", "libcurl transport ready (keep-alive enabled)");
     return 1;
 }
 
@@ -80,7 +108,7 @@ int telegram_http_post(const char *token, const char *method,
     if (!token || !method || !content_type || (!body && body_length != 0))
         return 0;
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = acquire_curl_handle();
     if (!curl) {
         c2t_log_error("https", "Cannot perform HTTP POST: failed to allocate curl handle");
         return 0;
@@ -93,7 +121,6 @@ int telegram_http_post(const char *token, const char *method,
                               "https://api.telegram.org/bot%s/%s",
                               token, method);
     if (url_length < 0 || (size_t)url_length >= sizeof(url)) {
-        curl_easy_cleanup(curl);
         return 0;
     }
 
@@ -103,13 +130,11 @@ int telegram_http_post(const char *token, const char *method,
                                  "Content-Type: %s", content_type);
     if (header_length < 0 || (size_t)header_length >=
         sizeof(content_type_header)) {
-        curl_easy_cleanup(curl);
         return 0;
     }
     struct curl_slist *request_headers =
         curl_slist_append(NULL, content_type_header);
     if (!request_headers) {
-        curl_easy_cleanup(curl);
         return 0;
     }
 
@@ -141,13 +166,15 @@ int telegram_http_post(const char *token, const char *method,
                           "HTTP=%ld, curl_error=%d", method, status,
                           (int)result);
         curl_slist_free_all(request_headers);
-        curl_easy_cleanup(curl);
+        if (result != CURLE_OK) {
+            curl_easy_cleanup(thread_curl_handle);
+            thread_curl_handle = NULL;
+        }
         return 0;
     }
     c2t_log_debug("https", "Telegram request completed: method=%s, HTTP=%ld",
                   method, status);
     curl_slist_free_all(request_headers);
-    curl_easy_cleanup(curl);
     return 1;
 }
 
@@ -157,7 +184,7 @@ int telegram_http_get(const char *token, const char *method_and_query,
     if (!token || !method_and_query || !response_out || response_capacity == 0)
         return 0;
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = acquire_curl_handle();
     if (!curl) {
         c2t_log_error("https", "Cannot perform HTTP GET: failed to allocate curl handle");
         return 0;
@@ -171,7 +198,6 @@ int telegram_http_get(const char *token, const char *method_and_query,
                               "https://api.telegram.org/bot%s/%s",
                               token, method_and_query);
     if (url_length < 0 || (size_t)url_length >= sizeof(url)) {
-        curl_easy_cleanup(curl);
         return 0;
     }
 
@@ -194,20 +220,26 @@ int telegram_http_get(const char *token, const char *method_and_query,
         sanitize_response(&response);
         c2t_log_error("https", "Telegram GET request failed: query=%s, HTTP=%ld, curl_error=%d",
                       method_and_query, status, (int)result);
-        curl_easy_cleanup(curl);
+        if (result != CURLE_OK) {
+            curl_easy_cleanup(thread_curl_handle);
+            thread_curl_handle = NULL;
+        }
         return 0;
     }
 
     size_t copy_len = response.length < response_capacity - 1 ? response.length : response_capacity - 1;
     memcpy(response_out, response.data, copy_len);
     response_out[copy_len] = '\0';
-    curl_easy_cleanup(curl);
     return 1;
 }
 
 void telegram_http_cleanup(void)
 {
     c2t_log_debug("https", "Cleaning up libcurl transport");
+    if (thread_curl_handle) {
+        curl_easy_cleanup(thread_curl_handle);
+        thread_curl_handle = NULL;
+    }
     if (curl_initialized) {
         curl_global_cleanup();
         curl_initialized = 0;

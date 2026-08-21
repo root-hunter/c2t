@@ -521,12 +521,21 @@ static int clipboard_listen_once(void)
         if (!event) {
             if (xcb_connection_has_error(connection))
                 break;
-            struct pollfd descriptor = {
-                .fd = xcb_get_file_descriptor(connection),
-                .events = POLLIN,
-                .revents = 0
-            };
-            int polled = poll(&descriptor, 1, 250);
+            struct pollfd fds[2];
+            int nfds = 1;
+            fds[0].fd = xcb_get_file_descriptor(connection);
+            fds[0].events = POLLIN;
+            fds[0].revents = 0;
+
+            int stop_fd = c2t_runtime_stop_descriptor();
+            if (stop_fd >= 0) {
+                fds[1].fd = stop_fd;
+                fds[1].events = POLLIN;
+                fds[1].revents = 0;
+                nfds = 2;
+            }
+
+            int polled = poll(fds, (nfds_t)nfds, -1);
             if (polled < 0 && errno != EINTR)
                 break;
             continue;
