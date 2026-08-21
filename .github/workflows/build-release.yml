@@ -45,16 +45,28 @@ jobs:
           fi
 
   build:
-    name: Build ${{ matrix.platform }} x86_64
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
     needs: validate-version
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - linux-musl
-          - linux-glibc
-          - windows
+        include:
+          - platform: linux-musl
+            arch: x86_64
+            runner: ubuntu-24.04
+          - platform: linux-musl
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+          - platform: linux-glibc
+            arch: x86_64
+            runner: ubuntu-24.04
+          - platform: linux-glibc
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+          - platform: windows
+            arch: x86_64
+            runner: ubuntu-24.04
 
     steps:
       - name: Check out source
@@ -158,11 +170,10 @@ jobs:
         run: |
           set -euo pipefail
           version="$(sed -nE 's/^project\(c2t VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
-          package="c2t-v${version}-linux-musl-x86_64"
+          package="c2t-v${version}-linux-musl-${{ matrix.arch }}"
           install -Dm755 build/linux-musl/c2t "stage/${package}/c2t"
           install -Dm644 README.md "stage/${package}/README.md"
           mkdir -p dist
-          install -Dm755 build/linux-musl/c2t dist/c2t-linux-x86_64
           tar -C stage -czf "dist/${package}.tar.gz" "${package}"
 
       - name: Package Linux with glibc
@@ -171,11 +182,10 @@ jobs:
         run: |
           set -euo pipefail
           version="$(sed -nE 's/^project\(c2t VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
-          package="c2t-v${version}-linux-glibc-x86_64"
+          package="c2t-v${version}-linux-glibc-${{ matrix.arch }}"
           install -Dm755 build/linux-glibc/c2t "stage/${package}/c2t"
           install -Dm644 README.md "stage/${package}/README.md"
           mkdir -p dist
-          install -Dm755 build/linux-glibc/c2t dist/c2t-linux-glibc-x86_64
           tar -C stage -czf "dist/${package}.tar.gz" "${package}"
 
       - name: Package Windows
@@ -188,13 +198,12 @@ jobs:
           install -Dm644 build/windows/c2t.exe "stage/${package}/c2t.exe"
           install -Dm644 README.md "stage/${package}/README.md"
           mkdir -p dist
-          install -Dm644 build/windows/c2t.exe dist/c2t-windows-x86_64.exe
           (cd stage && zip -9 -r "../dist/${package}.zip" "${package}")
 
       - name: Upload package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: package-${{ matrix.platform }}-x86_64
+          name: package-${{ matrix.platform }}-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
           retention-days: 14

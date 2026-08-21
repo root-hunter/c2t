@@ -1,10 +1,7 @@
 import { patchBinary } from "./provision.mjs";
+import { inferPlatform, PLATFORMS } from "./platforms.mjs";
 
 const RELEASE_METADATA_URL = "./release.json";
-const ASSET_NAMES = {
-  linux: "c2t-linux-x86_64",
-  windows: "c2t-windows-x86_64.exe",
-};
 
 const form = document.querySelector("#config-form");
 const downloadButton = document.querySelector("#download-button");
@@ -28,8 +25,9 @@ function setStatus(message, kind = "") {
 
 function updatePlatform() {
   const platform = selectedPlatform();
-  buttonPlatform.textContent = platform === "windows" ? "Windows x86_64" : "Linux x86_64";
-  const assetAvailable = latestRelease?.assets.some(({ name }) => name === ASSET_NAMES[platform]);
+  const details = PLATFORMS[platform];
+  buttonPlatform.textContent = details.label;
+  const assetAvailable = latestRelease?.assets.some(({ name }) => name === details.asset);
   downloadButton.disabled = !localBinary && !assetAvailable;
   if (!localBinary && latestRelease && !assetAvailable) {
     setStatus(`Release ${latestRelease.tag_name} has no direct ${platform} asset yet. Use a local file or publish a new release.`, "error");
@@ -135,11 +133,9 @@ localBinaryInput.addEventListener("change", async () => {
   if (!file) return;
   try {
     localBinary = new Uint8Array(await file.arrayBuffer());
-    const inferredPlatform = localBinary[0] === 0x4d && localBinary[1] === 0x5a
-      ? "windows"
-      : "linux";
+    const inferredPlatform = inferPlatform(localBinary);
     form.querySelector(`input[name="platform"][value="${inferredPlatform}"]`).checked = true;
-    buttonPlatform.textContent = inferredPlatform === "windows" ? "Windows x86_64" : "Linux x86_64";
+    buttonPlatform.textContent = PLATFORMS[inferredPlatform].label;
     downloadButton.disabled = false;
     setStatus(`Local file “${file.name}” ready · nothing was uploaded`, "success");
   } catch (error) {
@@ -156,23 +152,21 @@ form.addEventListener("submit", async (event) => {
     const config = collectConfig();
     let source = localBinary;
     if (!source) {
-      const asset = latestRelease?.assets.find(({ name }) => name === ASSET_NAMES[platform]);
+      const asset = latestRelease?.assets.find(({ name }) => name === PLATFORMS[platform].asset);
       if (!asset) throw new Error("The release does not contain a compatible direct binary");
       source = await downloadAsset(asset);
     }
     setStatus("Validating and writing the configuration…");
     const patched = patchBinary(source, config);
     const version = latestRelease?.tag_name ?? "custom";
-    const filename = platform === "windows"
-      ? `c2t-${version}-configured.exe`
-      : `c2t-${version}-configured-linux-x86_64`;
+    const filename = `c2t-${version}-configured-${PLATFORMS[platform].filenameSuffix}`;
     saveBinary(patched, filename);
     setStatus(`Done · ${Object.keys(config).length} embedded values · download started`, "success");
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
     const platform = selectedPlatform();
-    const assetAvailable = latestRelease?.assets.some(({ name }) => name === ASSET_NAMES[platform]);
+    const assetAvailable = latestRelease?.assets.some(({ name }) => name === PLATFORMS[platform].asset);
     downloadButton.disabled = !localBinary && !assetAvailable;
   }
 });

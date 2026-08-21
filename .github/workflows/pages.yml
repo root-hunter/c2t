@@ -46,14 +46,39 @@ jobs:
           set -euo pipefail
           mkdir -p site/downloads
           cp -a docs/. site/
-          gh release download \
-            --pattern c2t-linux-x86_64 \
-            --pattern c2t-windows-x86_64.exe \
-            --dir site/downloads
-
           release_tag="$(gh release view --json tagName --jq .tagName)"
           release_url="$(gh release view --json url --jq .url)"
+          packages="${RUNNER_TEMP}/c2t-release-packages"
+          extracted="${RUNNER_TEMP}/c2t-release-extracted"
+          mkdir -p "${packages}" "${extracted}"
+
+          linux_x64="c2t-${release_tag}-linux-musl-x86_64.tar.gz"
+          linux_arm64="c2t-${release_tag}-linux-musl-aarch64.tar.gz"
+          windows_x64="c2t-${release_tag}-windows-x86_64.zip"
+          gh release download "${release_tag}" \
+            --pattern "${linux_x64}" \
+            --pattern "${linux_arm64}" \
+            --pattern "${windows_x64}" \
+            --dir "${packages}"
+
+          mkdir -p "${extracted}/linux-x64" \
+            "${extracted}/linux-arm64" "${extracted}/windows-x64"
+          tar -xzf "${packages}/${linux_x64}" \
+            --strip-components=1 -C "${extracted}/linux-x64"
+          tar -xzf "${packages}/${linux_arm64}" \
+            --strip-components=1 -C "${extracted}/linux-arm64"
+          unzip -q "${packages}/${windows_x64}" \
+            -d "${extracted}/windows-x64"
+
+          install -m755 "${extracted}/linux-x64/c2t" \
+            site/downloads/c2t-linux-x86_64
+          install -m755 "${extracted}/linux-arm64/c2t" \
+            site/downloads/c2t-linux-aarch64
+          install -m644 "${extracted}/windows-x64/c2t-${release_tag}-windows-x86_64/c2t.exe" \
+            site/downloads/c2t-windows-x86_64.exe
+
           linux_size="$(stat -c %s site/downloads/c2t-linux-x86_64)"
+          linux_arm64_size="$(stat -c %s site/downloads/c2t-linux-aarch64)"
           windows_size="$(stat -c %s site/downloads/c2t-windows-x86_64.exe)"
           printf '%s\n' \
             '{' \
@@ -61,6 +86,7 @@ jobs:
             "  \"html_url\": \"${release_url}\"," \
             '  "assets": [' \
             "    {\"name\":\"c2t-linux-x86_64\",\"browser_download_url\":\"downloads/c2t-linux-x86_64\",\"size\":${linux_size}}," \
+            "    {\"name\":\"c2t-linux-aarch64\",\"browser_download_url\":\"downloads/c2t-linux-aarch64\",\"size\":${linux_arm64_size}}," \
             "    {\"name\":\"c2t-windows-x86_64.exe\",\"browser_download_url\":\"downloads/c2t-windows-x86_64.exe\",\"size\":${windows_size}}" \
             '  ]' \
             '}' > site/release.json

@@ -130,13 +130,13 @@ C2T_DELIVERY_ATTEMPTS=5 C2T_RETRY_DELAY_MS=1000 c2t
 
 ## Build and release
 
-GitHub Actions builds and verifies Linux x86_64 with musl, Linux x86_64 with
-glibc, and Windows x86_64 on every push and pull request. The musl executable
-is completely static and is the portable default used by the web configurator.
-The glibc executable is dynamically linked and published separately for users
-who prefer their distribution's standard runtime. Static glibc builds are not
-supported because they can load incompatible host NSS modules during DNS
-resolution. Configure a local glibc build with
+GitHub Actions builds and verifies Linux x86_64 and ARM64 with both musl and
+glibc, plus Windows x86_64, on every push and pull request. The musl
+executables are completely static and are the portable Linux builds used by
+the web configurator. The glibc executables are dynamically linked and
+published separately for users who prefer their distribution's standard
+runtime. Static glibc builds are not supported because they can load
+incompatible host NSS modules during DNS resolution. Configure a local glibc build with
 `-DC2T_STANDALONE_LINUX=OFF`; standalone builds require musl.
 
 To publish a release, first update the version in the `project(c2t VERSION ...)`
@@ -149,9 +149,11 @@ git push origin v0.2.0
 
 Tags such as `v0.2.0-rc.1` create a GitHub pre-release. The workflow rejects a
 tag whose base version differs from the CMake project version. Each release
-contains musl and glibc Linux packages, the standalone Windows package,
-generated release notes, uncompressed binaries, and a `SHA256SUMS` file. The
-web configurator selects only `c2t-linux-x86_64`, which is the musl build.
+contains packaged musl and glibc Linux archives for both architectures, the
+packaged Windows build, generated release notes, and a `SHA256SUMS` file. Raw
+executables are not attached to GitHub Releases. The Pages workflow extracts
+only the portable musl and Windows executables into the temporary site
+artifact used by the web configurator.
 Release packages contain an empty configuration area; provision a downloaded
 executable in the browser or locally with `tools/embed_config.py` when needed.
 Never put Telegram credentials in a GitHub release.

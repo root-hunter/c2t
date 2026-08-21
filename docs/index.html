@@ -28,7 +28,7 @@
 
         <div class="privacy-note">
           <strong>Runs locally in your browser</strong>
-          <p>Your configuration is never uploaded, stored, or logged. The release binary is downloaded from GitHub and modified in memory.</p>
+          <p>Your configuration is never uploaded, stored, or logged. The official binary is downloaded from this site and modified in memory.</p>
         </div>
 
         <div class="security-note">
@@ -46,12 +46,17 @@
 
           <div class="platform-grid">
             <label class="platform-option">
-              <input type="radio" name="platform" value="linux" checked>
+              <input type="radio" name="platform" value="linux-x86_64" checked>
               <span><strong>Linux</strong><small>Static ELF · x86_64</small></span>
               <i aria-hidden="true"></i>
             </label>
             <label class="platform-option">
-              <input type="radio" name="platform" value="windows">
+              <input type="radio" name="platform" value="linux-aarch64">
+              <span><strong>Linux</strong><small>Static ELF · ARM64</small></span>
+              <i aria-hidden="true"></i>
+            </label>
+            <label class="platform-option">
+              <input type="radio" name="platform" value="windows-x86_64">
               <span><strong>Windows</strong><small>Portable PE · x86_64</small></span>
               <i aria-hidden="true"></i>
             </label>
