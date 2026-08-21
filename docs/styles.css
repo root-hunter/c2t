@@ -30,7 +30,8 @@ button, input { font: inherit; }
   border-bottom: 1px solid var(--border);
 }
 
-.brand { color: var(--text); font: 700 18px/1 ui-monospace, SFMono-Regular, Consolas, monospace; text-decoration: none; }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--text); font: 700 18px/1 ui-monospace, SFMono-Regular, Consolas, monospace; text-decoration: none; }
+.brand-icon { width: 24px; height: 24px; border-radius: 5px; }
 nav { display: flex; gap: 24px; }
 nav a { color: var(--muted); font-size: 13px; text-decoration: none; }
 nav a:hover { color: var(--text); }
