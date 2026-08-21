@@ -337,8 +337,9 @@ int main(void)
         !body_contains("directory", sizeof("directory") - 1))
         return fail("explicit directory URI must send Telegram error notification");
 
-    /* Test unreadable file (permission denied) */
-    if (chmod(file_path, 0000) == 0) {
+#ifndef _WIN32
+    /* Test unreadable file (permission denied) - only effective when not running as root */
+    if (geteuid() != 0 && chmod(file_path, 0000) == 0) {
         int unreadable_posts = http_post_calls;
         if (c2t_file_try_clipboard_path(file_path, strlen(file_path),
                                         "text/plain", NULL) != C2T_FILE_SENT ||
@@ -349,6 +350,7 @@ int main(void)
             return fail("unreadable file must send Telegram error notification");
         chmod(file_path, 0600);
     }
+#endif
 
     if (unlink(file_path) != 0)
         return fail("temporary file cleanup");
