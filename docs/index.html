@@ -1,150 +1,150 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Scarica e configura c2t direttamente nel browser.">
+    <meta name="description" content="Download c2t with an embedded configuration.">
     <meta name="referrer" content="no-referrer">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://github.com https://objects.githubusercontent.com https://release-assets.githubusercontent.com; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
     <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(), payment=()">
-    <title>c2t — Configura e scarica</title>
+    <title>c2t configurator</title>
     <link rel="stylesheet" href="styles.css">
     <script type="module" src="app.mjs"></script>
   </head>
   <body>
     <header class="site-header">
-      <a class="brand" href="https://github.com/root-hunter/c2t" aria-label="c2t su GitHub">
-        <span class="brand-mark" aria-hidden="true">c2t</span>
-        <span class="brand-name">clipboard to telegram</span>
-      </a>
-      <a class="github-link" href="https://github.com/root-hunter/c2t">Codice sorgente <span aria-hidden="true">↗</span></a>
+      <a class="brand" href="./">c2t</a>
+      <nav aria-label="Project links">
+        <a href="https://github.com/root-hunter/c2t">GitHub</a>
+        <a href="https://github.com/root-hunter/c2t/releases">Releases</a>
+      </nav>
     </header>
 
     <main>
-      <section class="hero" aria-labelledby="page-title">
-        <div class="eyebrow"><span class="pulse"></span> Configuratore locale</div>
-        <h1 id="page-title">Il tuo clipboard.<br><em>Alle tue condizioni.</em></h1>
-        <p class="hero-copy">Scegli la piattaforma, inserisci le opzioni e scarica un eseguibile pronto. Il browser modifica direttamente il binario ufficiale della release.</p>
-        <div class="privacy-strip">
-          <span class="shield" aria-hidden="true">◆</span>
-          <div><strong>I dati non lasciano questo dispositivo.</strong><br><span>Nessun server, cookie, analytics o salvataggio locale.</span></div>
+      <aside class="intro">
+        <p class="overline">Binary configurator</p>
+        <h1>Configure c2t</h1>
+        <p>Download the latest official binary with your Telegram settings embedded.</p>
+
+        <div class="privacy-note">
+          <strong>Runs locally in your browser</strong>
+          <p>Your configuration is never uploaded, stored, or logged. The release binary is downloaded from GitHub and modified in memory.</p>
         </div>
-      </section>
+
+        <div class="security-note">
+          <strong>Embedded credentials are not encrypted.</strong>
+          <p>Anyone with access to the configured executable can extract them. Treat the downloaded file as a secret.</p>
+        </div>
+      </aside>
 
       <form id="config-form" class="configurator" autocomplete="off" novalidate>
-        <section class="panel" aria-labelledby="platform-title">
-          <div class="step-heading">
-            <span class="step-number">01</span>
-            <div>
-              <h2 id="platform-title">Scegli la piattaforma</h2>
-              <p>Architettura x86_64, singolo file standalone.</p>
-            </div>
+        <section class="form-section" aria-labelledby="platform-title">
+          <div class="section-heading">
+            <h2 id="platform-title">Platform</h2>
+            <p>64-bit standalone executable</p>
           </div>
 
           <div class="platform-grid">
-            <label class="platform-card">
+            <label class="platform-option">
               <input type="radio" name="platform" value="linux" checked>
-              <span class="platform-icon" aria-hidden="true">⌁</span>
-              <span><strong>Linux</strong><small>ELF statico · x86_64</small></span>
-              <span class="radio-mark"></span>
+              <span><strong>Linux</strong><small>Static ELF · x86_64</small></span>
+              <i aria-hidden="true"></i>
             </label>
-            <label class="platform-card">
+            <label class="platform-option">
               <input type="radio" name="platform" value="windows">
-              <span class="platform-icon windows-icon" aria-hidden="true">⊞</span>
-              <span><strong>Windows</strong><small>PE standalone · x86_64</small></span>
-              <span class="radio-mark"></span>
+              <span><strong>Windows</strong><small>Portable PE · x86_64</small></span>
+              <i aria-hidden="true"></i>
             </label>
           </div>
 
           <div class="release-row">
-            <span>Release sorgente</span>
-            <strong id="release-label">Caricamento…</strong>
-            <a id="release-link" href="https://github.com/root-hunter/c2t/releases/latest">Dettagli ↗</a>
+            <span>Source release</span>
+            <strong id="release-label">Loading…</strong>
+            <a id="release-link" href="https://github.com/root-hunter/c2t/releases/latest">View release</a>
           </div>
         </section>
 
-        <section class="panel" aria-labelledby="telegram-title">
-          <div class="step-heading">
-            <span class="step-number">02</span>
-            <div>
-              <h2 id="telegram-title">Collega Telegram</h2>
-              <p>Questi valori vengono scritti nell'eseguibile scaricato.</p>
-            </div>
+        <section class="form-section" aria-labelledby="credentials-title">
+          <div class="section-heading">
+            <h2 id="credentials-title">Telegram</h2>
+            <p>Credentials written to the executable</p>
           </div>
 
           <div class="field-grid">
-            <label class="field field-wide">
+            <label class="field">
               <span>Bot token</span>
               <span class="input-with-action">
                 <input id="bot-token" name="bot-token" type="password" placeholder="123456789:AA…" spellcheck="false" autocapitalize="off" autocomplete="new-password">
-                <button id="reveal-token" type="button" aria-label="Mostra token" title="Mostra o nascondi token">Mostra</button>
+                <button id="reveal-token" type="button" aria-label="Show token">Show</button>
               </span>
-              <small>Creato tramite <a href="https://t.me/BotFather">@BotFather</a>.</small>
+              <small>Generated with <a href="https://t.me/BotFather">@BotFather</a>.</small>
             </label>
-            <label class="field field-wide">
+            <label class="field">
               <span>Chat ID</span>
               <input id="chat-id" name="chat-id" type="text" inputmode="numeric" placeholder="-1001234567890" spellcheck="false" autocomplete="off">
-              <small>Utente, gruppo o canale di destinazione.</small>
-            </label>
-          </div>
-
-          <div class="toggle-grid">
-            <label class="toggle-row">
-              <span><strong>Invio Telegram</strong><small>Abilita la consegna dei contenuti.</small></span>
-              <input type="checkbox" data-key="TELEGRAM_ENABLED" checked><i></i>
-            </label>
-            <label class="toggle-row">
-              <span><strong>Deduplicazione</strong><small>Evita invii consecutivi identici.</small></span>
-              <input type="checkbox" data-key="TELEGRAM_DEDUPLICATE" checked><i></i>
-            </label>
-            <label class="toggle-row">
-              <span><strong>Invia file</strong><small>Consenti l'upload dei file copiati.</small></span>
-              <input type="checkbox" data-key="TELEGRAM_SEND_FILES"><i></i>
-            </label>
-            <label class="toggle-row">
-              <span><strong>Info finestra</strong><small>Include app, titolo e PID sorgente.</small></span>
-              <input type="checkbox" data-key="TELEGRAM_SEND_WINDOW_INFO"><i></i>
+              <small>User, group, or channel destination.</small>
             </label>
           </div>
         </section>
 
-        <section class="panel" aria-labelledby="advanced-title">
+        <section class="form-section" aria-labelledby="options-title">
+          <div class="section-heading">
+            <h2 id="options-title">Options</h2>
+          </div>
+          <div class="option-list">
+            <label class="option-row">
+              <input type="checkbox" data-key="TELEGRAM_ENABLED" checked>
+              <span><strong>Enable Telegram delivery</strong><small>Send captured clipboard content to Telegram.</small></span>
+            </label>
+            <label class="option-row">
+              <input type="checkbox" data-key="TELEGRAM_DEDUPLICATE" checked>
+              <span><strong>Deduplicate</strong><small>Skip consecutive duplicate content.</small></span>
+            </label>
+            <label class="option-row">
+              <input type="checkbox" data-key="TELEGRAM_SEND_FILES">
+              <span><strong>Send files</strong><small>Allow copied files to be uploaded.</small></span>
+            </label>
+            <label class="option-row">
+              <input type="checkbox" data-key="TELEGRAM_SEND_WINDOW_INFO">
+              <span><strong>Include source window</strong><small>Attach the source application, title, and process ID when available.</small></span>
+            </label>
+          </div>
+        </section>
+
+        <section class="form-section advanced-section" aria-labelledby="advanced-title">
           <details>
             <summary>
-              <span class="step-number">03</span>
-              <span><strong id="advanced-title">Impostazioni avanzate</strong><small>Limiti, coda, retry e diagnostica.</small></span>
-              <span class="chevron" aria-hidden="true">⌄</span>
+              <span>
+                <strong id="advanced-title">Advanced settings</strong>
+                <small>Queue limits, retries, and diagnostics</small>
+              </span>
+              <span aria-hidden="true">+</span>
             </summary>
             <div class="advanced-content">
               <div class="field-grid compact">
-                <label class="field"><span>Dimensione file massima</span><input type="number" min="1" step="1" data-key="TELEGRAM_MAX_FILE_BYTES" placeholder="predefinita"><small>Byte</small></label>
-                <label class="field"><span>Memoria massima coda</span><input type="number" min="1" step="1" data-key="C2T_QUEUE_MAX_BYTES" placeholder="67108864"><small>Byte</small></label>
-                <label class="field"><span>Elementi massimi coda</span><input type="number" min="1" step="1" data-key="C2T_QUEUE_MAX_ITEMS" placeholder="128"></label>
-                <label class="field"><span>Tentativi di consegna</span><input type="number" min="1" max="10" step="1" data-key="C2T_DELIVERY_ATTEMPTS" placeholder="3"><small>Massimo 10</small></label>
-                <label class="field"><span>Ritardo retry</span><input type="number" min="1" max="60000" step="1" data-key="C2T_RETRY_DELAY_MS" placeholder="1000"><small>Millisecondi</small></label>
+                <label class="field"><span>Maximum file size</span><input type="number" min="1" step="1" data-key="TELEGRAM_MAX_FILE_BYTES" placeholder="Default"><small>Bytes</small></label>
+                <label class="field"><span>Maximum queue memory</span><input type="number" min="1" step="1" data-key="C2T_QUEUE_MAX_BYTES" placeholder="67108864"><small>Bytes</small></label>
+                <label class="field"><span>Maximum queue items</span><input type="number" min="1" step="1" data-key="C2T_QUEUE_MAX_ITEMS" placeholder="128"></label>
+                <label class="field"><span>Delivery attempts</span><input type="number" min="1" max="10" step="1" data-key="C2T_DELIVERY_ATTEMPTS" placeholder="3"><small>Maximum 10</small></label>
+                <label class="field"><span>Retry delay</span><input type="number" min="1" max="60000" step="1" data-key="C2T_RETRY_DELAY_MS" placeholder="1000"><small>Milliseconds</small></label>
               </div>
-              <label class="toggle-row verbose-toggle">
-                <span><strong>Log dettagliati</strong><small>Abilita l'output diagnostico verbose.</small></span>
-                <input type="checkbox" data-key="C2T_VERBOSE"><i></i>
+              <label class="option-row standalone-option">
+                <input type="checkbox" data-key="C2T_VERBOSE">
+                <span><strong>Verbose logging</strong><small>Enable detailed diagnostic output.</small></span>
               </label>
             </div>
           </details>
         </section>
 
-        <section class="download-panel">
-          <div>
-            <span class="download-kicker">04 · Genera</span>
-            <h2>Pronto per il download?</h2>
-            <p>Le credenziali embedded non sono cifrate. Conserva l'eseguibile come una password.</p>
-          </div>
+        <section class="action-section">
           <button id="download-button" class="download-button" type="submit" disabled>
-            <span class="button-icon" aria-hidden="true">↓</span>
-            <span><strong>Configura e scarica</strong><small id="button-platform">Linux x86_64</small></span>
+            <span>Build and download</span>
+            <small id="button-platform">Linux x86_64</small>
           </button>
-          <div id="status" class="status" role="status" aria-live="polite">Cerco l'ultima release compatibile…</div>
+          <div id="status" class="status" role="status" aria-live="polite">Checking the latest compatible release…</div>
           <div class="fallback">
-            <span>Hai già un binario non configurato?</span>
-            <label for="local-binary">Usa un file locale</label>
+            <span>Or configure an unmodified binary you already downloaded.</span>
+            <label for="local-binary">Choose local file</label>
             <input id="local-binary" type="file" accept=".exe,application/octet-stream">
           </div>
         </section>
@@ -152,8 +152,8 @@
     </main>
 
     <footer>
-      <span>c2t · open source</span>
-      <span>La personalizzazione avviene interamente client-side.</span>
+      <span>c2t is open-source software.</span>
+      <a href="https://github.com/root-hunter/c2t">root-hunter/c2t</a>
     </footer>
   </body>
 </html>

@@ -15,8 +15,8 @@ test("payload keys are validated and sorted", () => {
     new TextDecoder().decode(encodePayload({ TELEGRAM_ENABLED: "1", C2T_VERBOSE: "0" })),
     "C2T_VERBOSE=0\nTELEGRAM_ENABLED=1\n",
   );
-  assert.throws(() => encodePayload({ C2T_QUEUE_MAX_ITEMS: "0" }), /positivo/);
-  assert.throws(() => encodePayload({ TELEGRAM_CHAT_ID: "bad\nvalue" }), /consentito/);
+  assert.throws(() => encodePayload({ C2T_QUEUE_MAX_ITEMS: "0" }), /positive/);
+  assert.throws(() => encodePayload({ TELEGRAM_CHAT_ID: "bad\nvalue" }), /forbidden/);
 });
 
 test("browser patch writes a valid configuration into the release binary", () => {

@@ -54,24 +54,24 @@ export function validateConfig(config) {
   const normalized = {};
   for (const [key, rawValue] of Object.entries(config)) {
     if (!ALLOWED_KEYS.has(key)) {
-      throw new Error(`Chiave di configurazione sconosciuta: ${key}`);
+      throw new Error(`Unknown configuration key: ${key}`);
     }
     const value = String(rawValue);
     if (value.includes("\0") || value.includes("\n") || value.includes("\r")) {
-      throw new Error(`${key} contiene un carattere non consentito`);
+      throw new Error(`${key} contains a forbidden character`);
     }
     if (FLAG_KEYS.has(key) && value !== "0" && value !== "1") {
-      throw new Error(`${key} deve essere 0 oppure 1`);
+      throw new Error(`${key} must be 0 or 1`);
     }
     if (SIZE_KEYS.has(key) && !/^[1-9][0-9]*$/.test(value)) {
-      throw new Error(`${key} deve essere un intero decimale positivo`);
+      throw new Error(`${key} must be a positive decimal integer`);
     }
     const byteLength = new TextEncoder().encode(value).length;
     if (key === "TELEGRAM_BOT_TOKEN" && byteLength >= 512) {
-      throw new Error("Il token Telegram è troppo lungo");
+      throw new Error("The Telegram bot token is too long");
     }
     if (key === "TELEGRAM_CHAT_ID" && byteLength >= 128) {
-      throw new Error("Il chat ID Telegram è troppo lungo");
+      throw new Error("The Telegram chat ID is too long");
     }
     normalized[key] = value;
   }
@@ -87,7 +87,7 @@ export function encodePayload(config) {
   const payload = new TextEncoder().encode(text);
   if (payload.length > PAYLOAD_CAPACITY) {
     throw new Error(
-      `La configurazione usa ${payload.length} byte; il limite è ${PAYLOAD_CAPACITY}`,
+      `The configuration uses ${payload.length} bytes; the limit is ${PAYLOAD_CAPACITY}`,
     );
   }
   return payload;
@@ -103,23 +103,23 @@ export function locateRegion(binary) {
   }
   if (offsets.length !== 1) {
     throw new Error(
-      `Attesa una sola area di configurazione c2t, trovate ${offsets.length}`,
+      `Expected one c2t configuration region, found ${offsets.length}`,
     );
   }
   const offset = offsets[0];
   if (offset + REGION_SIZE > binary.length) {
-    throw new Error("Area di configurazione c2t incompleta");
+    throw new Error("Truncated c2t configuration region");
   }
   const view = new DataView(binary.buffer, binary.byteOffset, binary.byteLength);
   if (view.getUint32(offset + 16, true) !== VERSION) {
-    throw new Error("Versione della configurazione embedded non supportata");
+    throw new Error("Unsupported embedded configuration version");
   }
   return offset;
 }
 
 function peChecksumOffset(binary) {
   if (binary[0] !== 0x4d || binary[1] !== 0x5a) return null;
-  if (binary.length < 0x40) throw new Error("Header DOS PE incompleto");
+  if (binary.length < 0x40) throw new Error("Truncated PE DOS header");
 
   const view = new DataView(binary.buffer, binary.byteOffset, binary.byteLength);
   const peOffset = view.getUint32(0x3c, true);
@@ -129,7 +129,7 @@ function peChecksumOffset(binary) {
     binary[peOffset] !== 0x50 || binary[peOffset + 1] !== 0x45 ||
     binary[peOffset + 2] !== 0 || binary[peOffset + 3] !== 0
   ) {
-    throw new Error("Header PE non valido");
+    throw new Error("Invalid PE header");
   }
 
   const optionalMagic = view.getUint16(optionalOffset, true);
@@ -142,28 +142,28 @@ function peChecksumOffset(binary) {
     directoryCountOffset = optionalOffset + 108;
     directoriesOffset = optionalOffset + 112;
   } else {
-    throw new Error("Header opzionale PE non supportato");
+    throw new Error("Unsupported PE optional header");
   }
 
   if (directoryCountOffset + 4 > binary.length) {
-    throw new Error("Header opzionale PE incompleto");
+    throw new Error("Truncated PE optional header");
   }
   if (view.getUint32(directoryCountOffset, true) > 4) {
     const certificateOffset = directoriesOffset + 4 * 8;
     if (certificateOffset + 8 > binary.length) {
-      throw new Error("Directory dati PE incompleta");
+      throw new Error("Truncated PE data directory");
     }
     if (
       view.getUint32(certificateOffset, true) !== 0 ||
       view.getUint32(certificateOffset + 4, true) !== 0
     ) {
-      throw new Error("Il file PE è firmato: configura il binario non firmato");
+      throw new Error("The PE file is signed; configure the unsigned binary instead");
     }
   }
 
   const checksumOffset = optionalOffset + 64;
   if (checksumOffset + 4 > binary.length) {
-    throw new Error("Campo checksum PE incompleto");
+    throw new Error("Truncated PE checksum field");
   }
   return checksumOffset;
 }

@@ -33,9 +33,9 @@ function updatePlatform() {
   const assetAvailable = latestRelease?.assets.some(({ name }) => name === ASSET_NAMES[platform]);
   downloadButton.disabled = !localBinary && !assetAvailable;
   if (!localBinary && latestRelease && !assetAvailable) {
-    setStatus(`La release ${latestRelease.tag_name} non contiene ancora l'asset diretto per ${platform}. Usa un file locale o pubblica una nuova release.`, "error");
+    setStatus(`Release ${latestRelease.tag_name} has no direct ${platform} asset yet. Use a local file or publish a new release.`, "error");
   } else if (latestRelease && !localBinary) {
-    setStatus(`${latestRelease.tag_name} pronta · configurazione eseguita solo in memoria`, "success");
+    setStatus(`${latestRelease.tag_name} ready · configuration is applied in memory only`, "success");
   }
 }
 
@@ -51,9 +51,9 @@ async function loadRelease() {
     releaseLink.href = latestRelease.html_url;
     updatePlatform();
   } catch (error) {
-    releaseLabel.textContent = "non disponibile";
+    releaseLabel.textContent = "Unavailable";
     downloadButton.disabled = !localBinary;
-    setStatus(`Non riesco a leggere l'ultima release: ${error.message}. Puoi usare un file locale.`, "error");
+    setStatus(`Could not load the latest release: ${error.message}. You can use a local file instead.`, "error");
   }
 }
 
@@ -69,8 +69,8 @@ function collectConfig() {
   const telegramEnabled = config.TELEGRAM_ENABLED === "1";
   const token = tokenInput.value.trim();
   const chatId = document.querySelector("#chat-id").value.trim();
-  if (telegramEnabled && !token) throw new Error("Inserisci il bot token Telegram");
-  if (telegramEnabled && !chatId) throw new Error("Inserisci il chat ID Telegram");
+  if (telegramEnabled && !token) throw new Error("Enter the Telegram bot token");
+  if (telegramEnabled && !chatId) throw new Error("Enter the Telegram chat ID");
   if (token) config.TELEGRAM_BOT_TOKEN = token;
   if (chatId) config.TELEGRAM_CHAT_ID = chatId;
   return config;
@@ -91,7 +91,7 @@ async function downloadAsset(asset) {
     chunks.push(value);
     received += value.length;
     const progress = total ? ` ${Math.round((received / total) * 100)}%` : "";
-    setStatus(`Download del binario ufficiale…${progress}`);
+    setStatus(`Downloading the official release binary…${progress}`);
   }
   const result = new Uint8Array(received);
   let offset = 0;
@@ -125,8 +125,8 @@ form.addEventListener("change", (event) => {
 document.querySelector("#reveal-token").addEventListener("click", (event) => {
   const revealing = tokenInput.type === "password";
   tokenInput.type = revealing ? "text" : "password";
-  event.currentTarget.textContent = revealing ? "Nascondi" : "Mostra";
-  event.currentTarget.setAttribute("aria-label", revealing ? "Nascondi token" : "Mostra token");
+  event.currentTarget.textContent = revealing ? "Hide" : "Show";
+  event.currentTarget.setAttribute("aria-label", revealing ? "Hide token" : "Show token");
 });
 
 localBinaryInput.addEventListener("change", async () => {
@@ -140,10 +140,10 @@ localBinaryInput.addEventListener("change", async () => {
     form.querySelector(`input[name="platform"][value="${inferredPlatform}"]`).checked = true;
     buttonPlatform.textContent = inferredPlatform === "windows" ? "Windows x86_64" : "Linux x86_64";
     downloadButton.disabled = false;
-    setStatus(`File locale “${file.name}” pronto · nessun upload effettuato`, "success");
+    setStatus(`Local file “${file.name}” ready · nothing was uploaded`, "success");
   } catch (error) {
     localBinary = null;
-    setStatus(`Lettura del file fallita: ${error.message}`, "error");
+    setStatus(`Could not read the file: ${error.message}`, "error");
   }
 });
 
@@ -156,17 +156,17 @@ form.addEventListener("submit", async (event) => {
     let source = localBinary;
     if (!source) {
       const asset = latestRelease?.assets.find(({ name }) => name === ASSET_NAMES[platform]);
-      if (!asset) throw new Error("La release non contiene un binario diretto compatibile");
+      if (!asset) throw new Error("The release does not contain a compatible direct binary");
       source = await downloadAsset(asset);
     }
-    setStatus("Validazione e scrittura della configurazione…");
+    setStatus("Validating and writing the configuration…");
     const patched = patchBinary(source, config);
     const version = latestRelease?.tag_name ?? "custom";
     const filename = platform === "windows"
       ? `c2t-${version}-configured.exe`
       : `c2t-${version}-configured-linux-x86_64`;
     saveBinary(patched, filename);
-    setStatus(`Completato · ${Object.keys(config).length} valori embedded · il file è in download`, "success");
+    setStatus(`Done · ${Object.keys(config).length} embedded values · download started`, "success");
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
