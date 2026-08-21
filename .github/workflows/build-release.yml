@@ -59,30 +59,52 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install build dependencies
+      - name: Install Windows build dependencies
+        if: matrix.platform == 'windows'
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends \
             cmake \
-            gcc \
-            libssl-dev \
-            libxau-dev \
-            libxcb1-dev \
-            libxdmcp-dev \
-            libzstd-dev \
             mingw-w64 \
             ninja-build \
             nodejs \
-            python3 \
             zip
 
-      - name: Configure Linux
+      - name: Build and test Linux with musl
         if: matrix.platform == 'linux'
-        run: >-
-          cmake -S . -B build/linux -G Ninja
-          -DCMAKE_BUILD_TYPE=MinSizeRel
-          -DBUILD_TESTING=ON
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/linux
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/src:ro" \
+            --volume "${GITHUB_WORKSPACE}/build/linux:/build" \
+            --workdir /src \
+            alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d \
+            sh -euxc '
+              apk add --no-cache \
+                build-base \
+                cmake \
+                libxau-dev \
+                libxcb-dev \
+                libxcb-static \
+                libxdmcp-dev \
+                linux-headers \
+                ninja \
+                nodejs \
+                openssl-dev \
+                openssl-libs-static \
+                perl \
+                python3 \
+                zstd-dev \
+                zstd-static
+              cmake -S /src -B /build -G Ninja \
+                -DCMAKE_BUILD_TYPE=MinSizeRel \
+                -DBUILD_TESTING=ON
+              cmake --build /build --parallel 2
+              ctest --test-dir /build --output-on-failure
+            '
 
       - name: Configure Windows
         if: matrix.platform == 'windows'
@@ -93,11 +115,8 @@ jobs:
           -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake
 
       - name: Build
+        if: matrix.platform == 'windows'
         run: cmake --build build/${{ matrix.platform }} --parallel 2
-
-      - name: Test Linux
-        if: matrix.platform == 'linux'
-        run: ctest --test-dir build/linux --output-on-failure
 
       - name: Test browser provisioner on Windows binary
         if: matrix.platform == 'windows'

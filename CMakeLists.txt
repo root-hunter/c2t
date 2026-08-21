@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(c2t VERSION 0.1.5 LANGUAGES C)
+project(c2t VERSION 0.1.6 LANGUAGES C)
 
 include(FetchContent)
 include(CTest)
@@ -43,6 +43,20 @@ if(WIN32)
         target_link_options(c2t PRIVATE -static -static-libgcc)
     endif()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include(CheckCSourceCompiles)
+    check_c_source_compiles([[
+        #include <features.h>
+        #ifdef __GLIBC__
+        #error "glibc static binaries may load incompatible host NSS modules"
+        #endif
+        int main(void) { return 0; }
+    ]] C2T_STATIC_LIBC_IS_PORTABLE)
+    if(NOT C2T_STATIC_LIBC_IS_PORTABLE)
+        message(FATAL_ERROR
+            "The standalone Linux build requires musl. Static glibc binaries "
+            "can load incompatible host NSS modules during DNS resolution.")
+    endif()
+
     set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)

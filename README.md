@@ -131,7 +131,10 @@ C2T_DELIVERY_ATTEMPTS=5 C2T_RETRY_DELAY_MS=1000 c2t
 ## Build and release
 
 GitHub Actions builds and verifies Linux x86_64 and Windows x86_64 packages on
-every push and pull request. The Linux job also runs the automated tests.
+every push and pull request. The Linux executable is built against musl in a
+pinned Alpine container and the Linux job also runs the automated tests. musl
+is required for standalone Linux builds: a static glibc executable can still
+load host NSS modules during DNS resolution and is therefore not portable.
 
 To publish a release, first update the version in the `project(c2t VERSION ...)`
 line of `CMakeLists.txt`, commit it, then create and push a matching SemVer tag:
