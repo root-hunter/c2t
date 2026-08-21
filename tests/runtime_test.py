@@ -45,6 +45,18 @@ def main():
             assert stopped.returncode == 3, stopped
             assert "stopped" in stopped.stdout
 
+            # Test start without --log-file (even with --send-logs): no Log: in stdout, no disk log
+            no_disk_started = invoke(
+                executable, "start", "--verbose", "--send-logs", environment=environment)
+            assert no_disk_started.returncode == 0, no_disk_started
+            assert "started (PID " in no_disk_started.stdout
+            assert "Log:" not in no_disk_started.stdout
+            stopped_no_disk = invoke(executable, "stop", environment=environment)
+            assert stopped_no_disk.returncode == 0
+
+            log_file = pathlib.Path(state_dir, "c2t", "c2t.log")
+            assert not log_file.exists()
+
             started = invoke(
                 executable, "start", "--verbose", "--log-file", environment=environment)
             assert started.returncode == 0, started
