@@ -90,6 +90,16 @@ h1 { margin: 0 0 18px; font-size: clamp(38px, 5vw, 56px); line-height: 1.02; let
 .option-row { display: flex; align-items: flex-start; gap: 11px; min-height: 72px; padding: 15px; cursor: pointer; }
 .platform-note { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .platform-note code { color: var(--ink); font: inherit; }
+.download-format { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 14px 0 0; padding: 0; border: 1px solid var(--border); }
+.download-format[hidden] { display: none; }
+.download-format legend { padding: 0 7px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.download-format label { display: flex; align-items: flex-start; gap: 9px; padding: 12px; cursor: pointer; }
+.download-format label:first-of-type { border-right: 1px solid var(--border); }
+.download-format input { margin: 3px 0 0; accent-color: var(--accent); }
+.download-format span { display: grid; gap: 3px; }
+.download-format strong { font-size: 13px; }
+.download-format small { color: var(--muted); font-size: 11px; }
+.download-format code { font: inherit; }
 .option-row:nth-child(odd) { border-right: 1px solid var(--border); }
 .option-row:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
 .option-row input { width: 15px; height: 15px; margin: 2px 0 0; accent-color: var(--accent); }
@@ -137,6 +147,8 @@ footer { display: flex; justify-content: space-between; width: min(var(--max-wid
   main { margin-bottom: 56px; }
   .privacy-note, .security-note { display: block; width: auto; margin-left: 0; }
   .form-section, .action-section { padding: 24px 20px; }
+  .download-format { grid-template-columns: 1fr; }
+  .download-format label:first-of-type { border-right: 0; border-bottom: 1px solid var(--border); }
   .section-heading { display: block; }
   .section-heading p { margin-top: 5px; }
   .platform-grid, .field-grid, .field-grid.compact, .option-list { grid-template-columns: 1fr; }

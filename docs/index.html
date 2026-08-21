@@ -61,7 +61,18 @@
               <i aria-hidden="true"></i>
             </label>
           </div>
-          <p class="platform-note">Linux downloads are executable <code>.tar.gz</code> archives. Extract one and run the contained file directly—no <code>chmod</code> required.</p>
+          <fieldset id="linux-format" class="download-format">
+            <legend>Linux download format</legend>
+            <label>
+              <input type="radio" name="linux-format" value="archive" checked>
+              <span><strong>Executable archive</strong><small><code>.tar.gz</code> · extracts with mode 0755</small></span>
+            </label>
+            <label>
+              <input type="radio" name="linux-format" value="raw">
+              <span><strong>Raw binary</strong><small>Direct file · may require <code>chmod +x</code></small></span>
+            </label>
+          </fieldset>
+          <p id="linux-format-note" class="platform-note">Browsers cannot assign POSIX execute permissions to a raw download. Choose the archive to run the extracted binary without <code>chmod</code>.</p>
 
           <div class="release-row">
             <span>Source release</span>

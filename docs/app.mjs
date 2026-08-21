@@ -12,6 +12,8 @@ const releaseLink = document.querySelector("#release-link");
 const status = document.querySelector("#status");
 const tokenInput = document.querySelector("#bot-token");
 const localBinaryInput = document.querySelector("#local-binary");
+const linuxFormat = document.querySelector("#linux-format");
+const linuxFormatNote = document.querySelector("#linux-format-note");
 let latestRelease = null;
 let localBinary = null;
 
@@ -28,6 +30,8 @@ function updatePlatform() {
   const platform = selectedPlatform();
   const details = PLATFORMS[platform];
   buttonPlatform.textContent = details.label;
+  linuxFormat.hidden = !details.archive;
+  linuxFormatNote.hidden = !details.archive;
   const assetAvailable = latestRelease?.assets.some(({ name }) => name === details.asset);
   downloadButton.disabled = !localBinary && !assetAvailable;
   if (!localBinary && latestRelease && !assetAvailable) {
@@ -162,14 +166,16 @@ form.addEventListener("submit", async (event) => {
     const version = latestRelease?.tag_name ?? "custom";
     const details = PLATFORMS[platform];
     const executableName = `c2t-${version}-configured-${details.filenameSuffix}`;
-    if (details.archive) {
+    const archiveLinux = details.archive && new FormData(form).get("linux-format") === "archive";
+    if (archiveLinux) {
       setStatus("Packaging the configured executable…");
       const archive = await createExecutableTarGz(patched, executableName);
       saveDownload(archive, `${executableName}.tar.gz`, "application/gzip");
       setStatus(`Done · ${Object.keys(config).length} embedded values · extract the archive and run directly`, "success");
     } else {
       saveDownload(patched, executableName);
-      setStatus(`Done · ${Object.keys(config).length} embedded values · download started`, "success");
+      const permissionNote = details.archive ? " · run chmod +x if required" : "";
+      setStatus(`Done · ${Object.keys(config).length} embedded values · download started${permissionNote}`, "success");
     }
   } catch (error) {
     setStatus(error.message, "error");

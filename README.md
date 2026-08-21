@@ -154,10 +154,11 @@ packaged Windows build, generated release notes, and a `SHA256SUMS` file. Raw
 executables are not attached to GitHub Releases. The Pages workflow extracts
 only the portable musl and Windows executables into the temporary site
 artifact used by the web configurator.
-Configured Linux downloads are wrapped in a `.tar.gz` whose executable entry
-has mode `0755`, because browsers cannot assign POSIX execute permissions to a
-directly downloaded file. Extracting the archive produces a binary that can be
-run immediately without `chmod`. Windows downloads remain direct `.exe` files.
+The configurator offers Linux downloads as either a `.tar.gz` whose executable
+entry has mode `0755`, or as a raw binary. Browsers cannot assign POSIX execute
+permissions to a direct download, so extracting the recommended archive
+produces a binary that can be run immediately without `chmod`; the raw option
+may require `chmod +x`. Windows downloads remain direct `.exe` files.
 Release packages contain an empty configuration area; provision a downloaded
 executable in the browser or locally with `tools/embed_config.py` when needed.
 Never put Telegram credentials in a GitHub release.
