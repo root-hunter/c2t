@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.24)
+
 if(NOT DEFINED EXECUTABLE OR NOT EXISTS "${EXECUTABLE}")
     message(FATAL_ERROR "Executable to verify not found: ${EXECUTABLE}")
 endif()
