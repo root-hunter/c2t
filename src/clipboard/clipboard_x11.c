@@ -2,6 +2,7 @@
 #include "clipboard_output.h"
 #include "../config/config.h"
 #include "../logging/logging.h"
+#include "../runtime/runtime.h"
 
 #include <xcb/xcb.h>
 #include <xcb/xcbext.h>
@@ -12,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <poll.h>
 #include <sys/uio.h>
 
 #define XFIXES_QUERY_VERSION 0
@@ -491,7 +493,21 @@ static int clipboard_listen_once(void)
     int has_source = 0;
     xcb_generic_event_t *event;
 
-    while ((event = xcb_wait_for_event(connection))) {
+    while (!c2t_runtime_stop_requested()) {
+        event = xcb_poll_for_event(connection);
+        if (!event) {
+            if (xcb_connection_has_error(connection))
+                break;
+            struct pollfd descriptor = {
+                .fd = xcb_get_file_descriptor(connection),
+                .events = POLLIN,
+                .revents = 0
+            };
+            int polled = poll(&descriptor, 1, 250);
+            if (polled < 0 && errno != EINTR)
+                break;
+            continue;
+        }
         uint8_t event_type = event->response_type & 0x7f;
 
         if (event_type == xfixes_event_type) {
@@ -547,16 +563,18 @@ static int clipboard_listen_once(void)
         free(event);
     }
 
-    c2t_log_error("x11", "The X11 connection was interrupted");
+    int stopped = c2t_runtime_stop_requested();
+    if (!stopped)
+        c2t_log_error("x11", "The X11 connection was interrupted");
     free(transfer.data);
     xcb_disconnect(connection);
-    return 2;
+    return stopped ? 0 : 2;
 }
 
 int clipboard_listen(void)
 {
     unsigned int retry = 0;
-    for (;;) {
+    while (!c2t_runtime_stop_requested()) {
         int result = clipboard_listen_once();
         if (result != 2)
             return result;
@@ -566,7 +584,9 @@ int clipboard_listen(void)
             ++retry;
         c2t_log_warning("x11", "Reconnecting to X11 in %u seconds", delay);
         struct timespec duration = {.tv_sec = (time_t)delay, .tv_nsec = 0};
-        while (nanosleep(&duration, &duration) != 0 && errno == EINTR) {
+        while (!c2t_runtime_stop_requested() &&
+               nanosleep(&duration, &duration) != 0 && errno == EINTR) {
         }
     }
+    return 0;
 }

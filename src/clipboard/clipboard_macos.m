@@ -2,6 +2,7 @@
 #include "clipboard_output.h"
 #include "../config/config.h"
 #include "../logging/logging.h"
+#include "../runtime/runtime.h"
 
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
@@ -177,7 +178,7 @@ int clipboard_listen(void)
         NSInteger change_count = pasteboard.changeCount;
         c2t_log_info("macos", "Listening for clipboard changes");
 
-        for (;;) {
+        while (!c2t_runtime_stop_requested()) {
             struct timespec delay = {
                 .tv_sec = 0,
                 .tv_nsec = C2T_PASTEBOARD_POLL_MS * 1000000L
@@ -194,5 +195,6 @@ int clipboard_listen(void)
                 }
             }
         }
+        return 0;
     }
 }

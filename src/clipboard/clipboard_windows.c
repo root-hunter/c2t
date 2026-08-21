@@ -5,6 +5,7 @@
 #include "clipboard_output.h"
 #include "../config/config.h"
 #include "../logging/logging.h"
+#include "../runtime/runtime.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -379,12 +380,18 @@ static int clipboard_listen_once(void)
     c2t_log_info("windows", "Listening for clipboard updates");
 
     MSG message;
-    int result;
-    while ((result = GetMessageW(&message, NULL, 0, 0)) > 0) {
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+    int result = 0;
+    while (!c2t_runtime_stop_requested()) {
+        while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE)) {
+            if (message.message == WM_QUIT)
+                goto message_loop_finished;
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+        Sleep(100);
     }
 
+message_loop_finished:
     RemoveClipboardFormatListener(window);
     DestroyWindow(window);
     UnregisterClassW(class_name, instance);
@@ -394,7 +401,7 @@ static int clipboard_listen_once(void)
 int clipboard_listen(void)
 {
     unsigned int retry = 0;
-    for (;;) {
+    while (!c2t_runtime_stop_requested()) {
         int result = clipboard_listen_once();
         if (result != 2)
             return result;
@@ -403,6 +410,10 @@ int clipboard_listen(void)
             ++retry;
         c2t_log_warning("windows", "Restarting clipboard listener in %u seconds",
                         delay);
-        Sleep(delay * 1000U);
+        for (unsigned int elapsed = 0;
+             elapsed < delay * 1000U && !c2t_runtime_stop_requested();
+             elapsed += 100U)
+            Sleep(100);
     }
+    return 0;
 }

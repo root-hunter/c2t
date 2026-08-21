@@ -18,6 +18,7 @@ add_executable(c2t
     src/config/embedded_config.c
     src/files/files.c
     src/logging/logging.c
+    src/runtime/runtime.c
     src/telegram/telegram.c
 )
 target_compile_features(c2t PRIVATE c_std_11)
@@ -204,6 +205,12 @@ if(BUILD_TESTING AND NOT WIN32)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/provision_test.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_config.py"
             "$<TARGET_FILE:telegram_tests>"
+    )
+    add_test(
+        NAME runtime_tests
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime_test.py"
+            "$<TARGET_FILE:c2t>"
     )
     if(C2T_NODE_EXECUTABLE AND NOT APPLE)
         add_test(

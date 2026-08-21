@@ -3,6 +3,34 @@
 `c2t` listens for clipboard changes and can deliver supported clipboard data
 to a Telegram chat.
 
+## Daemon management
+
+The same executable manages the complete daemon lifecycle; no service wrapper
+or second binary is required:
+
+```sh
+c2t start
+c2t status
+c2t restart
+c2t stop
+```
+
+`start` detaches the process, waits until core initialization has completed and
+prints both its PID and log path. `status` returns exit code `0` while the
+process is starting or running and `3` when it is stopped. `stop` requests a
+graceful shutdown and waits up to 15 seconds, allowing queued deliveries to
+finish. If a stuck process must be terminated, use `c2t stop --force`.
+
+Only one instance is allowed per user session. State is protected
+by an operating-system lock, so stale PID files do not produce false running
+states. On Linux and macOS, runtime state follows `XDG_RUNTIME_DIR` when set and
+logs follow `XDG_STATE_HOME` (otherwise `~/.local/state/c2t/c2t.log`). On
+Windows, both are stored below `%LOCALAPPDATA%\c2t`.
+
+Use `c2t run` for foreground operation. For compatibility, invoking `c2t`
+without a command still runs it in the foreground. Runtime options can follow
+`start`, `run`, or `restart`, for example `c2t start --verbose`.
+
 Use the [client-side configurator](https://root-hunter.github.io/c2t/) to
 download the latest release and apply its Telegram settings locally in the
 browser. The page has no backend, analytics or persistent storage: values stay
