@@ -919,6 +919,27 @@ int telegram_send_file(const void *data, size_t length, const char *mime_type,
     return result;
 }
 
+int telegram_send_html(const char *html_text)
+{
+    if (!initialized || !html_text || !*html_text || !chat_id || !bot_token)
+        return 0;
+
+    form_field_t fields[2] = {
+        {"text", html_text, strlen(html_text)},
+        {"parse_mode", "HTML", 4}
+    };
+    return send_fields("sendMessage", fields, 2);
+}
+
+int telegram_send_text_message(const char *text)
+{
+    if (!initialized || !text || !*text || !chat_id || !bot_token)
+        return 0;
+
+    form_field_t field = {"text", text, strlen(text)};
+    return send_fields("sendMessage", &field, 1);
+}
+
 static int parse_json_string_field(const char *json, const char *key, char *output, size_t capacity)
 {
     if (!json || !key || !output || capacity == 0) return 0;
@@ -1003,10 +1024,10 @@ int telegram_get_bot_username(const char *token, char *username_out, size_t capa
     return parse_json_string_field(response, "username", username_out, capacity);
 }
 
-int telegram_poll_updates(const char *token, int64_t *offset,
-                         char *chat_id_out, size_t chat_id_capacity,
-                         char *username_out, size_t username_capacity,
-                         char *text_out, size_t text_capacity)
+int telegram_poll_updates_timeout(const char *token, int64_t *offset, int timeout_seconds,
+                                 char *chat_id_out, size_t chat_id_capacity,
+                                 char *username_out, size_t username_capacity,
+                                 char *text_out, size_t text_capacity)
 {
     if (!token) return 0;
 
@@ -1018,9 +1039,9 @@ int telegram_poll_updates(const char *token, int64_t *offset,
 
     char query[128];
     if (offset && *offset > 0) {
-        snprintf(query, sizeof(query), "getUpdates?offset=%lld&timeout=2", (long long)*offset);
+        snprintf(query, sizeof(query), "getUpdates?offset=%lld&timeout=%d", (long long)*offset, timeout_seconds);
     } else {
-        snprintf(query, sizeof(query), "getUpdates?timeout=2");
+        snprintf(query, sizeof(query), "getUpdates?timeout=%d", timeout_seconds);
     }
 
     char response[4096] = {0};
@@ -1052,6 +1073,17 @@ int telegram_poll_updates(const char *token, int64_t *offset,
     }
 
     return found;
+}
+
+int telegram_poll_updates(const char *token, int64_t *offset,
+                         char *chat_id_out, size_t chat_id_capacity,
+                         char *username_out, size_t username_capacity,
+                         char *text_out, size_t text_capacity)
+{
+    return telegram_poll_updates_timeout(token, offset, 2,
+                                         chat_id_out, chat_id_capacity,
+                                         username_out, username_capacity,
+                                         text_out, text_capacity);
 }
 
 int telegram_pair(const char *token, const char *expected_code,

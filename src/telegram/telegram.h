@@ -29,11 +29,17 @@ int telegram_send_data(const void *data, size_t length, const char *mime_type,
 int telegram_send_file(const void *data, size_t length, const char *mime_type,
                        const char *filename,
                        const c2t_clipboard_source_t *source);
+int telegram_send_html(const char *html_text);
+int telegram_send_text_message(const char *text);
 int telegram_get_bot_username(const char *token, char *username_out, size_t capacity);
 int telegram_poll_updates(const char *token, int64_t *offset,
                          char *chat_id_out, size_t chat_id_capacity,
                          char *username_out, size_t username_capacity,
                          char *text_out, size_t text_capacity);
+int telegram_poll_updates_timeout(const char *token, int64_t *offset, int timeout_seconds,
+                                 char *chat_id_out, size_t chat_id_capacity,
+                                 char *username_out, size_t username_capacity,
+                                 char *text_out, size_t text_capacity);
 int telegram_pair(const char *token, const char *expected_code,
                   char *chat_id_out, size_t capacity, int timeout_seconds);
 void telegram_cleanup(void);

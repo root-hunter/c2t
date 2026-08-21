@@ -46,8 +46,17 @@ static size_t last_sent_offset;
 static CRITICAL_SECTION sender_mutex;
 static CONDITION_VARIABLE sender_condition;
 static HANDLE worker_thread;
+static int mutex_initialized;
 
-static void sender_lock(void) { EnterCriticalSection(&sender_mutex); }
+static void ensure_mutex_init(void)
+{
+    if (!mutex_initialized) {
+        InitializeCriticalSection(&sender_mutex);
+        InitializeConditionVariable(&sender_condition);
+        mutex_initialized = 1;
+    }
+}
+static void sender_lock(void) { ensure_mutex_init(); EnterCriticalSection(&sender_mutex); }
 static void sender_unlock(void) { LeaveCriticalSection(&sender_mutex); }
 static void sender_wait(size_t seconds)
 {
@@ -60,6 +69,7 @@ static pthread_mutex_t sender_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t sender_condition = PTHREAD_COND_INITIALIZER;
 static pthread_t worker_thread;
 
+static void ensure_mutex_init(void) {}
 static void sender_lock(void) { (void)pthread_mutex_lock(&sender_mutex); }
 static void sender_unlock(void) { (void)pthread_mutex_unlock(&sender_mutex); }
 static void sender_wait(size_t seconds)
@@ -72,25 +82,64 @@ static void sender_wait(size_t seconds)
 static void sender_signal(void) { (void)pthread_cond_signal(&sender_condition); }
 #endif
 
-static void send_log_chunk(void)
+static char *escape_html(const char *input, size_t input_len, size_t *out_len)
+{
+    size_t extra = 0;
+    for (size_t i = 0; i < input_len; ++i) {
+        if (input[i] == '&') extra += 4;
+        else if (input[i] == '<') extra += 3;
+        else if (input[i] == '>') extra += 3;
+    }
+    char *escaped = malloc(input_len + extra + 1);
+    if (!escaped) return NULL;
+
+    size_t out_idx = 0;
+    for (size_t i = 0; i < input_len; ++i) {
+        if (input[i] == '&') {
+            memcpy(escaped + out_idx, "&amp;", 5);
+            out_idx += 5;
+        } else if (input[i] == '<') {
+            memcpy(escaped + out_idx, "&lt;", 4);
+            out_idx += 4;
+        } else if (input[i] == '>') {
+            memcpy(escaped + out_idx, "&gt;", 4);
+            out_idx += 4;
+        } else {
+            escaped[out_idx++] = input[i];
+        }
+    }
+    escaped[out_idx] = '\0';
+    if (out_len) *out_len = out_idx;
+    return escaped;
+}
+
+static int send_log_payload(int on_demand)
 {
     const char *path = c2t_runtime_log_path();
-    if (!path)
-        return;
+    if (!path) {
+        if (on_demand) {
+            telegram_send_html("ℹ️ <b>c2t Logs</b>\n<i>Log system is not active or no log file path configured.</i>");
+        }
+        return 0;
+    }
 
     FILE *stream = fopen(path, "rb");
-    if (!stream)
-        return;
+    if (!stream) {
+        if (on_demand) {
+            telegram_send_html("ℹ️ <b>c2t Logs</b>\n<i>Log file is currently empty or unavailable.</i>");
+        }
+        return 0;
+    }
 
     if (fseek(stream, 0, SEEK_END) != 0) {
         fclose(stream);
-        return;
+        return 0;
     }
 
     long file_size = ftell(stream);
     if (file_size < 0) {
         fclose(stream);
-        return;
+        return 0;
     }
 
     size_t current_size = (size_t)file_size;
@@ -101,7 +150,10 @@ static void send_log_chunk(void)
 
     if (current_size <= last_sent_offset) {
         fclose(stream);
-        return;
+        if (on_demand) {
+            telegram_send_html("ℹ️ <b>c2t Logs</b>\n<i>No new logs since last dispatch.</i>");
+        }
+        return 1;
     }
 
     size_t unread_bytes = current_size - last_sent_offset;
@@ -110,14 +162,14 @@ static void send_log_chunk(void)
 
     if (fseek(stream, (long)last_sent_offset, SEEK_SET) != 0) {
         fclose(stream);
-        return;
+        return 0;
     }
 
-    unsigned char *buffer = malloc(unread_bytes);
+    char *buffer = malloc(unread_bytes + 1);
     if (!buffer) {
         c2t_log_error("log_sender", "Unable to allocate memory for log dispatch");
         fclose(stream);
-        return;
+        return 0;
     }
 
     size_t read_bytes = fread(buffer, 1, unread_bytes, stream);
@@ -125,33 +177,78 @@ static void send_log_chunk(void)
 
     if (read_bytes == 0) {
         free(buffer);
-        return;
+        if (on_demand) {
+            telegram_send_html("ℹ️ <b>c2t Logs</b>\n<i>No new logs available.</i>");
+        }
+        return 1;
+    }
+    buffer[read_bytes] = '\0';
+
+    int sent = 0;
+
+    /* If log chunk is small enough (<= 3000 bytes), format nicely in HTML code block */
+    if (read_bytes <= 3000) {
+        size_t escaped_len = 0;
+        char *escaped = escape_html(buffer, read_bytes, &escaped_len);
+        if (escaped) {
+            static const char prefix[] = "📋 <b>c2t Execution Logs</b>\n<pre><code class=\"language-log\">";
+            static const char suffix[] = "</code></pre>";
+            size_t total_len = strlen(prefix) + escaped_len + strlen(suffix) + 1;
+            char *msg = malloc(total_len);
+            if (msg) {
+                snprintf(msg, total_len, "%s%s%s", prefix, escaped, suffix);
+                sent = telegram_send_html(msg);
+                free(msg);
+            }
+            free(escaped);
+        }
     }
 
-    char filename[64];
-    time_t now = time(NULL);
-    struct tm utc_tm;
+    /* If sending as code block failed or buffer was larger than 3000 bytes, send as .log document file */
+    if (!sent) {
+        char filename[64];
+        time_t now = time(NULL);
+        struct tm utc_tm;
 #ifdef _WIN32
-    gmtime_s(&utc_tm, &now);
+        gmtime_s(&utc_tm, &now);
 #else
-    gmtime_r(&now, &utc_tm);
+        gmtime_r(&now, &utc_tm);
 #endif
-    snprintf(filename, sizeof(filename), "c2t_%04d%02d%02d_%02d%02d%02d.log",
-             utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday,
-             utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec);
+        snprintf(filename, sizeof(filename), "c2t_%04d%02d%02d_%02d%02d%02d.log",
+                 utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday,
+                 utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec);
 
-    c2t_log_info("log_sender", "Sending log file to Telegram (%llu bytes, name=%s)",
-                 (unsigned long long)read_bytes, filename);
+        c2t_log_info("log_sender", "Sending log file to Telegram (%llu bytes, name=%s)",
+                     (unsigned long long)read_bytes, filename);
 
-    int sent = telegram_send_file(buffer, read_bytes, "text/plain", filename, NULL);
+        sent = telegram_send_file(buffer, read_bytes, "text/plain", filename, NULL);
+    }
+
     free(buffer);
 
     if (sent) {
         last_sent_offset += read_bytes;
-        c2t_log_info("log_sender", "Log file successfully delivered to Telegram");
+        c2t_log_info("log_sender", "Logs successfully delivered to Telegram (%llu bytes)",
+                     (unsigned long long)read_bytes);
     } else {
-        c2t_log_warning("log_sender", "Failed to send log file to Telegram; will retry");
+        c2t_log_warning("log_sender", "Failed to send logs to Telegram; will retry");
     }
+
+    return sent;
+}
+
+static void send_log_chunk(void)
+{
+    send_log_payload(0);
+}
+
+int c2t_log_sender_dispatch_now(void)
+{
+    ensure_mutex_init();
+    sender_lock();
+    int result = send_log_payload(1);
+    sender_unlock();
+    return result;
 }
 
 #ifdef _WIN32
@@ -189,6 +286,7 @@ static void *log_sender_worker_func(void *context)
 
 int c2t_log_sender_init(void)
 {
+    ensure_mutex_init();
     const c2t_config_t *config = c2t_config_get();
     if (!config->telegram_enabled || !config->telegram_send_logs) {
         c2t_log_debug("log_sender", "Periodic Telegram log dispatching disabled");
@@ -205,12 +303,8 @@ int c2t_log_sender_init(void)
                  (unsigned long long)config->telegram_log_interval_sec);
 
 #ifdef _WIN32
-    InitializeCriticalSection(&sender_mutex);
-    InitializeConditionVariable(&sender_condition);
     worker_thread = CreateThread(NULL, 0, log_sender_worker_func, NULL, 0, NULL);
     worker_started = worker_thread != NULL;
-    if (!worker_started)
-        DeleteCriticalSection(&sender_mutex);
 #else
     worker_started = pthread_create(&worker_thread, NULL, log_sender_worker_func, NULL) == 0;
 #endif
@@ -235,7 +329,6 @@ void c2t_log_sender_cleanup(void)
     WaitForSingleObject(worker_thread, INFINITE);
     CloseHandle(worker_thread);
     worker_thread = NULL;
-    DeleteCriticalSection(&sender_mutex);
 #else
     (void)pthread_join(worker_thread, NULL);
 #endif

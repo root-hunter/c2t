@@ -413,6 +413,11 @@ int main(void)
     unsetenv("TELEGRAM_LOG_INTERVAL_SEC");
     c2t_config_load_environment();
 
+    if (!telegram_send_html("<b>Test Log</b>"))
+        return fail("telegram_send_html execution");
+    if (strcmp(last_method, "sendMessage") != 0 || !body_contains("parse_mode=HTML", 15))
+        return fail("telegram_send_html payload");
+
     telegram_cleanup();
     free(last_body);
     return 0;

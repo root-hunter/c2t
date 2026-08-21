@@ -21,6 +21,7 @@
 #include "logging/log_sender.h"
 #include "runtime/runtime.h"
 #include "telegram/telegram.h"
+#include "telegram/telegram_listener.h"
 #include "c2t_version.h"
 
 #include <stdio.h>
@@ -211,11 +212,20 @@ static int run_service(void)
         c2t_runtime_release();
         return 1;
     }
+    if (!c2t_telegram_listener_init()) {
+        c2t_log_error("main", "Telegram command listener initialization failed");
+        c2t_log_sender_cleanup();
+        clipboard_output_cleanup();
+        telegram_cleanup();
+        c2t_runtime_release();
+        return 1;
+    }
 
     c2t_runtime_mark_running();
     c2t_log_info("main", "Starting clipboard listener");
     int result = clipboard_listen();
     c2t_log_info("main", "Clipboard listener stopped with result %d", result);
+    c2t_telegram_listener_cleanup();
     c2t_log_sender_cleanup();
     clipboard_output_cleanup();
     telegram_cleanup();

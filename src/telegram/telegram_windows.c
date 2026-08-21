@@ -186,6 +186,8 @@ int telegram_http_get(const char *token, const char *method_and_query,
     if (!request)
         return 0;
 
+    WinHttpSetTimeouts(request, 10000, 10000, 10000, 35000);
+
     BOOL success = WinHttpSendRequest(
         request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA,
         0, 0, 0);

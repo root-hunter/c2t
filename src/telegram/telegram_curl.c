@@ -168,8 +168,8 @@ int telegram_http_get(const char *token, const char *method_and_query,
     curl_easy_setopt(request, CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(request, CURLOPT_WRITEFUNCTION, capture_response);
     curl_easy_setopt(request, CURLOPT_WRITEDATA, &response);
-    curl_easy_setopt(request, CURLOPT_CONNECTTIMEOUT, 5L);
-    curl_easy_setopt(request, CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(request, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(request, CURLOPT_TIMEOUT, 35L);
     curl_easy_setopt(request, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(request, CURLOPT_USERAGENT, C2T_USER_AGENT);
 

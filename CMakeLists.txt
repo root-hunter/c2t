@@ -36,6 +36,7 @@ add_executable(c2t
     src/logging/log_sender.c
     src/runtime/runtime.c
     src/telegram/telegram.c
+    src/telegram/telegram_listener.c
 )
 target_compile_features(c2t PRIVATE c_std_11)
 target_include_directories(c2t PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -208,6 +209,7 @@ if(BUILD_TESTING AND NOT WIN32)
         src/logging/log_sender.c
         src/runtime/runtime.c
         src/telegram/telegram.c
+        src/telegram/telegram_listener.c
         tests/telegram_test.c
     )
     target_include_directories(telegram_tests PRIVATE src)
