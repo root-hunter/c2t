@@ -15,6 +15,8 @@
 #pragma section(".c2tcfg", read)
 __declspec(allocate(".c2tcfg"))
 #define C2T_EMBEDDED_USED
+#elif defined(__APPLE__) && (defined(__GNUC__) || defined(__clang__))
+#define C2T_EMBEDDED_USED __attribute__((section("__DATA,__c2tcfg"), used))
 #elif defined(__GNUC__) || defined(__clang__)
 #define C2T_EMBEDDED_USED __attribute__((section(".c2tcfg"), used))
 #else

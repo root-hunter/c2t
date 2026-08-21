@@ -67,6 +67,12 @@ jobs:
           - platform: windows
             arch: x86_64
             runner: ubuntu-24.04
+          - platform: macos
+            arch: x86_64
+            runner: macos-15-intel
+          - platform: macos
+            arch: aarch64
+            runner: macos-15
 
     steps:
       - name: Check out source
@@ -152,6 +158,13 @@ jobs:
           -DBUILD_TESTING=OFF
           -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake
 
+      - name: Configure macOS
+        if: matrix.platform == 'macos'
+        run: >-
+          cmake -S . -B build/macos -G Ninja
+          -DCMAKE_BUILD_TYPE=MinSizeRel
+          -DBUILD_TESTING=ON
+
       - name: Build
         if: matrix.platform != 'linux-musl'
         run: cmake --build build/${{ matrix.platform }} --parallel 2
@@ -159,6 +172,10 @@ jobs:
       - name: Test Linux with glibc
         if: matrix.platform == 'linux-glibc'
         run: ctest --test-dir build/linux-glibc --output-on-failure
+
+      - name: Test macOS
+        if: matrix.platform == 'macos'
+        run: ctest --test-dir build/macos --output-on-failure
 
       - name: Test browser provisioner on Windows binary
         if: matrix.platform == 'windows'
@@ -200,6 +217,19 @@ jobs:
           mkdir -p dist
           (cd stage && zip -9 -r "../dist/${package}.zip" "${package}")
 
+      - name: Package macOS
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -nE 's/^project\(c2t VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
+          package="c2t-v${version}-macos-${{ matrix.arch }}"
+          codesign --force --sign - build/macos/c2t
+          install -m755 build/macos/c2t "stage/${package}/c2t"
+          install -m644 README.md "stage/${package}/README.md"
+          mkdir -p dist
+          tar -C stage -czf "dist/${package}.tar.gz" "${package}"
+
       - name: Verify Linux package permissions
         if: startsWith(matrix.platform, 'linux-')
         shell: bash
@@ -208,6 +238,17 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/package-mode-check"
           tar -xzf dist/*.tar.gz -C "${RUNNER_TEMP}/package-mode-check"
           test -x "${RUNNER_TEMP}"/package-mode-check/*/c2t
+
+      - name: Verify macOS package and signature
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/package-mode-check"
+          tar -xzf dist/*.tar.gz -C "${RUNNER_TEMP}/package-mode-check"
+          binary="$(find "${RUNNER_TEMP}/package-mode-check" -type f -name c2t)"
+          test -x "${binary}"
+          codesign --verify --strict "${binary}"
 
       - name: Upload package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

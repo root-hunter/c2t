@@ -1,5 +1,6 @@
 #include "telegram_platform.h"
 #include "../logging/logging.h"
+#include "c2t_version.h"
 
 #include <curl/curl.h>
 
@@ -96,7 +97,7 @@ int telegram_http_post(const char *token, const char *method,
     curl_easy_setopt(request, CURLOPT_CONNECTTIMEOUT, 5L);
     curl_easy_setopt(request, CURLOPT_TIMEOUT, 15L);
     curl_easy_setopt(request, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(request, CURLOPT_USERAGENT, "c2t/0.1");
+    curl_easy_setopt(request, CURLOPT_USERAGENT, C2T_USER_AGENT);
 
     CURLcode result = curl_easy_perform(request);
     long status = 0;

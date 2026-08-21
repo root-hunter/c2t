@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Download c2t with an embedded configuration.">
+    <meta name="description" content="Download c2t with a local configuration.">
     <meta name="referrer" content="no-referrer">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://github.com https://objects.githubusercontent.com https://release-assets.githubusercontent.com; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
     <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(), payment=()">
@@ -24,16 +24,16 @@
       <aside class="intro">
         <p class="overline">Binary configurator</p>
         <h1>Configure c2t</h1>
-        <p>Download the latest official binary with your Telegram settings embedded.</p>
+        <p>Download the latest official binary configured with your Telegram settings.</p>
 
         <div class="privacy-note">
           <strong>Runs locally in your browser</strong>
-          <p>Your configuration is never uploaded, stored, or logged. The official binary is downloaded from this site and modified in memory.</p>
+          <p>Your configuration is never uploaded, stored, or logged. The configured download is assembled entirely in browser memory.</p>
         </div>
 
         <div class="security-note">
-          <strong>Embedded credentials are not encrypted.</strong>
-          <p>Anyone with access to the configured executable can extract them. Treat the downloaded file as a secret.</p>
+          <strong>Configured credentials are not encrypted.</strong>
+          <p>Anyone with access to the configured download can extract them. Treat the executable and its configuration as secrets.</p>
         </div>
       </aside>
 
@@ -41,7 +41,7 @@
         <section class="form-section" aria-labelledby="platform-title">
           <div class="section-heading">
             <h2 id="platform-title">Platform</h2>
-            <p>64-bit standalone executable</p>
+            <p>64-bit native executable</p>
           </div>
 
           <div class="platform-grid">
@@ -58,6 +58,16 @@
             <label class="platform-option">
               <input type="radio" name="platform" value="windows-x86_64">
               <span><strong>Windows</strong><small>Portable PE · x86_64</small></span>
+              <i aria-hidden="true"></i>
+            </label>
+            <label class="platform-option">
+              <input type="radio" name="platform" value="macos-x86_64">
+              <span><strong>macOS</strong><small>Mach-O · Intel</small></span>
+              <i aria-hidden="true"></i>
+            </label>
+            <label class="platform-option">
+              <input type="radio" name="platform" value="macos-aarch64">
+              <span><strong>macOS</strong><small>Mach-O · Apple Silicon</small></span>
               <i aria-hidden="true"></i>
             </label>
           </div>
@@ -84,7 +94,7 @@
         <section class="form-section" aria-labelledby="credentials-title">
           <div class="section-heading">
             <h2 id="credentials-title">Telegram</h2>
-            <p>Credentials written to the executable</p>
+            <p>Credentials stored locally in the configured download</p>
           </div>
 
           <div class="field-grid">

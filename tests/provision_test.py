@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,19 @@ def main() -> int:
         provision_environment = os.environ.copy()
         provision_environment["TELEGRAM_BOT_TOKEN"] = "987654:embedded-test-token"
         provision_environment["TELEGRAM_CHAT_ID"] = "-987654"
+        if sys.platform == "darwin":
+            shutil.copy2(executable, provisioned)
+            (directory / ".c2t.env").write_text(
+                "TELEGRAM_BOT_TOKEN=987654:embedded-test-token\n"
+                "TELEGRAM_CHAT_ID=-987654\n",
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment["C2T_EXPECT_EMBEDDED"] = "1"
+            environment.pop("TELEGRAM_BOT_TOKEN", None)
+            environment.pop("TELEGRAM_CHAT_ID", None)
+            run([str(provisioned)], env=environment)
+            return 0
         run(
             [
                 sys.executable,

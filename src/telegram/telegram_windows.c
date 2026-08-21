@@ -1,5 +1,6 @@
 #include "telegram_platform.h"
 #include "../logging/logging.h"
+#include "c2t_version.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -36,7 +37,8 @@ static void read_error_response(HINTERNET request,
 
 int telegram_http_init(void)
 {
-    session = WinHttpOpen(L"c2t/0.1", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+    session = WinHttpOpen(C2T_USER_AGENT_WIDE,
+                          WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                           WINHTTP_NO_PROXY_NAME,
                           WINHTTP_NO_PROXY_BYPASS, 0);
     if (session) {

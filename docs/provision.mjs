@@ -183,8 +183,35 @@ function peChecksum(binary, checksumOffset) {
   return ((checksum & 0xffff) + binary.length) >>> 0;
 }
 
+function rejectSignedMachO(binary) {
+  if (
+    binary.length < 4 || binary[0] !== 0xcf || binary[1] !== 0xfa ||
+    binary[2] !== 0xed || binary[3] !== 0xfe
+  ) return;
+  if (binary.length < 32) throw new Error("Truncated 64-bit Mach-O header");
+  const view = new DataView(binary.buffer, binary.byteOffset, binary.byteLength);
+  const commandCount = view.getUint32(16, true);
+  const commandsSize = view.getUint32(20, true);
+  let commandOffset = 32;
+  const commandEnd = commandOffset + commandsSize;
+  if (commandEnd > binary.length) throw new Error("Truncated Mach-O load commands");
+  for (let index = 0; index < commandCount; index += 1) {
+    if (commandOffset + 8 > commandEnd) throw new Error("Truncated Mach-O load command");
+    const command = view.getUint32(commandOffset, true);
+    const commandSize = view.getUint32(commandOffset + 4, true);
+    if (commandSize < 8 || commandOffset + commandSize > commandEnd) {
+      throw new Error("Invalid Mach-O load command size");
+    }
+    if (command === 0x1d) {
+      throw new Error("The Mach-O file is code signed; use a macOS sidecar configuration");
+    }
+    commandOffset += commandSize;
+  }
+}
+
 export function patchBinary(input, config) {
   const binary = input instanceof Uint8Array ? input : new Uint8Array(input);
+  rejectSignedMachO(binary);
   const offset = locateRegion(binary);
   const payload = encodePayload(config);
   const result = new Uint8Array(binary);

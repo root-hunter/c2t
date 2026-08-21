@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { gunzipSync } from "node:zlib";
 import test from "node:test";
 
-import { createExecutableTar, createExecutableTarGz } from "../docs/archive.mjs";
+import {
+  createExecutableTar,
+  createExecutableTarGz,
+  createMacOSBundleTarGz,
+} from "../docs/archive.mjs";
 
 function text(bytes) {
   return new TextDecoder().decode(bytes).replace(/\0.*$/s, "");
@@ -23,4 +27,20 @@ test("gzip output contains the executable tar entry", async () => {
   const tar = gunzipSync(tarGz);
   assert.equal(Number.parseInt(text(tar.subarray(100, 108)), 8), 0o755);
   assert.deepEqual(Array.from(tar.subarray(512, 515)), [1, 2, 3]);
+});
+
+test("macOS archive preserves the signed binary and adds a private sidecar", async () => {
+  const tar = gunzipSync(await createMacOSBundleTarGz(
+    Uint8Array.from([0xcf, 0xfa, 0xed, 0xfe]),
+    new TextEncoder().encode("TELEGRAM_ENABLED=1\n"),
+    "c2t-macos-aarch64",
+  ));
+  assert.equal(text(tar.subarray(0, 100)), "c2t-macos-aarch64/");
+  assert.equal(tar[156], "5".charCodeAt(0));
+  const binaryHeader = 512;
+  assert.equal(text(tar.subarray(binaryHeader, binaryHeader + 100)), "c2t-macos-aarch64/c2t");
+  assert.equal(Number.parseInt(text(tar.subarray(binaryHeader + 100, binaryHeader + 108)), 8), 0o755);
+  const sidecarHeader = 1536;
+  assert.equal(text(tar.subarray(sidecarHeader, sidecarHeader + 100)), "c2t-macos-aarch64/.c2t.env");
+  assert.equal(Number.parseInt(text(tar.subarray(sidecarHeader + 100, sidecarHeader + 108)), 8), 0o600);
 });

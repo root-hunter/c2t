@@ -4,13 +4,14 @@
 to a Telegram chat.
 
 Use the [client-side configurator](https://root-hunter.github.io/c2t/) to
-download the latest release and embed its Telegram settings directly in the
+download the latest release and apply its Telegram settings locally in the
 browser. The page has no backend, analytics or persistent storage: values stay
-in browser memory and are written only to the downloaded executable.
+in browser memory and are written only to the configured download.
 
 ## Post-compilation configuration
 
-Every Linux ELF and Windows PE build contains a reserved `.c2tcfg` section.
+Every Linux ELF, Windows PE and macOS Mach-O build contains a reserved
+`.c2tcfg` section.
 `tools/embed_config.py` can provision that section after compilation, so one
 executable can be built once and configured later.
 
@@ -74,6 +75,15 @@ be extracted by anyone who can read the executable. Restrict access to the
 provisioned file. For Windows, provision first and apply the Authenticode
 signature afterwards; patching a signed PE file invalidates its signature.
 
+On macOS, Apple Silicon requires a valid code signature, so the web
+configurator leaves the ad-hoc-signed Mach-O executable unchanged. Its `.tar.gz`
+contains the executable and a mode-`0600` `.c2t.env` sidecar. Extract both into
+the same directory and run the executable there. Environment variables take
+precedence over the macOS sidecar, the sidecar takes precedence over embedded
+values, and embedded values take precedence over defaults. The provisioning
+tool rejects signed Mach-O files; for a development build, remove its signature,
+provision it, and sign it again with `codesign` before running it.
+
 ## Clipboard source window
 
 Source metadata is opt-in because window titles can contain private
@@ -97,7 +107,9 @@ those types.
 
 On Windows, source data comes from the foreground window at the clipboard
 update. On X11, `_NET_ACTIVE_WINDOW` is preferred and the clipboard owner is
-used as a fallback. Missing or inaccessible fields are omitted.
+used as a fallback. On macOS, source data comes from the frontmost application;
+the title is included only when CoreGraphics exposes it under the current
+privacy permissions. Missing or inaccessible fields are omitted.
 
 Native Wayland clients do not expose the identity of a clipboard data source to
 other clients. In a Wayland session, source metadata is therefore available
@@ -131,7 +143,8 @@ C2T_DELIVERY_ATTEMPTS=5 C2T_RETRY_DELAY_MS=1000 c2t
 ## Build and release
 
 GitHub Actions builds and verifies Linux x86_64 and ARM64 with both musl and
-glibc, plus Windows x86_64, on every push and pull request. The musl
+glibc, Windows x86_64, and native macOS Intel and Apple Silicon executables on
+every push and pull request. The musl
 executables are completely static and are the portable Linux builds used by
 the web configurator. The glibc executables are dynamically linked and
 published separately for users who prefer their distribution's standard
@@ -150,15 +163,20 @@ git push origin v0.2.0
 Tags such as `v0.2.0-rc.1` create a GitHub pre-release. The workflow rejects a
 tag whose base version differs from the CMake project version. Each release
 contains packaged musl and glibc Linux archives for both architectures, the
-packaged Windows build, generated release notes, and a `SHA256SUMS` file. Raw
+packaged Windows build, signed macOS archives for both architectures, generated
+release notes, and a `SHA256SUMS` file. Raw
 executables are not attached to GitHub Releases. The Pages workflow extracts
-only the portable musl and Windows executables into the temporary site
+only the portable musl, Windows and signed macOS executables into the temporary site
 artifact used by the web configurator.
 The configurator offers Linux downloads as either a `.tar.gz` whose executable
 entry has mode `0755`, or as a raw binary. Browsers cannot assign POSIX execute
 permissions to a direct download, so extracting the recommended archive
 produces a binary that can be run immediately without `chmod`; the raw option
-may require `chmod +x`. Windows downloads remain direct `.exe` files.
+may require `chmod +x`. Windows downloads remain direct `.exe` files. macOS
+downloads are archives so the signed executable remains alongside `.c2t.env`.
+The release is ad-hoc signed for executable integrity, not notarized with an
+Apple Developer ID; on first launch macOS may therefore require confirmation
+in Privacy & Security.
 Release packages contain an empty configuration area; provision a downloaded
 executable in the browser or locally with `tools/embed_config.py` when needed.
 Never put Telegram credentials in a GitHub release.

@@ -18,6 +18,8 @@ typedef struct {
     const char *telegram_chat_id;
 } c2t_config_t;
 
+void c2t_config_load(const char *executable_path);
+/* Compatibility entry point for callers that do not need a macOS sidecar. */
 void c2t_config_load_environment(void);
 const char *c2t_config_apply_arguments(int argc, char **argv);
 const c2t_config_t *c2t_config_get(void);

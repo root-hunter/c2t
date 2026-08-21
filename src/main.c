@@ -9,7 +9,7 @@
 
 int main(int argc, char **argv)
 {
-    c2t_config_load_environment();
+    c2t_config_load(argv[0]);
     const char *invalid_option = c2t_config_apply_arguments(argc, argv);
     c2t_log_init();
 #ifndef _WIN32

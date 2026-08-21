@@ -77,6 +77,25 @@ elseif(PLATFORM STREQUAL "Windows")
     endif()
 
     message(STATUS "Single file verified with embedded configuration section: only Windows system DLLs are required")
+elseif(PLATFORM STREQUAL "Darwin")
+    execute_process(
+        COMMAND "${ANALYZER}" -l "${EXECUTABLE}"
+        RESULT_VARIABLE analyzer_result
+        OUTPUT_VARIABLE load_commands
+        ERROR_VARIABLE analyzer_error
+    )
+    if(NOT analyzer_result EQUAL 0)
+        message(FATAL_ERROR "Unable to analyze ${EXECUTABLE}: ${analyzer_error}")
+    endif()
+    if(NOT load_commands MATCHES "sectname __c2tcfg" OR
+       NOT load_commands MATCHES "segname __DATA")
+        message(FATAL_ERROR
+            "${EXECUTABLE} has no __DATA,__c2tcfg configuration section")
+    endif()
+    if(NOT load_commands MATCHES "path /usr/lib/libSystem.B.dylib")
+        message(FATAL_ERROR "${EXECUTABLE} has no macOS system runtime load command")
+    endif()
+    message(STATUS "macOS executable verified with native system dependencies and configuration section")
 else()
     message(FATAL_ERROR "Single-file verification is not implemented for ${PLATFORM}")
 endif()

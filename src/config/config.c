@@ -6,6 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#include <stdio.h>
+#endif
+
 #define TELEGRAM_DEFAULT_MAX_FILE_BYTES (50U * 1024U * 1024U)
 #define C2T_DEFAULT_QUEUE_MAX_BYTES (64U * 1024U * 1024U)
 #define C2T_DEFAULT_QUEUE_MAX_ITEMS 128U
@@ -18,12 +23,80 @@ static c2t_config_t config;
 static char embedded_bot_token[512];
 static char embedded_chat_id[128];
 
+#ifdef __APPLE__
+#define C2T_SIDECAR_CAPACITY 4096U
+static char sidecar[C2T_SIDECAR_CAPACITY + 1];
+static size_t sidecar_length;
+
+static void load_sidecar(const char *executable_path)
+{
+    char executable[4096];
+    uint32_t capacity = (uint32_t)sizeof(executable);
+    if (_NSGetExecutablePath(executable, &capacity) != 0) {
+        if (!executable_path || strlen(executable_path) >= sizeof(executable))
+            return;
+        memcpy(executable, executable_path, strlen(executable_path) + 1);
+    }
+
+    char *separator = strrchr(executable, '/');
+    const char suffix[] = "/.c2t.env";
+    size_t directory_length = separator ? (size_t)(separator - executable) : 1;
+    if (!separator)
+        executable[0] = '.';
+    if (directory_length + sizeof(suffix) > sizeof(executable))
+        return;
+    memcpy(executable + directory_length, suffix, sizeof(suffix));
+
+    FILE *stream = fopen(executable, "rb");
+    if (!stream)
+        return;
+    sidecar_length = fread(sidecar, 1, C2T_SIDECAR_CAPACITY, stream);
+    int extra = fgetc(stream);
+    if (fclose(stream) != 0 || extra != EOF) {
+        sidecar_length = 0;
+        return;
+    }
+    sidecar[sidecar_length] = '\0';
+}
+
+static int sidecar_get(const char *name, char *output, size_t capacity)
+{
+    size_t name_length = strlen(name);
+    size_t position = 0;
+    while (position < sidecar_length) {
+        size_t start = position;
+        while (position < sidecar_length && sidecar[position] != '\n' &&
+               sidecar[position] != '\r')
+            ++position;
+        size_t length = position - start;
+        while (position < sidecar_length &&
+               (sidecar[position] == '\n' || sidecar[position] == '\r'))
+            ++position;
+        if (!length || sidecar[start] == '#')
+            continue;
+        if (length > name_length && length - name_length <= capacity &&
+            sidecar[start + name_length] == '=' &&
+            memcmp(sidecar + start, name, name_length) == 0) {
+            size_t value_length = length - name_length - 1;
+            memcpy(output, sidecar + start + name_length + 1, value_length);
+            output[value_length] = '\0';
+            return 1;
+        }
+    }
+    return 0;
+}
+#endif
+
 static const char *configured_value(const char *name, char *embedded,
                                     size_t embedded_capacity)
 {
     const char *value = getenv(name);
     if (value)
         return value;
+#ifdef __APPLE__
+    if (sidecar_get(name, embedded, embedded_capacity))
+        return embedded;
+#endif
     if (c2t_embedded_config_get(name, embedded, embedded_capacity))
         return embedded;
     return NULL;
@@ -51,8 +124,13 @@ static size_t configured_size(const char *name, size_t fallback)
     return (size_t)parsed;
 }
 
-void c2t_config_load_environment(void)
+void c2t_config_load(const char *executable_path)
 {
+#ifdef __APPLE__
+    load_sidecar(executable_path);
+#else
+    (void)executable_path;
+#endif
     config.verbose = configured_flag("C2T_VERBOSE");
     config.telegram_enabled = configured_flag("TELEGRAM_ENABLED");
     config.telegram_deduplicate = configured_flag("TELEGRAM_DEDUPLICATE");
@@ -78,6 +156,11 @@ void c2t_config_load_environment(void)
         sizeof(embedded_bot_token));
     config.telegram_chat_id = configured_value(
         "TELEGRAM_CHAT_ID", embedded_chat_id, sizeof(embedded_chat_id));
+}
+
+void c2t_config_load_environment(void)
+{
+    c2t_config_load(NULL);
 }
 
 const char *c2t_config_apply_arguments(int argc, char **argv)

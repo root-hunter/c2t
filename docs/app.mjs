@@ -1,6 +1,6 @@
-import { patchBinary } from "./provision.mjs";
+import { encodePayload, patchBinary } from "./provision.mjs";
 import { inferPlatform, PLATFORMS } from "./platforms.mjs";
-import { createExecutableTarGz } from "./archive.mjs";
+import { createExecutableTarGz, createMacOSBundleTarGz } from "./archive.mjs";
 
 const RELEASE_METADATA_URL = "./release.json";
 
@@ -30,8 +30,8 @@ function updatePlatform() {
   const platform = selectedPlatform();
   const details = PLATFORMS[platform];
   buttonPlatform.textContent = details.label;
-  linuxFormat.hidden = !details.archive;
-  linuxFormatNote.hidden = !details.archive;
+  linuxFormat.hidden = !details.formatChoice;
+  linuxFormatNote.hidden = !details.formatChoice;
   const assetAvailable = latestRelease?.assets.some(({ name }) => name === details.asset);
   downloadButton.disabled = !localBinary && !assetAvailable;
   if (!localBinary && latestRelease && !assetAvailable) {
@@ -162,11 +162,22 @@ form.addEventListener("submit", async (event) => {
       source = await downloadAsset(asset);
     }
     setStatus("Validating and writing the configuration…");
-    const patched = patchBinary(source, config);
     const version = latestRelease?.tag_name ?? "custom";
     const details = PLATFORMS[platform];
     const executableName = `c2t-${version}-configured-${details.filenameSuffix}`;
-    const archiveLinux = details.archive && new FormData(form).get("linux-format") === "archive";
+    if (details.configMode === "sidecar") {
+      setStatus("Packaging the signed executable and its private configuration…");
+      const archive = await createMacOSBundleTarGz(
+        source,
+        encodePayload(config),
+        executableName,
+      );
+      saveDownload(archive, `${executableName}.tar.gz`, "application/gzip");
+      setStatus(`Done · ${Object.keys(config).length} configuration values · keep the executable and .c2t.env together`, "success");
+      return;
+    }
+    const patched = patchBinary(source, config);
+    const archiveLinux = details.formatChoice && new FormData(form).get("linux-format") === "archive";
     if (archiveLinux) {
       setStatus("Packaging the configured executable…");
       const archive = await createExecutableTarGz(patched, executableName);

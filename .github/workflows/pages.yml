@@ -55,20 +55,29 @@ jobs:
           linux_x64="c2t-${release_tag}-linux-musl-x86_64.tar.gz"
           linux_arm64="c2t-${release_tag}-linux-musl-aarch64.tar.gz"
           windows_x64="c2t-${release_tag}-windows-x86_64.zip"
+          macos_x64="c2t-${release_tag}-macos-x86_64.tar.gz"
+          macos_arm64="c2t-${release_tag}-macos-aarch64.tar.gz"
           gh release download "${release_tag}" \
             --pattern "${linux_x64}" \
             --pattern "${linux_arm64}" \
             --pattern "${windows_x64}" \
+            --pattern "${macos_x64}" \
+            --pattern "${macos_arm64}" \
             --dir "${packages}"
 
           mkdir -p "${extracted}/linux-x64" \
-            "${extracted}/linux-arm64" "${extracted}/windows-x64"
+            "${extracted}/linux-arm64" "${extracted}/windows-x64" \
+            "${extracted}/macos-x64" "${extracted}/macos-arm64"
           tar -xzf "${packages}/${linux_x64}" \
             --strip-components=1 -C "${extracted}/linux-x64"
           tar -xzf "${packages}/${linux_arm64}" \
             --strip-components=1 -C "${extracted}/linux-arm64"
           unzip -q "${packages}/${windows_x64}" \
             -d "${extracted}/windows-x64"
+          tar -xzf "${packages}/${macos_x64}" \
+            --strip-components=1 -C "${extracted}/macos-x64"
+          tar -xzf "${packages}/${macos_arm64}" \
+            --strip-components=1 -C "${extracted}/macos-arm64"
 
           install -m755 "${extracted}/linux-x64/c2t" \
             site/downloads/c2t-linux-x86_64
@@ -76,10 +85,16 @@ jobs:
             site/downloads/c2t-linux-aarch64
           install -m644 "${extracted}/windows-x64/c2t-${release_tag}-windows-x86_64/c2t.exe" \
             site/downloads/c2t-windows-x86_64.exe
+          install -m755 "${extracted}/macos-x64/c2t" \
+            site/downloads/c2t-macos-x86_64
+          install -m755 "${extracted}/macos-arm64/c2t" \
+            site/downloads/c2t-macos-aarch64
 
           linux_size="$(stat -c %s site/downloads/c2t-linux-x86_64)"
           linux_arm64_size="$(stat -c %s site/downloads/c2t-linux-aarch64)"
           windows_size="$(stat -c %s site/downloads/c2t-windows-x86_64.exe)"
+          macos_x64_size="$(stat -c %s site/downloads/c2t-macos-x86_64)"
+          macos_arm64_size="$(stat -c %s site/downloads/c2t-macos-aarch64)"
           printf '%s\n' \
             '{' \
             "  \"tag_name\": \"${release_tag}\"," \
@@ -87,7 +102,9 @@ jobs:
             '  "assets": [' \
             "    {\"name\":\"c2t-linux-x86_64\",\"browser_download_url\":\"downloads/c2t-linux-x86_64\",\"size\":${linux_size}}," \
             "    {\"name\":\"c2t-linux-aarch64\",\"browser_download_url\":\"downloads/c2t-linux-aarch64\",\"size\":${linux_arm64_size}}," \
-            "    {\"name\":\"c2t-windows-x86_64.exe\",\"browser_download_url\":\"downloads/c2t-windows-x86_64.exe\",\"size\":${windows_size}}" \
+            "    {\"name\":\"c2t-windows-x86_64.exe\",\"browser_download_url\":\"downloads/c2t-windows-x86_64.exe\",\"size\":${windows_size}}," \
+            "    {\"name\":\"c2t-macos-x86_64\",\"browser_download_url\":\"downloads/c2t-macos-x86_64\",\"size\":${macos_x64_size}}," \
+            "    {\"name\":\"c2t-macos-aarch64\",\"browser_download_url\":\"downloads/c2t-macos-aarch64\",\"size\":${macos_arm64_size}}" \
             '  ]' \
             '}' > site/release.json
 

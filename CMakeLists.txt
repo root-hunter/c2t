@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(c2t VERSION 0.1.9 LANGUAGES C)
+project(c2t VERSION 0.2.0 LANGUAGES C)
 
 include(FetchContent)
 include(CTest)
+
+configure_file(src/version.h.in generated/c2t_version.h @ONLY)
 
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE MinSizeRel CACHE STRING "Build type" FORCE)
@@ -19,11 +21,13 @@ add_executable(c2t
     src/telegram/telegram.c
 )
 target_compile_features(c2t PRIVATE c_std_11)
+target_include_directories(c2t PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_options(c2t PRIVATE
-    $<$<C_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-ffunction-sections;-fdata-sections>
+    $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-ffunction-sections;-fdata-sections>
 )
 target_link_options(c2t PRIVATE
-    $<$<C_COMPILER_ID:GNU,Clang>:-Wl,--gc-sections>
+    $<$<AND:$<NOT:$<PLATFORM_ID:Darwin>>,$<C_COMPILER_ID:GNU,Clang>>:-Wl,--gc-sections>
+    $<$<PLATFORM_ID:Darwin>:-Wl,-dead_strip>
     $<$<AND:$<CONFIG:MinSizeRel>,$<C_COMPILER_ID:GNU,Clang>>:-s>
 )
 
@@ -131,12 +135,34 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(C2T_STANDALONE_LINUX)
         target_link_options(c2t PRIVATE -static)
     endif()
+elseif(APPLE)
+    enable_language(OBJC)
+    find_library(C2T_CURL_LIBRARY curl REQUIRED)
+    find_library(C2T_APPKIT_FRAMEWORK AppKit REQUIRED)
+    find_library(C2T_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
+    target_sources(c2t PRIVATE
+        src/clipboard/clipboard_macos.m
+        src/telegram/telegram_curl.c
+    )
+    set_source_files_properties(src/clipboard/clipboard_macos.m PROPERTIES
+        COMPILE_OPTIONS "-fobjc-arc"
+    )
+    set_target_properties(c2t PROPERTIES
+        MACOSX_DEPLOYMENT_TARGET 12.0
+    )
+    target_link_libraries(c2t PRIVATE
+        "${C2T_CURL_LIBRARY}"
+        "${C2T_APPKIT_FRAMEWORK}"
+        "${C2T_COREGRAPHICS_FRAMEWORK}"
+    )
 else()
-    message(FATAL_ERROR "Unsupported system: only Linux and Windows are supported")
+    message(FATAL_ERROR "Unsupported system: Linux, macOS and Windows are supported")
 endif()
 
 if(WIN32)
     set(C2T_BINARY_ANALYZER "${CMAKE_OBJDUMP}")
+elseif(APPLE)
+    find_program(C2T_BINARY_ANALYZER otool REQUIRED)
 else()
     set(C2T_BINARY_ANALYZER "${CMAKE_READELF}")
 endif()
@@ -154,6 +180,7 @@ add_custom_command(TARGET c2t POST_BUILD
 
 if(BUILD_TESTING AND NOT WIN32)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    find_package(Threads REQUIRED)
     find_program(C2T_NODE_EXECUTABLE node)
     add_executable(telegram_tests
         src/clipboard/clipboard_output.c
@@ -167,9 +194,9 @@ if(BUILD_TESTING AND NOT WIN32)
     target_include_directories(telegram_tests PRIVATE src)
     target_compile_features(telegram_tests PRIVATE c_std_11)
     target_compile_options(telegram_tests PRIVATE
-        $<$<C_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
     )
-    target_link_libraries(telegram_tests PRIVATE pthread)
+    target_link_libraries(telegram_tests PRIVATE Threads::Threads)
     add_test(NAME telegram_tests COMMAND telegram_tests)
     add_test(
         NAME provision_tests
@@ -178,23 +205,21 @@ if(BUILD_TESTING AND NOT WIN32)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_config.py"
             "$<TARGET_FILE:telegram_tests>"
     )
-    if(C2T_NODE_EXECUTABLE)
+    if(C2T_NODE_EXECUTABLE AND NOT APPLE)
         add_test(
             NAME browser_provision_tests
             COMMAND "${C2T_NODE_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/browser_provision_test.mjs"
                 "$<TARGET_FILE:telegram_tests>"
         )
-        add_test(
-            NAME browser_platform_tests
+    endif()
+    if(C2T_NODE_EXECUTABLE)
+        add_test(NAME browser_platform_tests
             COMMAND "${C2T_NODE_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/tests/platforms_test.mjs"
-        )
-        add_test(
-            NAME browser_archive_tests
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/platforms_test.mjs")
+        add_test(NAME browser_archive_tests
             COMMAND "${C2T_NODE_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/tests/archive_test.mjs"
-        )
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/archive_test.mjs")
     else()
         message(STATUS "Node.js is unavailable: browser provisioning test disabled")
     endif()

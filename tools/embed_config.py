@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provision c2t's reserved configuration region in an ELF or PE executable."""
+"""Provision c2t's reserved configuration region in an ELF, PE or Mach-O executable."""
 
 from __future__ import annotations
 
@@ -126,6 +126,7 @@ def decode_payload(binary: bytes, offset: int) -> dict[str, str]:
 
 
 def patched_binary(binary: bytes, offset: int, payload: bytes) -> bytes:
+    reject_signed_macho(binary)
     region = bytearray(REGION_SIZE)
     region[: len(MAGIC)] = MAGIC
     struct.pack_into("<III", region, 16, VERSION, len(payload), binascii.crc32(payload))
@@ -135,6 +136,30 @@ def patched_binary(binary: bytes, offset: int, payload: bytes) -> bytes:
     if checksum_offset is not None:
         struct.pack_into("<I", result, checksum_offset, pe_checksum(result, checksum_offset))
     return bytes(result)
+
+
+def reject_signed_macho(binary: bytes | bytearray) -> None:
+    if not binary.startswith(b"\xcf\xfa\xed\xfe"):
+        return
+    if len(binary) < 32:
+        raise ProvisionError("truncated 64-bit Mach-O header")
+    command_count, commands_size = struct.unpack_from("<II", binary, 16)
+    command_offset = 32
+    command_end = command_offset + commands_size
+    if command_end > len(binary):
+        raise ProvisionError("truncated Mach-O load commands")
+    for _ in range(command_count):
+        if command_offset + 8 > command_end:
+            raise ProvisionError("truncated Mach-O load command")
+        command, command_size = struct.unpack_from("<II", binary, command_offset)
+        if command_size < 8 or command_offset + command_size > command_end:
+            raise ProvisionError("invalid Mach-O load command size")
+        if command == 0x1D:
+            raise ProvisionError(
+                "the Mach-O file is code signed; use the macOS sidecar or remove "
+                "the signature, provision, and sign it again"
+            )
+        command_offset += command_size
 
 
 def pe_checksum_offset(binary: bytes | bytearray) -> int | None:
