@@ -73,6 +73,7 @@ jobs:
             libzstd-dev \
             mingw-w64 \
             ninja-build \
+            nodejs \
             python3 \
             zip
 
@@ -98,6 +99,10 @@ jobs:
         if: matrix.platform == 'linux'
         run: ctest --test-dir build/linux --output-on-failure
 
+      - name: Test browser provisioner on Windows binary
+        if: matrix.platform == 'windows'
+        run: node tests/browser_provision_test.mjs build/windows/c2t.exe
+
       - name: Package Linux
         if: matrix.platform == 'linux'
         shell: bash
@@ -108,6 +113,7 @@ jobs:
           install -Dm755 build/linux/c2t "stage/${package}/c2t"
           install -Dm644 README.md "stage/${package}/README.md"
           mkdir -p dist
+          install -Dm755 build/linux/c2t dist/c2t-linux-x86_64
           tar -C stage -czf "dist/${package}.tar.gz" "${package}"
 
       - name: Package Windows
@@ -120,6 +126,7 @@ jobs:
           install -Dm644 build/windows/c2t.exe "stage/${package}/c2t.exe"
           install -Dm644 README.md "stage/${package}/README.md"
           mkdir -p dist
+          install -Dm644 build/windows/c2t.exe dist/c2t-windows-x86_64.exe
           (cd stage && zip -9 -r "../dist/${package}.zip" "${package}")
 
       - name: Upload package

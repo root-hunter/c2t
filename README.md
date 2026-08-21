@@ -3,6 +3,11 @@
 `c2t` listens for clipboard changes and can deliver supported clipboard data
 to a Telegram chat.
 
+Use the [client-side configurator](https://root-hunter.github.io/c2t/) to
+download the latest release and embed its Telegram settings directly in the
+browser. The page has no backend, analytics or persistent storage: values stay
+in browser memory and are written only to the downloaded executable.
+
 ## Post-compilation configuration
 
 Every Linux ELF and Windows PE build contains a reserved `.c2tcfg` section.
@@ -139,6 +144,7 @@ git push origin v0.2.0
 Tags such as `v0.2.0-rc.1` create a GitHub pre-release. The workflow rejects a
 tag whose base version differs from the CMake project version. Each release
 contains the standalone Linux and Windows packages, generated release notes,
-and a `SHA256SUMS` file. Release packages contain an empty configuration area;
-provision a downloaded executable locally with `tools/embed_config.py` when
-needed. Never put Telegram credentials in a GitHub release.
+uncompressed binaries for the web configurator, and a `SHA256SUMS` file.
+Release packages contain an empty configuration area; provision a downloaded
+executable in the browser or locally with `tools/embed_config.py` when needed.
+Never put Telegram credentials in a GitHub release.

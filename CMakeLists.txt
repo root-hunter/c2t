@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(c2t VERSION 0.1.4 LANGUAGES C)
+project(c2t VERSION 0.1.5 LANGUAGES C)
 
 include(FetchContent)
 include(CTest)
@@ -133,6 +133,7 @@ add_custom_command(TARGET c2t POST_BUILD
 
 if(BUILD_TESTING AND NOT WIN32)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    find_program(C2T_NODE_EXECUTABLE node)
     add_executable(telegram_tests
         src/clipboard/clipboard_output.c
         src/config/config.c
@@ -156,4 +157,14 @@ if(BUILD_TESTING AND NOT WIN32)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_config.py"
             "$<TARGET_FILE:telegram_tests>"
     )
+    if(C2T_NODE_EXECUTABLE)
+        add_test(
+            NAME browser_provision_tests
+            COMMAND "${C2T_NODE_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/browser_provision_test.mjs"
+                "$<TARGET_FILE:telegram_tests>"
+        )
+    else()
+        message(STATUS "Node.js is unavailable: browser provisioning test disabled")
+    endif()
 endif()
