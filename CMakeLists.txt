@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(c2t VERSION 0.2.1 LANGUAGES C)
+project(c2t VERSION 0.2.2 LANGUAGES C)
 
 include(FetchContent)
 include(CTest)
