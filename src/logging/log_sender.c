@@ -82,37 +82,6 @@ static void sender_wait(size_t seconds)
 static void sender_signal(void) { (void)pthread_cond_signal(&sender_condition); }
 #endif
 
-static char *escape_html(const char *input, size_t input_len, size_t *out_len)
-{
-    size_t extra = 0;
-    for (size_t i = 0; i < input_len; ++i) {
-        if (input[i] == '&') extra += 4;
-        else if (input[i] == '<') extra += 3;
-        else if (input[i] == '>') extra += 3;
-    }
-    char *escaped = malloc(input_len + extra + 1);
-    if (!escaped) return NULL;
-
-    size_t out_idx = 0;
-    for (size_t i = 0; i < input_len; ++i) {
-        if (input[i] == '&') {
-            memcpy(escaped + out_idx, "&amp;", 5);
-            out_idx += 5;
-        } else if (input[i] == '<') {
-            memcpy(escaped + out_idx, "&lt;", 4);
-            out_idx += 4;
-        } else if (input[i] == '>') {
-            memcpy(escaped + out_idx, "&gt;", 4);
-            out_idx += 4;
-        } else {
-            escaped[out_idx++] = input[i];
-        }
-    }
-    escaped[out_idx] = '\0';
-    if (out_len) *out_len = out_idx;
-    return escaped;
-}
-
 #define LOG_TEXT_MAX_THRESHOLD (25 * 1024)
 #define LOG_CHUNK_TARGET_CHARS 3200
 
@@ -133,35 +102,40 @@ static int send_log_text_chunks(const char *buffer, size_t length)
             }
         }
 
-        size_t escaped_len = 0;
-        char *escaped = escape_html(buffer + offset, chunk_len, &escaped_len);
-        if (!escaped)
-            return 0;
+        char msg[16384];
+        size_t msg_idx = 0;
+        const char *prefix = (chunk_index == 0)
+            ? "📋 <b>c2t Execution Logs</b>\n<pre><code class=\"language-log\">"
+            : "<pre><code class=\"language-log\">";
+        size_t prefix_len = strlen(prefix);
+        memcpy(msg + msg_idx, prefix, prefix_len);
+        msg_idx += prefix_len;
 
-        char *msg = NULL;
-        if (chunk_index == 0) {
-            static const char prefix[] = "📋 <b>c2t Execution Logs</b>\n<pre><code class=\"language-log\">";
-            static const char suffix[] = "</code></pre>";
-            size_t total_len = strlen(prefix) + escaped_len + strlen(suffix) + 1;
-            msg = malloc(total_len);
-            if (msg)
-                snprintf(msg, total_len, "%s%s%s", prefix, escaped, suffix);
-        } else {
-            static const char prefix[] = "<pre><code class=\"language-log\">";
-            static const char suffix[] = "</code></pre>";
-            size_t total_len = strlen(prefix) + escaped_len + strlen(suffix) + 1;
-            msg = malloc(total_len);
-            if (msg)
-                snprintf(msg, total_len, "%s%s%s", prefix, escaped, suffix);
+        for (size_t i = 0; i < chunk_len && msg_idx + 10 < sizeof(msg); ++i) {
+            char c = buffer[offset + i];
+            if (c == '&') {
+                memcpy(msg + msg_idx, "&amp;", 5);
+                msg_idx += 5;
+            } else if (c == '<') {
+                memcpy(msg + msg_idx, "&lt;", 4);
+                msg_idx += 4;
+            } else if (c == '>') {
+                memcpy(msg + msg_idx, "&gt;", 4);
+                msg_idx += 4;
+            } else {
+                msg[msg_idx++] = c;
+            }
         }
-        free(escaped);
 
-        if (!msg)
-            return 0;
+        static const char suffix[] = "</code></pre>";
+        size_t suffix_len = sizeof(suffix) - 1;
+        if (msg_idx + suffix_len < sizeof(msg)) {
+            memcpy(msg + msg_idx, suffix, suffix_len);
+            msg_idx += suffix_len;
+        }
+        msg[msg_idx] = '\0';
 
-        int ok = telegram_send_html(msg);
-        free(msg);
-        if (!ok)
+        if (!telegram_send_html(msg))
             return 0;
 
         offset += chunk_len;

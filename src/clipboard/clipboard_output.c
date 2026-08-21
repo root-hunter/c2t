@@ -332,8 +332,8 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
         allocation_size > maximum_queue_bytes -
             (queue_bytes < maximum_queue_bytes ? queue_bytes
                                                  : maximum_queue_bytes);
-    queue_unlock();
     if (queue_full) {
+        queue_unlock();
         c2t_log_warning("clipboard",
                         "Delivery queue full; clipboard event dropped "
                         "(size=%llu bytes)", (unsigned long long)length);
@@ -342,6 +342,7 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
 
     clipboard_event_t *event = malloc(allocation_size);
     if (!event) {
+        queue_unlock();
         c2t_log_error("clipboard", "Not enough memory to queue clipboard data");
         return;
     }
@@ -357,29 +358,16 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
     if (length)
         memcpy(event->data, data, length);
 
-    queue_lock();
-    queue_full = stopping || queue_items >= maximum_queue_items ||
-        allocation_size > maximum_queue_bytes -
-            (queue_bytes < maximum_queue_bytes ? queue_bytes
-                                                 : maximum_queue_bytes);
-    if (!queue_full) {
-        if (queue_tail)
-            queue_tail->next = event;
-        else
-            queue_head = event;
-        queue_tail = event;
-        queue_bytes += allocation_size;
-        ++queue_items;
-        queue_signal();
-    }
+    if (queue_tail)
+        queue_tail->next = event;
+    else
+        queue_head = event;
+    queue_tail = event;
+    queue_bytes += allocation_size;
+    ++queue_items;
+    queue_signal();
     queue_unlock();
-    if (queue_full) {
-        free(event);
-        c2t_log_warning("clipboard",
-                        "Delivery queue full; clipboard event dropped "
-                        "(size=%llu bytes)", (unsigned long long)length);
-        return;
-    }
+
     c2t_log_info("clipboard", "Queued content: type=%s, size=%llu bytes",
                  mime_type, (unsigned long long)length);
 

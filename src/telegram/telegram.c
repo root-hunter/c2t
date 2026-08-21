@@ -335,31 +335,6 @@ typedef struct {
     size_t length;
 } form_field_t;
 
-static char *form_encode(const char *value, size_t length)
-{
-    if (length > (SIZE_MAX - 1) / 3)
-        return NULL;
-
-    static const char hexadecimal[] = "0123456789ABCDEF";
-    char *encoded = malloc(length * 3 + 1);
-    if (!encoded)
-        return NULL;
-
-    char *output = encoded;
-    for (size_t index = 0; index < length; ++index) {
-        unsigned char character = (unsigned char)value[index];
-        if (is_unreserved(character)) {
-            *output++ = (char)character;
-        } else {
-            *output++ = '%';
-            *output++ = hexadecimal[character >> 4];
-            *output++ = hexadecimal[character & 0x0f];
-        }
-    }
-    *output = '\0';
-    return encoded;
-}
-
 static size_t utf8_chunk_length(const char *text, size_t length,
                                 size_t maximum_characters)
 {
@@ -386,58 +361,65 @@ static size_t utf8_chunk_length(const char *text, size_t length,
 static int send_fields(const char *method, const form_field_t *fields,
                        size_t field_count)
 {
-    if (field_count > 4)
+    if (field_count > 4 || !chat_id)
         return 0;
 
-    char *encoded_chat = form_encode(chat_id, strlen(chat_id));
-    char *encoded_values[4] = {0};
-    if (!encoded_chat) {
-        c2t_log_error("telegram", "Not enough memory for message encoding");
-        return 0;
-    }
-
-    size_t body_length = strlen("chat_id=") + strlen(encoded_chat);
+    size_t chat_len = strlen(chat_id);
+    size_t max_body_length = 8 + chat_len * 3 + 1;
     for (size_t index = 0; index < field_count; ++index) {
-        encoded_values[index] = form_encode(fields[index].value,
-                                             fields[index].length);
-        if (!encoded_values[index] ||
-            strlen(fields[index].name) > SIZE_MAX - body_length - 2 ||
-            strlen(encoded_values[index]) >
-                SIZE_MAX - body_length - strlen(fields[index].name) - 2) {
-            for (size_t free_index = 0; free_index <= index; ++free_index)
-                free(encoded_values[free_index]);
-            free(encoded_chat);
-            c2t_log_error("telegram", "Not enough memory for message encoding");
-            return 0;
-        }
-        body_length += 2 + strlen(fields[index].name) +
-                       strlen(encoded_values[index]);
+        max_body_length += 1 + strlen(fields[index].name) + 1 + fields[index].length * 3 + 1;
     }
 
-    char *body = malloc(body_length + 1);
+    char stack_body[4096];
+    char *body = max_body_length <= sizeof(stack_body) ? stack_body : malloc(max_body_length);
     if (!body) {
-        for (size_t index = 0; index < field_count; ++index)
-            free(encoded_values[index]);
-        free(encoded_chat);
         c2t_log_error("telegram", "Not enough memory for message body");
         return 0;
     }
 
-    size_t offset = (size_t)snprintf(body, body_length + 1, "chat_id=%s",
-                                     encoded_chat);
-    for (size_t index = 0; index < field_count; ++index) {
-        offset += (size_t)snprintf(body + offset, body_length + 1 - offset,
-                                  "&%s=%s", fields[index].name,
-                                  encoded_values[index]);
+    static const char hexadecimal[] = "0123456789ABCDEF";
+    size_t offset = 0;
+
+    memcpy(body + offset, "chat_id=", 8);
+    offset += 8;
+    for (size_t i = 0; i < chat_len; ++i) {
+        unsigned char c = (unsigned char)chat_id[i];
+        if (is_unreserved(c)) {
+            body[offset++] = (char)c;
+        } else {
+            body[offset++] = '%';
+            body[offset++] = hexadecimal[c >> 4];
+            body[offset++] = hexadecimal[c & 0x0f];
+        }
     }
+
+    for (size_t index = 0; index < field_count; ++index) {
+        body[offset++] = '&';
+        size_t nlen = strlen(fields[index].name);
+        memcpy(body + offset, fields[index].name, nlen);
+        offset += nlen;
+        body[offset++] = '=';
+        const char *v = fields[index].value;
+        size_t vlen = fields[index].length;
+        for (size_t i = 0; i < vlen; ++i) {
+            unsigned char c = (unsigned char)v[i];
+            if (is_unreserved(c)) {
+                body[offset++] = (char)c;
+            } else {
+                body[offset++] = '%';
+                body[offset++] = hexadecimal[c >> 4];
+                body[offset++] = hexadecimal[c & 0x0f];
+            }
+        }
+    }
+    body[offset] = '\0';
 
     int result = telegram_http_post(
         bot_token, method, "application/x-www-form-urlencoded",
-        body, body_length);
-    free(body);
-    for (size_t index = 0; index < field_count; ++index)
-        free(encoded_values[index]);
-    free(encoded_chat);
+        body, offset);
+
+    if (body != stack_body)
+        free(body);
     return result;
 }
 
@@ -605,7 +587,7 @@ static int text_is_url(const char *text, size_t length)
     size_t prefix = length >= 8 && ascii_equal_nocase(text, "https://", 8)
                         ? 8
                         : (length >= 7 && ascii_equal_nocase(text, "http://", 7)
-                               ? 7 : 0);
+                                ? 7 : 0);
     if (!prefix || prefix == length)
         return 0;
     for (size_t index = prefix; index < length; ++index) {
@@ -685,11 +667,20 @@ static int contains_bytes(const unsigned char *data, size_t length,
                           const char *needle)
 {
     size_t needle_length = strlen(needle);
-    if (needle_length > length)
+    if (needle_length > length || needle_length == 0)
         return 0;
-    for (size_t index = 0; index <= length - needle_length; ++index) {
-        if (memcmp(data + index, needle, needle_length) == 0)
+
+    const unsigned char *p = data;
+    size_t remaining = length;
+    unsigned char first = (unsigned char)needle[0];
+    while (remaining >= needle_length) {
+        const unsigned char *match = memchr(p, first, remaining - needle_length + 1);
+        if (!match)
+            return 0;
+        if (memcmp(match, needle, needle_length) == 0)
             return 1;
+        remaining -= (size_t)(match - p + 1);
+        p = match + 1;
     }
     return 0;
 }
