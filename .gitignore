@@ -1,0 +1,6 @@
+/build/
+/c2t
+/dist
+*.env
+__pycache__/
+.vscode/
