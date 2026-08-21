@@ -136,6 +136,21 @@ static void *telegram_listener_worker_func(void *context)
     char username_buf[128];
     char text_buf[512];
 
+    const c2t_config_t *initial_cfg = c2t_config_get();
+    if (initial_cfg->telegram_bot_token) {
+        int64_t skip_offset = -1;
+        telegram_poll_updates_timeout(
+            initial_cfg->telegram_bot_token,
+            &skip_offset,
+            0,
+            chat_id_buf, sizeof(chat_id_buf),
+            username_buf, sizeof(username_buf),
+            text_buf, sizeof(text_buf)
+        );
+        if (skip_offset > 0)
+            offset = skip_offset;
+    }
+
     c2t_log_info("listener", "Telegram command listener started (long-polling timeout=%ds)",
                  POLL_TIMEOUT_SECONDS);
 

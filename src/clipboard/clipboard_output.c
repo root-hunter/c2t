@@ -58,6 +58,7 @@ static size_t delivery_attempts;
 static size_t retry_delay_ms;
 static int stopping;
 static int worker_started;
+static volatile int clipboard_paused;
 
 #ifdef _WIN32
 static CRITICAL_SECTION queue_mutex;
@@ -237,6 +238,7 @@ int clipboard_output_init(void)
     delivery_attempts = c2t_config_get()->delivery_attempts;
     retry_delay_ms = c2t_config_get()->retry_delay_ms;
     stopping = 0;
+    clipboard_paused = 0;
 #ifdef _WIN32
     InitializeCriticalSection(&queue_mutex);
     InitializeConditionVariable(&queue_condition);
@@ -259,7 +261,6 @@ static uint64_t last_duplicate_hash;
 static size_t last_duplicate_length;
 static uint64_t last_duplicate_time_ms;
 static int has_duplicate_previous;
-static volatile int clipboard_paused;
 
 int clipboard_is_paused(void)
 {
