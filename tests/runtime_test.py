@@ -30,7 +30,7 @@ def main():
             assert "stopped" in stopped.stdout
 
             started = invoke(
-                executable, "start", "--verbose", environment=environment)
+                executable, "start", "--verbose", "--log-file", environment=environment)
             assert started.returncode == 0, started
             assert "started (PID " in started.stdout
             assert "Log:" in started.stdout
@@ -44,7 +44,7 @@ def main():
             assert "already running" in duplicate.stdout
 
             restarted = invoke(
-                executable, "restart", "--verbose", environment=environment)
+                executable, "restart", "--verbose", "--log-file", environment=environment)
             assert restarted.returncode == 0, restarted
             assert "started (PID " in restarted.stdout
 
@@ -56,7 +56,7 @@ def main():
             assert final.returncode == 3, final
 
             foreground = subprocess.Popen(
-                [executable, "run", "--verbose"], env=environment,
+                [executable, "run", "--verbose", "--log-file"], env=environment,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             for _ in range(50):
                 foreground_status = invoke(

@@ -24,12 +24,12 @@ finish. If a stuck process must be terminated, use `c2t stop --force`.
 Only one instance is allowed per user session. State is protected
 by an operating-system lock, so stale PID files do not produce false running
 states. On Linux and macOS, runtime state follows `XDG_RUNTIME_DIR` when set and
-logs follow `XDG_STATE_HOME` (otherwise `~/.local/state/c2t/c2t.log`). On
-Windows, both are stored below `%LOCALAPPDATA%\c2t`.
+logs (when enabled via `-l` / `--log-file` or `C2T_LOG_FILE=1`) follow `XDG_STATE_HOME`
+(otherwise `~/.local/state/c2t/c2t.log`). On Windows, both are stored below `%LOCALAPPDATA%\c2t`.
 
 Use `c2t run` for foreground operation. For compatibility, invoking `c2t`
 without a command still runs it in the foreground. Runtime options can follow
-`start`, `run`, or `restart`, for example `c2t start --verbose`.
+`start`, `run`, or `restart`, for example `c2t start --verbose --log-file`.
 
 Use the [client-side configurator](https://root-hunter.github.io/c2t/) to
 download the latest release and apply its Telegram settings locally in the
@@ -92,7 +92,7 @@ environment variable is missing.
 
 Supported embedded keys are `TELEGRAM_ENABLED`, `TELEGRAM_BOT_TOKEN`,
 `TELEGRAM_CHAT_ID`, `TELEGRAM_DEDUPLICATE`, `TELEGRAM_SEND_FILES`,
-`TELEGRAM_SEND_WINDOW_INFO`, `TELEGRAM_MAX_FILE_BYTES`, `C2T_VERBOSE`,
+`TELEGRAM_SEND_WINDOW_INFO`, `TELEGRAM_MAX_FILE_BYTES`, `C2T_VERBOSE`, `C2T_LOG_FILE`,
 `C2T_QUEUE_MAX_BYTES`, `C2T_QUEUE_MAX_ITEMS`, `C2T_DELIVERY_ATTEMPTS`, and
 `C2T_RETRY_DELAY_MS`. Environment variables take precedence over embedded
 values, which in turn take precedence over defaults. Setting an environment

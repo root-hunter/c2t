@@ -41,6 +41,7 @@ static void print_usage(FILE *stream)
         "  version     Show the version\n\n"
         "Options for start, run and restart:\n"
         "  -v, --verbose          Enable verbose logging\n"
+        "  -l, --log-file         Save logs to disk\n"
         "  --send-files           Send copied files\n"
         "  --send-window-info     Include clipboard source metadata\n\n"
         "Stop options:\n"

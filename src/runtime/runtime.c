@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "../config/config.h"
 
 #include <errno.h>
 #include <stdarg.h>
@@ -293,9 +294,13 @@ int c2t_runtime_start_background(int argc, char **argv,
     if (!prepare_paths())
         return C2T_BACKGROUND_ERROR;
     SECURITY_ATTRIBUTES security = {sizeof(security), NULL, TRUE};
-    HANDLE log = CreateFileA(log_path, FILE_APPEND_DATA,
-                             FILE_SHARE_READ | FILE_SHARE_WRITE, &security,
-                             OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE log = c2t_config_get()->log_file
+        ? CreateFileA(log_path, FILE_APPEND_DATA,
+                      FILE_SHARE_READ | FILE_SHARE_WRITE, &security,
+                      OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL)
+        : CreateFileA("NUL", FILE_APPEND_DATA,
+                      FILE_SHARE_READ | FILE_SHARE_WRITE, &security,
+                      OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     HANDLE input = CreateFileA("NUL", GENERIC_READ,
                                FILE_SHARE_READ | FILE_SHARE_WRITE, &security,
                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -521,7 +526,9 @@ int c2t_runtime_stop(unsigned int timeout_ms, int force)
 static int redirect_background_io(void)
 {
     int input = open("/dev/null", O_RDONLY);
-    int output = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0600);
+    int output = c2t_config_get()->log_file
+        ? open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0600)
+        : open("/dev/null", O_WRONLY);
     if (input < 0 || output < 0) {
         if (input >= 0)
             close(input);
@@ -582,5 +589,5 @@ int c2t_runtime_start_background(int argc, char **argv,
 
 const char *c2t_runtime_log_path(void)
 {
-    return prepare_paths() ? log_path : NULL;
+    return (prepare_paths() && c2t_config_get()->log_file) ? log_path : NULL;
 }

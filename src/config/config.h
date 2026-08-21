@@ -5,6 +5,7 @@
 
 typedef struct {
     int verbose;
+    int log_file;
     int telegram_enabled;
     int telegram_deduplicate;
     int telegram_send_files;
