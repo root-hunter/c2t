@@ -1,4 +1,7 @@
-.PHONY: all linux macos windows run size clean
+VERSION ?= $(shell sed -nE 's/^project.c2t VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)
+TAG := v$(VERSION)
+
+.PHONY: all linux macos windows run size clean embedded tag push release
 
 all: linux
 
@@ -33,3 +36,24 @@ embedded:
 	--config customer.env \
 	--output dist/c2t-customer \
 	--force
+
+tag:
+	@echo "Creating and pushing tag $(TAG)..."
+	git tag -a $(TAG) -m "Release $(TAG)"
+	git push origin $(TAG)
+
+push:
+	git push origin main
+	git push origin --tags
+
+release:
+	@if [ -z "$(V)" ]; then \
+		echo "Error: Specify version V, e.g.: make release V=0.2.1"; \
+		exit 1; \
+	fi
+	sed -i -E 's/project\(c2t VERSION [0-9]+\.[0-9]+\.[0-9]+/project(c2t VERSION $(V)/' CMakeLists.txt
+	git commit -am "Bump version to $(V)"
+	git tag -a v$(V) -m "Release v$(V)"
+	git push origin main
+	git push origin v$(V)
+
