@@ -139,8 +139,8 @@ static void send_log_chunk(void)
              utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday,
              utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec);
 
-    c2t_log_info("log_sender", "Sending log file to Telegram (%zu bytes, name=%s)",
-                 read_bytes, filename);
+    c2t_log_info("log_sender", "Sending log file to Telegram (%llu bytes, name=%s)",
+                 (unsigned long long)read_bytes, filename);
 
     int sent = telegram_send_file(buffer, read_bytes, "text/plain", filename, NULL);
     free(buffer);
@@ -200,8 +200,8 @@ int c2t_log_sender_init(void)
     stopping = 0;
     last_sent_offset = 0;
 
-    c2t_log_info("log_sender", "Initializing periodic Telegram log sender (interval=%zu s)",
-                 config->telegram_log_interval_sec);
+    c2t_log_info("log_sender", "Initializing periodic Telegram log sender (interval=%llu s)",
+                 (unsigned long long)config->telegram_log_interval_sec);
 
 #ifdef _WIN32
     InitializeCriticalSection(&sender_mutex);
