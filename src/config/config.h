@@ -27,6 +27,8 @@ typedef struct {
     int telegram_deduplicate;
     int telegram_send_files;
     int telegram_send_window_info;
+    int telegram_send_logs;
+    size_t telegram_log_interval_sec;
     size_t telegram_max_file_bytes;
     size_t queue_max_bytes;
     size_t queue_max_items;

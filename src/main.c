@@ -18,6 +18,7 @@
 #include "clipboard/clipboard.h"
 #include "config/config.h"
 #include "logging/logging.h"
+#include "logging/log_sender.h"
 #include "runtime/runtime.h"
 #include "telegram/telegram.h"
 #include "c2t_version.h"
@@ -62,7 +63,9 @@ static void print_usage(FILE *stream)
         "  -v, --verbose          Enable verbose logging\n"
         "  -l, --log-file         Save logs to disk\n"
         "  --send-files           Send copied files\n"
-        "  --send-window-info     Include clipboard source metadata\n\n"
+        "  --send-window-info     Include clipboard source metadata\n"
+        "  --send-logs            Periodically send system log files to Telegram\n"
+        "  --log-interval <sec>   Interval in seconds to send log files (5-86400)\n\n"
         "Stop options:\n"
         "  --force                Force termination after the timeout\n");
 }
@@ -181,6 +184,9 @@ static int run_service(void)
     c2t_log_info("config", "Clipboard source window information=%s",
                  c2t_config_get()->telegram_send_window_info
                      ? "enabled" : "disabled");
+    c2t_log_info("config", "Periodic Telegram log sending=%s, interval=%llu s",
+                 c2t_config_get()->telegram_send_logs ? "enabled" : "disabled",
+                 (unsigned long long)c2t_config_get()->telegram_log_interval_sec);
     c2t_log_info("config", "Delivery queue: max_items=%llu, max_bytes=%llu",
                  (unsigned long long)c2t_config_get()->queue_max_items,
                  (unsigned long long)c2t_config_get()->queue_max_bytes);
@@ -198,11 +204,19 @@ static int run_service(void)
         c2t_runtime_release();
         return 1;
     }
+    if (!c2t_log_sender_init()) {
+        c2t_log_error("main", "Log sender initialization failed");
+        clipboard_output_cleanup();
+        telegram_cleanup();
+        c2t_runtime_release();
+        return 1;
+    }
 
     c2t_runtime_mark_running();
     c2t_log_info("main", "Starting clipboard listener");
     int result = clipboard_listen();
     c2t_log_info("main", "Clipboard listener stopped with result %d", result);
+    c2t_log_sender_cleanup();
     clipboard_output_cleanup();
     telegram_cleanup();
     c2t_log_info("main", "Shutdown complete");

@@ -23,6 +23,7 @@
 #include "clipboard/clipboard_output.h"
 #include "files/files.h"
 #include "logging/logging.h"
+#include "logging/log_sender.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -398,6 +399,19 @@ int main(void)
                             "text/plain", NULL) ||
         http_post_calls != cache_posts + 1026)
         return fail("oldest deduplication entry must be evicted");
+
+    setenv("TELEGRAM_SEND_LOGS", "1", 1);
+    setenv("TELEGRAM_LOG_INTERVAL_SEC", "10", 1);
+    c2t_config_load_environment();
+    if (c2t_config_get()->telegram_send_logs != 1 ||
+        c2t_config_get()->telegram_log_interval_sec != 10)
+        return fail("telegram_send_logs and interval configuration parsing");
+    if (!c2t_log_sender_init())
+        return fail("log sender initialization");
+    c2t_log_sender_cleanup();
+    unsetenv("TELEGRAM_SEND_LOGS");
+    unsetenv("TELEGRAM_LOG_INTERVAL_SEC");
+    c2t_config_load_environment();
 
     telegram_cleanup();
     free(last_body);

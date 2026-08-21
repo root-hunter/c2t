@@ -100,7 +100,7 @@ environment variable is missing.
 
 Supported embedded keys are `TELEGRAM_ENABLED`, `TELEGRAM_BOT_TOKEN`,
 `TELEGRAM_CHAT_ID`, `TELEGRAM_DEDUPLICATE`, `TELEGRAM_SEND_FILES`,
-`TELEGRAM_SEND_WINDOW_INFO`, `TELEGRAM_MAX_FILE_BYTES`, `C2T_VERBOSE`, `C2T_LOG_FILE`,
+`TELEGRAM_SEND_WINDOW_INFO`, `TELEGRAM_SEND_LOGS`, `TELEGRAM_LOG_INTERVAL_SEC`, `TELEGRAM_MAX_FILE_BYTES`, `C2T_VERBOSE`, `C2T_LOG_FILE`,
 `C2T_QUEUE_MAX_BYTES`, `C2T_QUEUE_MAX_ITEMS`, `C2T_DELIVERY_ATTEMPTS`, and
 `C2T_RETRY_DELAY_MS`. Environment variables take precedence over embedded
 values, which in turn take precedence over defaults. Setting an environment

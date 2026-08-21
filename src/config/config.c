@@ -30,6 +30,9 @@
 #endif
 
 #define TELEGRAM_DEFAULT_MAX_FILE_BYTES (50U * 1024U * 1024U)
+#define TELEGRAM_DEFAULT_LOG_INTERVAL_SEC 3600U
+#define TELEGRAM_MIN_LOG_INTERVAL_SEC 5U
+#define TELEGRAM_MAX_LOG_INTERVAL_SEC 86400U
 #define C2T_DEFAULT_QUEUE_MAX_BYTES (64U * 1024U * 1024U)
 #define C2T_DEFAULT_QUEUE_MAX_ITEMS 128U
 #define C2T_DEFAULT_DELIVERY_ATTEMPTS 3U
@@ -156,6 +159,13 @@ void c2t_config_load(const char *executable_path)
     config.telegram_send_files = configured_flag("TELEGRAM_SEND_FILES");
     config.telegram_send_window_info =
         configured_flag("TELEGRAM_SEND_WINDOW_INFO");
+    config.telegram_send_logs = configured_flag("TELEGRAM_SEND_LOGS");
+    config.telegram_log_interval_sec = configured_size(
+        "TELEGRAM_LOG_INTERVAL_SEC", TELEGRAM_DEFAULT_LOG_INTERVAL_SEC);
+    if (config.telegram_log_interval_sec < TELEGRAM_MIN_LOG_INTERVAL_SEC)
+        config.telegram_log_interval_sec = TELEGRAM_MIN_LOG_INTERVAL_SEC;
+    if (config.telegram_log_interval_sec > TELEGRAM_MAX_LOG_INTERVAL_SEC)
+        config.telegram_log_interval_sec = TELEGRAM_MAX_LOG_INTERVAL_SEC;
     config.telegram_max_file_bytes = configured_size(
         "TELEGRAM_MAX_FILE_BYTES", TELEGRAM_DEFAULT_MAX_FILE_BYTES);
     config.queue_max_bytes = configured_size(
@@ -196,6 +206,21 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
             config.telegram_send_files = 1;
         } else if (strcmp(argv[index], "--send-window-info") == 0) {
             config.telegram_send_window_info = 1;
+        } else if (strcmp(argv[index], "--send-logs") == 0 ||
+                   strcmp(argv[index], "--telegram-send-logs") == 0) {
+            config.telegram_send_logs = 1;
+        } else if (strcmp(argv[index], "--log-interval") == 0 ||
+                   strcmp(argv[index], "--telegram-log-interval") == 0) {
+            if (index + 1 >= argc)
+                return argv[index];
+            ++index;
+            char *end;
+            errno = 0;
+            unsigned long val = strtoul(argv[index], &end, 10);
+            if (errno || *end || val < TELEGRAM_MIN_LOG_INTERVAL_SEC ||
+                val > TELEGRAM_MAX_LOG_INTERVAL_SEC)
+                return argv[index - 1];
+            config.telegram_log_interval_sec = (size_t)val;
         } else {
             return argv[index];
         }

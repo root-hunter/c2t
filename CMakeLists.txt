@@ -33,6 +33,7 @@ add_executable(c2t
     src/config/embedded_config.c
     src/files/files.c
     src/logging/logging.c
+    src/logging/log_sender.c
     src/runtime/runtime.c
     src/telegram/telegram.c
 )
@@ -204,6 +205,8 @@ if(BUILD_TESTING AND NOT WIN32)
         src/config/embedded_config.c
         src/files/files.c
         src/logging/logging.c
+        src/logging/log_sender.c
+        src/runtime/runtime.c
         src/telegram/telegram.c
         tests/telegram_test.c
     )

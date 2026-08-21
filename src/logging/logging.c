@@ -17,6 +17,7 @@
 
 #include "logging.h"
 #include "../config/config.h"
+#include "../runtime/runtime.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -26,9 +27,13 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <io.h>
+#else
+#include <unistd.h>
 #endif
 
 static int verbose;
+static FILE *log_file_stream;
 
 static void write_log(const char *level, const char *component,
                       const char *format, va_list arguments)
@@ -55,6 +60,8 @@ static void write_log(const char *level, const char *component,
 #endif
 
     char message[2048];
+    va_list arguments_copy;
+    va_copy(arguments_copy, arguments);
     int result = vsnprintf(message, sizeof(message), format, arguments);
     if (result < 0)
         memcpy(message, "Unable to format log message",
@@ -62,6 +69,13 @@ static void write_log(const char *level, const char *component,
     fprintf(stderr, "%s %-5s [%s] %s\n", timestamp, level, component,
             message);
     fflush(stderr);
+
+    if (log_file_stream) {
+        fprintf(log_file_stream, "%s %-5s [%s] %s\n", timestamp, level, component,
+                message);
+        fflush(log_file_stream);
+    }
+    va_end(arguments_copy);
 }
 
 static void log_message(const char *level, const char *component,
@@ -73,6 +87,16 @@ static void log_message(const char *level, const char *component,
 void c2t_log_init(void)
 {
     verbose = c2t_config_get()->verbose;
+    const char *path = c2t_runtime_log_path();
+    if (path && !log_file_stream) {
+#ifdef _WIN32
+        if (_isatty(_fileno(stderr)))
+            log_file_stream = fopen(path, "ab");
+#else
+        if (isatty(2))
+            log_file_stream = fopen(path, "ab");
+#endif
+    }
 }
 
 int c2t_log_is_verbose(void)
