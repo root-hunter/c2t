@@ -183,6 +183,96 @@ static const char *mime_from_filename(const char *filename)
     return "application/octet-stream";
 }
 
+#include <errno.h>
+
+static void append_escaped_html(char *output, size_t *offset, size_t capacity,
+                                const char *input)
+{
+    if (!input || !output || !offset)
+        return;
+    while (*input && *offset + 6 < capacity) {
+        if (*input == '&') {
+            memcpy(output + *offset, "&amp;", 5);
+            *offset += 5;
+        } else if (*input == '<') {
+            memcpy(output + *offset, "&lt;", 4);
+            *offset += 4;
+        } else if (*input == '>') {
+            memcpy(output + *offset, "&gt;", 4);
+            *offset += 4;
+        } else {
+            output[(*offset)++] = *input;
+        }
+        input++;
+    }
+    output[*offset] = '\0';
+}
+
+static int send_file_error_telegram(const char *path, const char *error_message,
+                                    const c2t_clipboard_source_t *source)
+{
+    char html[2048];
+    size_t offset = 0;
+
+    static const char header[] = "⚠️ <b>File Delivery Failed</b>\n<b>Path:</b> <code>";
+    memcpy(html, header, sizeof(header) - 1);
+    offset = sizeof(header) - 1;
+
+    append_escaped_html(html, &offset, sizeof(html), path);
+
+    static const char mid[] = "</code>\n<b>Error:</b> ";
+    if (offset + sizeof(mid) - 1 < sizeof(html)) {
+        memcpy(html + offset, mid, sizeof(mid) - 1);
+        offset += sizeof(mid) - 1;
+    }
+
+    append_escaped_html(html, &offset, sizeof(html), error_message);
+
+    const c2t_config_t *config = c2t_config_get();
+    if (config->telegram_send_window_info && source &&
+        (source->application[0] || source->title[0] || source->process_id)) {
+        static const char src_hdr[] = "\n<b>Source:</b> <i>";
+        if (offset + sizeof(src_hdr) - 1 < sizeof(html)) {
+            memcpy(html + offset, src_hdr, sizeof(src_hdr) - 1);
+            offset += sizeof(src_hdr) - 1;
+        }
+
+        char source_desc[512] = {0};
+        size_t s_off = 0;
+        if (source->application[0]) {
+            s_off += snprintf(source_desc + s_off, sizeof(source_desc) - s_off,
+                              "%s", source->application);
+        }
+        if (source->title[0] && s_off + 3 < sizeof(source_desc)) {
+            s_off += snprintf(source_desc + s_off, sizeof(source_desc) - s_off,
+                              "%s%s", s_off > 0 ? " | " : "", source->title);
+        }
+        if (source->process_id && s_off + 16 < sizeof(source_desc)) {
+            snprintf(source_desc + s_off, sizeof(source_desc) - s_off,
+                     "%sPID %lu", s_off > 0 ? " | " : "",
+                     (unsigned long)source->process_id);
+        }
+
+        append_escaped_html(html, &offset, sizeof(html), source_desc);
+
+        static const char src_ftr[] = "</i>";
+        if (offset + sizeof(src_ftr) - 1 < sizeof(html)) {
+            memcpy(html + offset, src_ftr, sizeof(src_ftr) - 1);
+            offset += sizeof(src_ftr) - 1;
+        }
+    }
+
+    html[offset] = '\0';
+    return telegram_send_html(html);
+}
+
+enum {
+    READ_FILE_OK = 0,
+    READ_FILE_NOT_FOUND = 1,
+    READ_FILE_NOT_REGULAR = 2,
+    READ_FILE_ERROR = -1
+};
+
 #ifdef _WIN32
 static wchar_t *utf8_path(const char *path)
 {
@@ -199,60 +289,119 @@ static wchar_t *utf8_path(const char *path)
 #endif
 
 static int read_file(const char *path, const c2t_config_t *config,
-                     unsigned char **data, size_t *length)
+                     unsigned char **data, size_t *length,
+                     char *error_out, size_t error_capacity)
 {
     c2t_stat_t status;
     FILE *file;
 #ifdef _WIN32
     wchar_t *wide = utf8_path(path);
-    if (!wide)
-        return C2T_FILE_NOT_HANDLED;
+    if (!wide) {
+        if (error_out && error_capacity > 0)
+            snprintf(error_out, error_capacity, "Invalid UTF-8 file path");
+        return READ_FILE_NOT_FOUND;
+    }
     int stat_result = _wstat64(wide, &status);
+    int saved_errno = errno;
     file = stat_result == 0 ? _wfopen(wide, L"rb") : NULL;
+    int open_errno = errno;
     free(wide);
-    if (stat_result != 0)
-        return C2T_FILE_NOT_HANDLED;
+    if (stat_result != 0) {
+        if (error_out && error_capacity > 0)
+            snprintf(error_out, error_capacity,
+                     "File does not exist or cannot be accessed: %s",
+                     strerror(saved_errno));
+        return READ_FILE_NOT_FOUND;
+    }
     if ((status.st_mode & _S_IFMT) != _S_IFREG) {
-#else
-    int stat_result = stat(path, &status);
-    file = stat_result == 0 ? fopen(path, "rb") : NULL;
-    if (stat_result != 0)
-        return C2T_FILE_NOT_HANDLED;
-    if (!S_ISREG(status.st_mode)) {
-#endif
         if (file)
             fclose(file);
-        return C2T_FILE_NOT_HANDLED;
+        if (error_out && error_capacity > 0) {
+            if ((status.st_mode & _S_IFMT) == _S_IFDIR)
+                snprintf(error_out, error_capacity,
+                         "Path is a directory, not a regular file");
+            else
+                snprintf(error_out, error_capacity, "Path is not a regular file");
+        }
+        return READ_FILE_NOT_REGULAR;
     }
+#else
+    int stat_result = stat(path, &status);
+    int saved_errno = errno;
+    file = stat_result == 0 ? fopen(path, "rb") : NULL;
+    int open_errno = errno;
+    if (stat_result != 0) {
+        if (error_out && error_capacity > 0)
+            snprintf(error_out, error_capacity,
+                     "File does not exist or cannot be accessed: %s",
+                     strerror(saved_errno));
+        return READ_FILE_NOT_FOUND;
+    }
+    if (!S_ISREG(status.st_mode)) {
+        if (file)
+            fclose(file);
+        if (error_out && error_capacity > 0) {
+            if (S_ISDIR(status.st_mode))
+                snprintf(error_out, error_capacity,
+                         "Path is a directory, not a regular file");
+            else
+                snprintf(error_out, error_capacity, "Path is not a regular file");
+        }
+        return READ_FILE_NOT_REGULAR;
+    }
+#endif
     if (status.st_size < 0 || (uintmax_t)status.st_size >
         (uintmax_t)config->telegram_max_file_bytes) {
         if (file)
             fclose(file);
-        c2t_log_error("files", "File exceeds configured limit of %llu bytes",
-                      (unsigned long long)config->telegram_max_file_bytes);
-        return C2T_FILE_ERROR;
+        c2t_log_error("files", "File '%s' exceeds configured limit of %llu bytes (size: %llu bytes)",
+                      path,
+                      (unsigned long long)config->telegram_max_file_bytes,
+                      (unsigned long long)status.st_size);
+        if (error_out && error_capacity > 0) {
+            snprintf(error_out, error_capacity,
+                     "File size (%.2f MB / %llu bytes) exceeds configured limit (%.2f MB / %llu bytes)",
+                     (double)status.st_size / (1024.0 * 1024.0),
+                     (unsigned long long)status.st_size,
+                     (double)config->telegram_max_file_bytes / (1024.0 * 1024.0),
+                     (unsigned long long)config->telegram_max_file_bytes);
+        }
+        return READ_FILE_ERROR;
     }
     if (!file) {
-        c2t_log_error("files", "Recognized file cannot be opened for reading");
-        return C2T_FILE_ERROR;
+        c2t_log_error("files", "File '%s' cannot be opened for reading: %s",
+                      path, strerror(open_errno));
+        if (error_out && error_capacity > 0)
+            snprintf(error_out, error_capacity,
+                     "Cannot open file for reading: %s", strerror(open_errno));
+        return READ_FILE_ERROR;
     }
 
     *length = (size_t)status.st_size;
     *data = malloc(*length ? *length : 1);
     if (!*data) {
         fclose(file);
-        c2t_log_error("files", "Not enough memory to read clipboard file");
-        return C2T_FILE_ERROR;
+        c2t_log_error("files", "Not enough memory to read clipboard file '%s'", path);
+        if (error_out && error_capacity > 0)
+            snprintf(error_out, error_capacity,
+                     "Memory allocation failed while reading file");
+        return READ_FILE_ERROR;
     }
     size_t bytes_read = fread(*data, 1, *length, file);
+    int read_errno = errno;
     int close_result = fclose(file);
     if (bytes_read != *length || close_result != 0) {
         free(*data);
         *data = NULL;
-        c2t_log_error("files", "Unable to read the complete clipboard file");
-        return C2T_FILE_ERROR;
+        c2t_log_error("files", "Unable to read the complete clipboard file '%s': %s",
+                      path, strerror(read_errno));
+        if (error_out && error_capacity > 0)
+            snprintf(error_out, error_capacity,
+                     "Failed to read complete file content: %s",
+                     strerror(read_errno));
+        return READ_FILE_ERROR;
     }
-    return C2T_FILE_SENT;
+    return READ_FILE_OK;
 }
 
 int c2t_file_try_clipboard_path(const void *data, size_t length,
@@ -269,16 +418,36 @@ int c2t_file_try_clipboard_path(const void *data, size_t length,
     if (!path)
         return C2T_FILE_NOT_HANDLED;
 
+    char error_msg[512] = {0};
     unsigned char *contents = NULL;
     size_t file_length = 0;
-    int read_result = read_file(path, config, &contents, &file_length);
-    if (read_result == C2T_FILE_NOT_HANDLED) {
+    int read_result = read_file(path, config, &contents, &file_length,
+                                error_msg, sizeof(error_msg));
+
+    if (read_result == READ_FILE_NOT_FOUND) {
+        if (!explicit_uri) {
+            free(path);
+            return C2T_FILE_NOT_HANDLED;
+        }
+        int sent = send_file_error_telegram(path, error_msg, source);
         free(path);
-        return explicit_uri ? C2T_FILE_ERROR : C2T_FILE_NOT_HANDLED;
+        return sent ? C2T_FILE_SENT : C2T_FILE_ERROR;
     }
-    if (read_result == C2T_FILE_ERROR) {
+
+    if (read_result == READ_FILE_NOT_REGULAR) {
+        if (!explicit_uri) {
+            free(path);
+            return C2T_FILE_NOT_HANDLED;
+        }
+        int sent = send_file_error_telegram(path, error_msg, source);
         free(path);
-        return C2T_FILE_ERROR;
+        return sent ? C2T_FILE_SENT : C2T_FILE_ERROR;
+    }
+
+    if (read_result == READ_FILE_ERROR) {
+        int sent = send_file_error_telegram(path, error_msg, source);
+        free(path);
+        return sent ? C2T_FILE_SENT : C2T_FILE_ERROR;
     }
 
     const char *filename = filename_from_path(path);
@@ -288,6 +457,10 @@ int c2t_file_try_clipboard_path(const void *data, size_t length,
                  (unsigned long long)file_length);
     int result = telegram_send_file(contents, file_length, mime, filename,
                                     source);
+    if (!result) {
+        send_file_error_telegram(path, "Failed to upload file to Telegram",
+                                 source);
+    }
     free(contents);
     free(path);
     return result ? C2T_FILE_SENT : C2T_FILE_ERROR;

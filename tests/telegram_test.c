@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static char last_method[32];
@@ -293,6 +294,62 @@ int main(void)
                                     "text/uri-list", NULL) != C2T_FILE_SENT ||
         http_post_calls != 12)
         return fail("filesystem file URI deduplication");
+
+    /* Test oversized file error notification */
+    setenv("TELEGRAM_MAX_FILE_BYTES", "5", 1);
+    c2t_config_load_environment();
+    int oversized_posts = http_post_calls;
+    if (c2t_file_try_clipboard_path(file_path, strlen(file_path),
+                                    "text/plain", NULL) != C2T_FILE_SENT ||
+        http_post_calls != oversized_posts + 1 ||
+        strcmp(last_method, "sendMessage") != 0 ||
+        !body_contains("File%20Delivery%20Failed", sizeof("File%20Delivery%20Failed") - 1) ||
+        !body_contains("exceeds%20configured%20limit", sizeof("exceeds%20configured%20limit") - 1))
+        return fail("oversized file must send Telegram error notification with path and reason");
+    unsetenv("TELEGRAM_MAX_FILE_BYTES");
+    c2t_config_load_environment();
+
+    /* Test non-existent explicit file URI error notification */
+    static const char missing_uri[] = "file:///tmp/c2t-missing-file-test.txt";
+    int missing_posts = http_post_calls;
+    if (c2t_file_try_clipboard_path(missing_uri, sizeof(missing_uri) - 1,
+                                    "text/uri-list", NULL) != C2T_FILE_SENT ||
+        http_post_calls != missing_posts + 1 ||
+        strcmp(last_method, "sendMessage") != 0 ||
+        !body_contains("File%20Delivery%20Failed", sizeof("File%20Delivery%20Failed") - 1) ||
+        !body_contains("c2t-missing-file-test.txt", sizeof("c2t-missing-file-test.txt") - 1))
+        return fail("missing explicit file URI must send Telegram error notification");
+
+    /* Test plain non-file text must remain not handled (pass through as regular text) */
+    static const char plain_string[] = "not a real file path string";
+    if (c2t_file_try_clipboard_path(plain_string, sizeof(plain_string) - 1,
+                                    "text/plain", NULL) != C2T_FILE_NOT_HANDLED)
+        return fail("plain non-file text must return C2T_FILE_NOT_HANDLED");
+
+    /* Test explicit directory URI error notification */
+    static const char dir_uri[] = "file:///tmp";
+    int dir_posts = http_post_calls;
+    if (c2t_file_try_clipboard_path(dir_uri, sizeof(dir_uri) - 1,
+                                    "text/uri-list", NULL) != C2T_FILE_SENT ||
+        http_post_calls != dir_posts + 1 ||
+        strcmp(last_method, "sendMessage") != 0 ||
+        !body_contains("File%20Delivery%20Failed", sizeof("File%20Delivery%20Failed") - 1) ||
+        !body_contains("directory", sizeof("directory") - 1))
+        return fail("explicit directory URI must send Telegram error notification");
+
+    /* Test unreadable file (permission denied) */
+    if (chmod(file_path, 0000) == 0) {
+        int unreadable_posts = http_post_calls;
+        if (c2t_file_try_clipboard_path(file_path, strlen(file_path),
+                                        "text/plain", NULL) != C2T_FILE_SENT ||
+            http_post_calls != unreadable_posts + 1 ||
+            strcmp(last_method, "sendMessage") != 0 ||
+            !body_contains("File%20Delivery%20Failed", sizeof("File%20Delivery%20Failed") - 1) ||
+            !body_contains("Cannot%20open%20file", sizeof("Cannot%20open%20file") - 1))
+            return fail("unreadable file must send Telegram error notification");
+        chmod(file_path, 0600);
+    }
+
     if (unlink(file_path) != 0)
         return fail("temporary file cleanup");
 
@@ -302,9 +359,10 @@ int main(void)
     c2t_config_load_environment();
     if (!telegram_init())
         return fail("initialization without deduplication");
+    int dedup_disabled_posts = http_post_calls;
     if (!telegram_send_data(png, sizeof(png), "image/png", NULL) ||
         !telegram_send_data(png, sizeof(png), "image/png", NULL) ||
-        http_post_calls != 14)
+        http_post_calls != dedup_disabled_posts + 2)
         return fail("duplicates must be sent when deduplication is disabled");
 
     static const char short_number[] = "123456";
