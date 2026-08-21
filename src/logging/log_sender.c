@@ -21,6 +21,7 @@
 #include "../runtime/runtime.h"
 #include "../telegram/telegram.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,7 +51,7 @@ static void sender_lock(void) { EnterCriticalSection(&sender_mutex); }
 static void sender_unlock(void) { LeaveCriticalSection(&sender_mutex); }
 static void sender_wait(size_t seconds)
 {
-    DWORD timeout = seconds > (DWORD_MAX / 1000U) ? INFINITE : (DWORD)(seconds * 1000U);
+    DWORD timeout = seconds > (0xFFFFFFFFU / 1000U) ? INFINITE : (DWORD)(seconds * 1000U);
     (void)SleepConditionVariableCS(&sender_condition, &sender_mutex, timeout);
 }
 static void sender_signal(void) { WakeConditionVariable(&sender_condition); }
