@@ -1,6 +1,7 @@
 /build/
 /c2t
 /dist
+/site/
 *.env
 __pycache__/
 .vscode/
