@@ -82,9 +82,8 @@ static const char *get_command_argument(const char *text)
 {
     if (!text) return "";
     while (isspace((unsigned char)*text)) text++;
-    if (*text == '/') {
-        while (*text && !isspace((unsigned char)*text)) text++;
-    }
+    if (*text == '/') text++;
+    while (*text && !isspace((unsigned char)*text)) text++;
     while (isspace((unsigned char)*text)) text++;
     return text;
 }

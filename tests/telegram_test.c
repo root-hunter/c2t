@@ -474,6 +474,11 @@ int main(void)
         strstr(info_buf, "Regular File") == nullptr)
         return fail("c2t_file_get_info regular file");
 
+    char slashless_dir[3800] = {};
+    if (!c2t_file_list_directory("/tmp", slashless_dir, sizeof(slashless_dir)) ||
+        strstr(slashless_dir, "Directory:") == nullptr)
+        return fail("c2t_file_list_directory /tmp listing");
+
     if (!c2t_file_get_info("/tmp", info_buf, sizeof(info_buf)) ||
         strstr(info_buf, "Directory") == nullptr)
         return fail("c2t_file_get_info directory");

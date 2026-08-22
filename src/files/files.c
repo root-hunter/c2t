@@ -589,8 +589,17 @@ static int list_dir_posix(const char *clean_path, char *output, size_t capacity)
 {
     DIR *dir = opendir(clean_path);
     if (!dir) {
-        snprintf(output, capacity, "⚠️ <b>Cannot open directory:</b> <code>%s</code>\n<b>Error:</b> %s",
-                 clean_path, strerror(errno));
+        size_t offset = 0;
+        static const char err_hdr[] = "⚠️ <b>Cannot open directory:</b> <code>";
+        memcpy(output, err_hdr, sizeof(err_hdr) - 1);
+        offset = sizeof(err_hdr) - 1;
+        append_escaped_html(output, &offset, capacity, clean_path);
+        static const char err_mid[] = "</code>\n<b>Error:</b> ";
+        if (offset + sizeof(err_mid) - 1 < capacity) {
+            memcpy(output + offset, err_mid, sizeof(err_mid) - 1);
+            offset += sizeof(err_mid) - 1;
+        }
+        append_escaped_html(output, &offset, capacity, strerror(errno));
         return 0;
     }
 
@@ -641,21 +650,36 @@ static int list_dir_posix(const char *clean_path, char *output, size_t capacity)
         }
 
         if (!truncated && offset + 128 < capacity - 256) {
-            char line[256];
             char size_str[32] = {};
             if (is_dir) {
-                snprintf(line, sizeof(line), "📁 <code>%s/</code>\n", entry->d_name);
+                static const char dir_pfx[] = "📁 <code>";
+                if (offset + sizeof(dir_pfx) - 1 < capacity - 256) {
+                    memcpy(output + offset, dir_pfx, sizeof(dir_pfx) - 1);
+                    offset += sizeof(dir_pfx) - 1;
+                    append_escaped_html(output, &offset, capacity - 256, entry->d_name);
+                    static const char dir_sfx[] = "/</code>\n";
+                    if (offset + sizeof(dir_sfx) - 1 < capacity - 256) {
+                        memcpy(output + offset, dir_sfx, sizeof(dir_sfx) - 1);
+                        offset += sizeof(dir_sfx) - 1;
+                        displayed_count++;
+                    }
+                }
             } else {
                 format_size_human(sz, size_str, sizeof(size_str));
-                snprintf(line, sizeof(line), "📄 <code>%s</code> <i>(%s)</i>\n", entry->d_name, size_str);
-            }
-            size_t l_len = strlen(line);
-            if (offset + l_len < capacity - 256) {
-                memcpy(output + offset, line, l_len);
-                offset += l_len;
-                displayed_count++;
-            } else {
-                truncated = 1;
+                static const char file_pfx[] = "📄 <code>";
+                if (offset + sizeof(file_pfx) - 1 < capacity - 256) {
+                    memcpy(output + offset, file_pfx, sizeof(file_pfx) - 1);
+                    offset += sizeof(file_pfx) - 1;
+                    append_escaped_html(output, &offset, capacity - 256, entry->d_name);
+                    char sz_suffix[64];
+                    snprintf(sz_suffix, sizeof(sz_suffix), "</code> <i>(%s)</i>\n", size_str);
+                    size_t s_len = strlen(sz_suffix);
+                    if (offset + s_len < capacity - 256) {
+                        memcpy(output + offset, sz_suffix, s_len);
+                        offset += s_len;
+                        displayed_count++;
+                    }
+                }
             }
         } else {
             truncated = 1;
@@ -719,8 +743,19 @@ static int list_dir_windows(const char *clean_path, char *output, size_t capacit
     WIN32_FIND_DATAW find_data;
     HANDLE find_handle = FindFirstFileW(search_pattern, &find_data);
     if (find_handle == INVALID_HANDLE_VALUE) {
-        snprintf(output, capacity, "⚠️ <b>Cannot open directory:</b> <code>%s</code>\n<b>Error:</b> %lu",
-                 clean_path, (unsigned long)GetLastError());
+        size_t offset = 0;
+        static const char err_hdr[] = "⚠️ <b>Cannot open directory:</b> <code>";
+        memcpy(output, err_hdr, sizeof(err_hdr) - 1);
+        offset = sizeof(err_hdr) - 1;
+        append_escaped_html(output, &offset, capacity, clean_path);
+        char err_msg[64];
+        snprintf(err_msg, sizeof(err_msg), "</code>\n<b>Error:</b> %lu", (unsigned long)GetLastError());
+        size_t e_len = strlen(err_msg);
+        if (offset + e_len < capacity) {
+            memcpy(output + offset, err_msg, e_len);
+            offset += e_len;
+        }
+        output[offset] = '\0';
         return 0;
     }
 
@@ -758,21 +793,36 @@ static int list_dir_windows(const char *clean_path, char *output, size_t capacit
         }
 
         if (!truncated && offset + 128 < capacity - 256) {
-            char line[512];
             char size_str[32] = {};
             if (is_dir) {
-                snprintf(line, sizeof(line), "📁 <code>%s/</code>\n", utf8_name);
+                static const char dir_pfx[] = "📁 <code>";
+                if (offset + sizeof(dir_pfx) - 1 < capacity - 256) {
+                    memcpy(output + offset, dir_pfx, sizeof(dir_pfx) - 1);
+                    offset += sizeof(dir_pfx) - 1;
+                    append_escaped_html(output, &offset, capacity - 256, utf8_name);
+                    static const char dir_sfx[] = "/</code>\n";
+                    if (offset + sizeof(dir_sfx) - 1 < capacity - 256) {
+                        memcpy(output + offset, dir_sfx, sizeof(dir_sfx) - 1);
+                        offset += sizeof(dir_sfx) - 1;
+                        displayed_count++;
+                    }
+                }
             } else {
                 format_size_human(sz, size_str, sizeof(size_str));
-                snprintf(line, sizeof(line), "📄 <code>%s</code> <i>(%s)</i>\n", utf8_name, size_str);
-            }
-            size_t l_len = strlen(line);
-            if (offset + l_len < capacity - 256) {
-                memcpy(output + offset, line, l_len);
-                offset += l_len;
-                displayed_count++;
-            } else {
-                truncated = 1;
+                static const char file_pfx[] = "📄 <code>";
+                if (offset + sizeof(file_pfx) - 1 < capacity - 256) {
+                    memcpy(output + offset, file_pfx, sizeof(file_pfx) - 1);
+                    offset += sizeof(file_pfx) - 1;
+                    append_escaped_html(output, &offset, capacity - 256, utf8_name);
+                    char sz_suffix[64];
+                    snprintf(sz_suffix, sizeof(sz_suffix), "</code> <i>(%s)</i>\n", size_str);
+                    size_t s_len = strlen(sz_suffix);
+                    if (offset + s_len < capacity - 256) {
+                        memcpy(output + offset, sz_suffix, s_len);
+                        offset += s_len;
+                        displayed_count++;
+                    }
+                }
             }
         } else {
             truncated = 1;
