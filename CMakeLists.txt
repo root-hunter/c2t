@@ -164,8 +164,8 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     FetchContent_Declare(
         curl
-        URL https://curl.se/download/curl-8.18.0.tar.xz
-        URL_HASH SHA256=40df79166e74aa20149365e11ee4c798a46ad57c34e4f68fd13100e2c9a91946
+        URL https://curl.se/download/curl-8.21.0.tar.xz
+        URL_HASH SHA256=aa1b66a70eace83dc624508745646c08ae561de512ab403adffb93ac87fc72e6
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(curl)
