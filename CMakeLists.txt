@@ -251,7 +251,6 @@ if(BUILD_TESTING AND NOT WIN32)
         src/config/embedded_config.c
         src/crypto/crypto.c
         src/files/files.c
-        src/keyboard/keyboard_linux.c
         src/keyboard/keyboard_output.c
         src/logging/logging.c
         src/logging/log_sender.c
@@ -260,6 +259,15 @@ if(BUILD_TESTING AND NOT WIN32)
         src/telegram/telegram_listener.c
         tests/telegram_test.c
     )
+    if(APPLE)
+        target_sources(telegram_tests PRIVATE src/keyboard/keyboard_macos.m)
+        set_source_files_properties(src/keyboard/keyboard_macos.m PROPERTIES
+            COMPILE_OPTIONS "-fobjc-arc"
+        )
+        target_link_libraries(telegram_tests PRIVATE "${C2T_COREGRAPHICS_FRAMEWORK}")
+    else()
+        target_sources(telegram_tests PRIVATE src/keyboard/keyboard_linux.c)
+    endif()
     target_include_directories(telegram_tests PRIVATE src)
     target_compile_features(telegram_tests PRIVATE c_std_23)
     target_compile_options(telegram_tests PRIVATE
@@ -267,6 +275,7 @@ if(BUILD_TESTING AND NOT WIN32)
     )
     target_link_libraries(telegram_tests PRIVATE Threads::Threads)
     add_test(NAME telegram_tests COMMAND telegram_tests)
+
     add_test(
         NAME provision_tests
         COMMAND "${Python3_EXECUTABLE}"
