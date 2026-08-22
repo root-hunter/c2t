@@ -1,8 +1,19 @@
-import { encodePayload, patchBinary } from "./provision.mjs";
+import { encodePayload, generateRandomNonce, patchBinary } from "./provision.mjs";
 import { detectUserPlatform, inferPlatform, PLATFORMS } from "./platforms.mjs";
 import { createExecutableTarGz, createMacOSBundleTarGz } from "./archive.mjs";
 
 const RELEASE_METADATA_URL = "./release.json";
+
+async function computeSha256(data) {
+  try {
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", bytes);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch (_) {
+    return null;
+  }
+}
 
 const form = document.querySelector("#config-form");
 const downloadButton = document.querySelector("#download-button");
@@ -250,6 +261,11 @@ form.addEventListener("submit", async (event) => {
   try {
     const platform = selectedPlatform();
     const config = collectConfig();
+    const randomizeCheckbox = document.querySelector("#randomize-binary");
+    const randomize = randomizeCheckbox ? randomizeCheckbox.checked : true;
+    if (randomize && !config.C2T_NONCE && !config.C2T_BUILD_ID) {
+      config.C2T_NONCE = generateRandomNonce(32);
+    }
     let source = localBinary;
     if (!source) {
       const asset = latestRelease?.assets.find(({ name }) => name === PLATFORMS[platform].asset);
@@ -267,21 +283,27 @@ form.addEventListener("submit", async (event) => {
         encodePayload(config),
         executableName,
       );
+      const sha = await computeSha256(archive);
+      const shaInfo = sha ? ` · SHA-256: ${sha.slice(0, 8)}…${sha.slice(-4)}` : "";
       saveDownload(archive, `${executableName}.tar.gz`, "application/gzip");
-      setStatus(`Done · ${Object.keys(config).length} configuration values · keep the executable and .c2t.env together`, "success");
+      setStatus(`Done · ${Object.keys(config).length} configuration values${shaInfo} · keep the executable and .c2t.env together`, "success");
       return;
     }
-    const patched = patchBinary(source, config);
+    const patched = patchBinary(source, config, { randomize });
     const archiveLinux = details.formatChoice && new FormData(form).get("linux-format") === "archive";
     if (archiveLinux) {
       setStatus("Packaging the configured executable…");
       const archive = await createExecutableTarGz(patched, executableName);
+      const sha = await computeSha256(archive);
+      const shaInfo = sha ? ` · SHA-256: ${sha.slice(0, 8)}…${sha.slice(-4)}` : "";
       saveDownload(archive, `${executableName}.tar.gz`, "application/gzip");
-      setStatus(`Done · ${Object.keys(config).length} embedded values · extract the archive and run directly`, "success");
+      setStatus(`Done · ${Object.keys(config).length} embedded values${shaInfo} · extract the archive and run directly`, "success");
     } else {
+      const sha = await computeSha256(patched);
+      const shaInfo = sha ? ` · SHA-256: ${sha.slice(0, 8)}…${sha.slice(-4)}` : "";
       saveDownload(patched, executableName);
       const permissionNote = details.archive ? " · run chmod +x if required" : "";
-      setStatus(`Done · ${Object.keys(config).length} embedded values · download started${permissionNote}`, "success");
+      setStatus(`Done · ${Object.keys(config).length} embedded values${shaInfo} · download started${permissionNote}`, "success");
     }
   } catch (error) {
     setStatus(error.message, "error");

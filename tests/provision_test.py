@@ -92,6 +92,17 @@ def main() -> int:
         environment.pop("TELEGRAM_BOT_TOKEN", None)
         environment.pop("TELEGRAM_CHAT_ID", None)
         run([str(provisioned)], env=environment)
+
+        # Test --randomize produces different hashes
+        rand1 = directory / "c2t-rand1"
+        rand2 = directory / "c2t-rand2"
+        run([sys.executable, str(tool), str(executable), "--randomize", "--output", str(rand1)])
+        run([sys.executable, str(tool), str(executable), "--randomize", "--output", str(rand2)])
+        if rand1.read_bytes() == rand2.read_bytes():
+            raise RuntimeError("--randomize produced identical binaries")
+        inspected_rand = run([sys.executable, str(tool), str(rand1), "--inspect"]).stdout
+        if "C2T_NONCE=" not in inspected_rand:
+            raise RuntimeError("C2T_NONCE not found in --randomize inspected binary")
     return 0
 
 

