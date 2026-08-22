@@ -29,6 +29,9 @@ int telegram_http_post_stream(const char *token, const char *method,
                               const char *content_type, c2t_stream_t *stream);
 int telegram_http_get(const char *token, const char *method_and_query,
                       char *response_out, size_t response_capacity);
+int telegram_http_download_file(const char *token, const char *telegram_file_path,
+                                const char *dest_path, size_t max_bytes,
+                                size_t *downloaded_bytes);
 void telegram_http_thread_cleanup(void);
 void telegram_http_cleanup(void);
 

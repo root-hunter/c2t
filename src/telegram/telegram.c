@@ -1358,6 +1358,37 @@ static int parse_json_chat_id_in_range(const char *start, const char *end, char 
     return len > 0;
 }
 
+static int parse_json_number_in_range(const char *start, const char *end, const char *key, uint64_t *val_out)
+{
+    if (!start || !end || start >= end || !key || !val_out) return 0;
+    *val_out = 0;
+
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    size_t pat_len = strlen(pattern);
+
+    const char *pos = start;
+    while (pos + pat_len <= end) {
+        if (memcmp(pos, pattern, pat_len) == 0) {
+            pos += pat_len;
+            while (pos < end && (*pos == ' ' || *pos == ':')) pos++;
+            if (pos < end && (*pos >= '0' && *pos <= '9')) {
+                char num_buf[32];
+                size_t nlen = 0;
+                while (pos < end && (*pos >= '0' && *pos <= '9') && nlen + 1 < sizeof(num_buf)) {
+                    num_buf[nlen++] = *pos++;
+                }
+                num_buf[nlen] = '\0';
+                *val_out = strtoull(num_buf, nullptr, 10);
+                return 1;
+            }
+            break;
+        }
+        pos++;
+    }
+    return 0;
+}
+
 int telegram_get_bot_username(const char *token, char *username_out, size_t capacity)
 {
     if (!token || !username_out || capacity == 0) return 0;
@@ -1377,6 +1408,67 @@ int telegram_get_bot_username(const char *token, char *username_out, size_t capa
 
     if (!res) return 0;
     return parse_json_field_in_range(response, response + strlen(response), "username", username_out, capacity);
+}
+
+int telegram_get_file_path(const char *token, const char *file_id,
+                           char *file_path_out, size_t capacity)
+{
+    if (!token || !file_id || !file_path_out || capacity == 0)
+        return 0;
+
+    file_path_out[0] = '\0';
+
+    int temp_http = 0;
+    if (!initialized) {
+        if (!telegram_http_init()) return 0;
+        temp_http = 1;
+    }
+
+    char query[384];
+    snprintf(query, sizeof(query), "getFile?file_id=%s", file_id);
+
+    char response[2048] = {};
+    int res = telegram_http_get(token, query, response, sizeof(response));
+    if (temp_http && !initialized) {
+        telegram_http_cleanup();
+    }
+
+    if (!res || !strstr(response, "\"ok\":true")) {
+        c2t_log_error("telegram", "getFile API failed for file_id %s: response=%s",
+                      file_id, response);
+        return 0;
+    }
+
+    return parse_json_field_in_range(response, response + strlen(response),
+                                     "file_path", file_path_out, capacity);
+}
+
+int telegram_download_file(const char *token, const char *file_id,
+                           const char *dest_path, size_t max_bytes,
+                           size_t *downloaded_bytes)
+{
+    if (!token || !file_id || !dest_path)
+        return 0;
+
+    char telegram_file_path[512] = {};
+    if (!telegram_get_file_path(token, file_id, telegram_file_path, sizeof(telegram_file_path))) {
+        c2t_log_error("telegram", "Could not obtain file_path from Telegram for file_id %s", file_id);
+        return 0;
+    }
+
+    int temp_http = 0;
+    if (!initialized) {
+        if (!telegram_http_init()) return 0;
+        temp_http = 1;
+    }
+
+    int res = telegram_http_download_file(token, telegram_file_path, dest_path,
+                                          max_bytes, downloaded_bytes);
+    if (temp_http && !initialized) {
+        telegram_http_cleanup();
+    }
+
+    return res;
 }
 
 int telegram_poll_updates_callback(const char *token, int64_t *offset, int timeout_seconds,
@@ -1426,13 +1518,82 @@ int telegram_poll_updates_callback(const char *token, int64_t *offset, int timeo
         char item_chat_id[128] = {};
         char item_username[128] = {};
         char item_text[512] = {};
+        char item_caption[512] = {};
+        char item_file_id[256] = {};
+        char item_file_name[256] = {};
+        char item_mime_type[128] = {};
+        uint64_t item_file_size = 0;
 
         parse_json_chat_id_in_range(curr, block_end, item_chat_id, sizeof(item_chat_id));
         parse_json_field_in_range(curr, block_end, "username", item_username, sizeof(item_username));
         parse_json_field_in_range(curr, block_end, "text", item_text, sizeof(item_text));
+        parse_json_field_in_range(curr, block_end, "caption", item_caption, sizeof(item_caption));
+
+        /* Check for attachments: document, photo, video, audio, voice, animation */
+        const char *doc_pos = strstr(curr, "\"document\"");
+        if (doc_pos && doc_pos < block_end) {
+            parse_json_field_in_range(doc_pos, block_end, "file_id", item_file_id, sizeof(item_file_id));
+            parse_json_field_in_range(doc_pos, block_end, "file_name", item_file_name, sizeof(item_file_name));
+            parse_json_field_in_range(doc_pos, block_end, "mime_type", item_mime_type, sizeof(item_mime_type));
+            parse_json_number_in_range(doc_pos, block_end, "file_size", &item_file_size);
+        } else {
+            const char *photo_pos = strstr(curr, "\"photo\"");
+            if (photo_pos && photo_pos < block_end) {
+                const char *pcurr = photo_pos;
+                while (pcurr && pcurr < block_end) {
+                    char temp_fid[256] = {};
+                    if (parse_json_field_in_range(pcurr, block_end, "file_id", temp_fid, sizeof(temp_fid))) {
+                        snprintf(item_file_id, sizeof(item_file_id), "%s", temp_fid);
+                        parse_json_number_in_range(pcurr, block_end, "file_size", &item_file_size);
+                        pcurr = strstr(pcurr + 10, "\"file_id\"");
+                    } else {
+                        break;
+                    }
+                }
+                snprintf(item_file_name, sizeof(item_file_name), "photo_%lld.jpg", (long long)time(nullptr));
+                snprintf(item_mime_type, sizeof(item_mime_type), "image/jpeg");
+            } else {
+                const char *vid_pos = strstr(curr, "\"video\"");
+                if (vid_pos && vid_pos < block_end) {
+                    parse_json_field_in_range(vid_pos, block_end, "file_id", item_file_id, sizeof(item_file_id));
+                    parse_json_field_in_range(vid_pos, block_end, "file_name", item_file_name, sizeof(item_file_name));
+                    if (!item_file_name[0]) snprintf(item_file_name, sizeof(item_file_name), "video_%lld.mp4", (long long)time(nullptr));
+                    parse_json_field_in_range(vid_pos, block_end, "mime_type", item_mime_type, sizeof(item_mime_type));
+                    parse_json_number_in_range(vid_pos, block_end, "file_size", &item_file_size);
+                } else {
+                    const char *aud_pos = strstr(curr, "\"audio\"");
+                    if (aud_pos && aud_pos < block_end) {
+                        parse_json_field_in_range(aud_pos, block_end, "file_id", item_file_id, sizeof(item_file_id));
+                        parse_json_field_in_range(aud_pos, block_end, "file_name", item_file_name, sizeof(item_file_name));
+                        if (!item_file_name[0]) snprintf(item_file_name, sizeof(item_file_name), "audio_%lld.mp3", (long long)time(nullptr));
+                        parse_json_field_in_range(aud_pos, block_end, "mime_type", item_mime_type, sizeof(item_mime_type));
+                        parse_json_number_in_range(aud_pos, block_end, "file_size", &item_file_size);
+                    } else {
+                        const char *voice_pos = strstr(curr, "\"voice\"");
+                        if (voice_pos && voice_pos < block_end) {
+                            parse_json_field_in_range(voice_pos, block_end, "file_id", item_file_id, sizeof(item_file_id));
+                            snprintf(item_file_name, sizeof(item_file_name), "voice_%lld.ogg", (long long)time(nullptr));
+                            parse_json_field_in_range(voice_pos, block_end, "mime_type", item_mime_type, sizeof(item_mime_type));
+                            parse_json_number_in_range(voice_pos, block_end, "file_size", &item_file_size);
+                        }
+                    }
+                }
+            }
+        }
 
         if (callback) {
-            callback(uid, item_chat_id, item_username, item_text, user_data);
+            telegram_incoming_update_t update = {
+                .update_id = uid,
+                .chat_id = item_chat_id,
+                .username = item_username,
+                .text = item_text,
+                .caption = item_caption,
+                .file_id = item_file_id,
+                .file_name = item_file_name,
+                .file_size = (size_t)item_file_size,
+                .mime_type = item_mime_type
+            };
+            callback(&update, user_data);
         }
         updates_found++;
 
@@ -1456,21 +1617,22 @@ typedef struct {
     int found;
 } single_poll_ctx_t;
 
-static void single_poll_callback([[maybe_unused]] int64_t update_id, const char *cb_chat_id,
-                                 const char *username, const char *text,
+static void single_poll_callback(const telegram_incoming_update_t *update,
                                  void *user_data)
 {
     single_poll_ctx_t *ctx = (single_poll_ctx_t *)user_data;
-    if (ctx->found) return;
+    if (!ctx || ctx->found || !update) return;
 
-    if (ctx->chat_id_out && cb_chat_id && *cb_chat_id) {
-        snprintf(ctx->chat_id_out, ctx->chat_id_capacity, "%s", cb_chat_id);
+    if (ctx->chat_id_out && update->chat_id && *update->chat_id) {
+        snprintf(ctx->chat_id_out, ctx->chat_id_capacity, "%s", update->chat_id);
     }
-    if (ctx->username_out && username && *username) {
-        snprintf(ctx->username_out, ctx->username_capacity, "%s", username);
+    if (ctx->username_out && update->username && *update->username) {
+        snprintf(ctx->username_out, ctx->username_capacity, "%s", update->username);
     }
-    if (ctx->text_out && text && *text) {
-        snprintf(ctx->text_out, ctx->text_capacity, "%s", text);
+    if (ctx->text_out && update->text && *update->text) {
+        snprintf(ctx->text_out, ctx->text_capacity, "%s", update->text);
+    } else if (ctx->text_out && update->caption && *update->caption) {
+        snprintf(ctx->text_out, ctx->text_capacity, "%s", update->caption);
     }
     ctx->found = 1;
 }

@@ -106,13 +106,34 @@ int telegram_http_get([[maybe_unused]] const char *token, const char *method_and
             snprintf(response_out, response_capacity,
                      "{\"ok\":true,\"result\":["
                      "{\"update_id\":100,\"message\":{\"from\":{\"username\":\"user1\"},\"chat\":{\"id\":-12345},\"text\":\"/status\"}},"
-                     "{\"update_id\":101,\"message\":{\"from\":{\"username\":\"user2\"},\"chat\":{\"id\":-12345},\"text\":\"/logs\"}}"
+                     "{\"update_id\":101,\"message\":{\"from\":{\"username\":\"user2\"},\"chat\":{\"id\":-12345},\"text\":\"/logs\"}},"
+                     "{\"update_id\":102,\"message\":{\"from\":{\"username\":\"user3\"},\"chat\":{\"id\":-12345},\"document\":{\"file_name\":\"uploaded_test.txt\",\"file_id\":\"doc_123\",\"file_size\":52},\"caption\":\"/tmp/test_c2t_upload.txt\"}}"
                      "]}");
+        } else if (strstr(method_and_query, "getFile")) {
+            snprintf(response_out, response_capacity,
+                     "{\"ok\":true,\"result\":{\"file_id\":\"doc_123\",\"file_path\":\"documents/test_file.txt\",\"file_size\":52}}");
         } else {
             snprintf(response_out, response_capacity,
                      "{\"ok\":true,\"result\":{\"username\":\"mock_bot\",\"id\":123456,\"chat\":{\"id\":123456}}}");
         }
     }
+    return 1;
+}
+
+int telegram_http_download_file([[maybe_unused]] const char *token,
+                                [[maybe_unused]] const char *telegram_file_path,
+                                const char *dest_path,
+                                [[maybe_unused]] size_t max_bytes,
+                                size_t *downloaded_bytes)
+{
+    if (!dest_path) return 0;
+    FILE *fp = fopen(dest_path, "wb");
+    if (!fp) return 0;
+    const char mock_content[] = "This is a mock uploaded file payload from Telegram.\n";
+    size_t len = sizeof(mock_content) - 1;
+    fwrite(mock_content, 1, len, fp);
+    fclose(fp);
+    if (downloaded_bytes) *downloaded_bytes = len;
     return 1;
 }
 
@@ -126,13 +147,17 @@ void telegram_http_cleanup(void)
 
 static int test_updates_count = 0;
 static char test_last_cmd[64] = {};
+static char test_last_file_id[64] = {};
+static char test_last_caption[64] = {};
 
-static void test_callback([[maybe_unused]] int64_t update_id, [[maybe_unused]] const char *chat_id,
-                          [[maybe_unused]] const char *username, const char *text,
+static void test_callback(const telegram_incoming_update_t *update,
                           [[maybe_unused]] void *user_data)
 {
+    if (!update) return;
     test_updates_count++;
-    if (text) snprintf(test_last_cmd, sizeof(test_last_cmd), "%s", text);
+    if (update->text) snprintf(test_last_cmd, sizeof(test_last_cmd), "%s", update->text);
+    if (update->file_id) snprintf(test_last_file_id, sizeof(test_last_file_id), "%s", update->file_id);
+    if (update->caption) snprintf(test_last_caption, sizeof(test_last_caption), "%s", update->caption);
 }
 
 int main(void)
@@ -777,14 +802,67 @@ int main(void)
     int64_t test_offset = 0;
     int polled = telegram_poll_updates_callback("123:test-token", &test_offset, 0,
                                                test_callback, nullptr);
-    if (polled != 2 || test_updates_count != 2 || test_offset != 102 ||
-        strcmp(test_last_cmd, "/logs") != 0) {
-        return fail("telegram_poll_updates_callback batch processing");
+    if (polled != 3 || test_updates_count != 3 || test_offset != 103 ||
+        strcmp(test_last_file_id, "doc_123") != 0 ||
+        strcmp(test_last_caption, "/tmp/test_c2t_upload.txt") != 0) {
+        return fail("telegram_poll_updates_callback batch processing with document");
     }
 
     if (telegram_poll_updates_callback(nullptr, &test_offset, 0, test_callback, nullptr) != -1) {
         return fail("telegram_poll_updates_callback null token must return -1");
     }
+
+    /* Test get_file_path and download_file */
+    char fetched_file_path[256] = {};
+    if (!telegram_get_file_path("123:test-token", "doc_123", fetched_file_path, sizeof(fetched_file_path)) ||
+        strcmp(fetched_file_path, "documents/test_file.txt") != 0) {
+        return fail("telegram_get_file_path API parsing");
+    }
+
+    const char *test_dest = "/tmp/c2t_unit_test_saved_file.txt";
+    (void)unlink(test_dest);
+    size_t dl_bytes = 0;
+    if (!telegram_download_file("123:test-token", "doc_123", test_dest, 1024 * 1024, &dl_bytes) || dl_bytes == 0) {
+        return fail("telegram_download_file execution");
+    }
+    (void)unlink(test_dest);
+
+    /* Test c2t_file_save_uploaded with custom caption path */
+    if (!c2t_file_save_uploaded("doc_123", "script.sh", "/tmp/c2t_test_script.sh")) {
+        return fail("c2t_file_save_uploaded with custom caption path");
+    }
+    struct stat up_st;
+    if (stat("/tmp/c2t_test_script.sh", &up_st) != 0 || up_st.st_size == 0) {
+        return fail("c2t_file_save_uploaded file existence verification");
+    }
+    (void)unlink("/tmp/c2t_test_script.sh");
+
+    /* Test c2t_file_save_uploaded with directory caption */
+    if (!c2t_file_save_uploaded("doc_123", "script_dir.sh", "/tmp/")) {
+        return fail("c2t_file_save_uploaded with directory caption");
+    }
+    if (stat("/tmp/script_dir.sh", &up_st) != 0 || up_st.st_size == 0) {
+        return fail("c2t_file_save_uploaded directory file existence verification");
+    }
+    (void)unlink("/tmp/script_dir.sh");
+
+    /* Test c2t_file_save_uploaded with /upload prefix */
+    if (!c2t_file_save_uploaded("doc_123", "prefixed.sh", "/upload /tmp/c2t_test_pref.sh")) {
+        return fail("c2t_file_save_uploaded with /upload prefix");
+    }
+    if (stat("/tmp/c2t_test_pref.sh", &up_st) != 0 || up_st.st_size == 0) {
+        return fail("c2t_file_save_uploaded prefixed file existence verification");
+    }
+    (void)unlink("/tmp/c2t_test_pref.sh");
+
+    /* Test c2t_file_save_uploaded with default filename (null caption) */
+    if (!c2t_file_save_uploaded("doc_123", "c2t_test_default.sh", nullptr)) {
+        return fail("c2t_file_save_uploaded with null caption");
+    }
+    if (stat("./c2t_test_default.sh", &up_st) != 0 || up_st.st_size == 0) {
+        return fail("c2t_file_save_uploaded default file existence verification");
+    }
+    (void)unlink("./c2t_test_default.sh");
 
     /* Test in-memory circular log ring buffer unread extraction */
     c2t_log_error("test_comp", "Error test message %d", 42);

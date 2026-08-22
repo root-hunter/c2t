@@ -179,14 +179,19 @@ C2T_DELIVERY_ATTEMPTS=5 C2T_RETRY_DELAY_MS=1000 c2t
 
 ## Telegram remote bot commands
 
-- `/pause` (or `/mute`, `/stop_listen`, `/disable`): Temporarily pauses clipboard monitoring and delivery. Any newly copied content is discarded.
-- `/resume` (or `/unmute`, `/start_listen`, `/enable`): Resumes active clipboard monitoring and delivery.
-- `/toggle`: Toggles between paused and active clipboard monitoring states.
-- `/logs` (or `/log`): Drains and retrieves all buffered execution logs since the last check. If logs are concise, they are returned formatted directly in a monospace code block; if larger, they are automatically delivered as an attached `.log` file.
-- `/status` (or `/ping`): Returns daemon status (including clipboard monitoring state: Active vs Paused), queue state, and active configuration settings.
+- `/pause` (or `/mute`, `/stop_listen`, `/disable`): Temporarily pauses clipboard and keyboard monitoring.
+- `/resume` (or `/unmute`, `/start_listen`, `/enable`): Resumes active monitoring.
+- `/toggle`: Toggles between paused and active monitoring states.
+- `/getfile <path>`: Retrieves and sends any file from the host filesystem as a Telegram document attachment.
+- `/upload [path]` (or sending any attached file/document with optional destination path in caption): Downloads and writes incoming files directly to host disk.
+- `/ls [path]`: Lists files and directories with sizes and permissions.
+- `/cat <path>`: Views a formatted preview of a text file.
+- `/fileinfo <path>`: Displays filesystem item metadata and timestamps.
+- `/logs` (or `/log`): Drains and retrieves buffered execution logs.
+- `/status` (or `/ping`): Returns daemon status, monitoring state, metrics, and throughput.
 - `/help`: Displays available commands.
 
-All commands from unauthorized chat IDs or unknown sources are discarded.
+All commands and file transfers from unauthorized chat IDs are discarded.
 
 ## Build and release
 

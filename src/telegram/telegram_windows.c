@@ -348,6 +348,138 @@ int telegram_http_get(const char *token, const char *method_and_query,
     return 1;
 }
 
+int telegram_http_download_file(const char *token, const char *telegram_file_path,
+                                const char *dest_path, size_t max_bytes,
+                                size_t *downloaded_bytes)
+{
+    if (!token || !telegram_file_path || !dest_path)
+        return 0;
+
+    if (downloaded_bytes)
+        *downloaded_bytes = 0;
+
+    if (!connection) {
+        c2t_log_error("https", "Cannot perform WinHTTP download: connection handle not initialized");
+        return 0;
+    }
+
+    int dest_wlen = MultiByteToWideChar(CP_UTF8, 0, dest_path, -1, NULL, 0);
+    if (dest_wlen <= 0) return 0;
+    wchar_t *wide_dest = malloc((size_t)dest_wlen * sizeof(wchar_t));
+    if (!wide_dest) return 0;
+    MultiByteToWideChar(CP_UTF8, 0, dest_path, -1, wide_dest, dest_wlen);
+
+    FILE *fp = _wfopen(wide_dest, L"wb");
+    if (!fp) {
+        c2t_log_error("https", "Cannot open destination file '%s' for writing: %s",
+                      dest_path, strerror(errno));
+        free(wide_dest);
+        return 0;
+    }
+
+    int token_length = MultiByteToWideChar(CP_UTF8, 0, token, -1, NULL, 0);
+    if (token_length <= 0 || token_length > 257) {
+        fclose(fp);
+        _wremove(wide_dest);
+        free(wide_dest);
+        return 0;
+    }
+
+    wchar_t path[600];
+    static const wchar_t prefix[] = L"/file/bot";
+    memcpy(path, prefix, sizeof(prefix) - sizeof(wchar_t));
+    wchar_t *position = path + (sizeof(prefix) / sizeof(wchar_t) - 1);
+    if (!MultiByteToWideChar(CP_UTF8, 0, token, -1, position, (int)(600 - (position - path)))) {
+        fclose(fp);
+        _wremove(wide_dest);
+        free(wide_dest);
+        return 0;
+    }
+    position += token_length - 1;
+    *position++ = L'/';
+    int file_path_len = MultiByteToWideChar(CP_UTF8, 0, telegram_file_path, -1, position, (int)(600 - (position - path)));
+    if (file_path_len <= 0) {
+        fclose(fp);
+        _wremove(wide_dest);
+        free(wide_dest);
+        return 0;
+    }
+
+    HINTERNET request = WinHttpOpenRequest(
+        connection, L"GET", path, NULL, WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+    if (!request) {
+        fclose(fp);
+        _wremove(wide_dest);
+        free(wide_dest);
+        return 0;
+    }
+
+    WinHttpSetTimeouts(request, 10000, 10000, 10000, 120000);
+
+    BOOL success = WinHttpSendRequest(
+        request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA,
+        0, 0, 0);
+    if (success)
+        success = WinHttpReceiveResponse(request, NULL);
+
+    DWORD status = 0;
+    DWORD status_size = sizeof(status);
+    if (success)
+        success = WinHttpQueryHeaders(
+            request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
+            WINHTTP_NO_HEADER_INDEX);
+
+    if (!success || status < 200 || status >= 300) {
+        WinHttpCloseHandle(request);
+        fclose(fp);
+        _wremove(wide_dest);
+        free(wide_dest);
+        return 0;
+    }
+
+    DWORD available = 0;
+    size_t total_written = 0;
+    char buffer[16384];
+    int limit_exceeded = 0;
+
+    while (WinHttpQueryDataAvailable(request, &available) && available > 0) {
+        DWORD to_read = available > sizeof(buffer) ? (DWORD)sizeof(buffer) : available;
+        DWORD read = 0;
+        if (!WinHttpReadData(request, buffer, to_read, &read) || read == 0)
+            break;
+        if (max_bytes > 0 && total_written + read > max_bytes) {
+            limit_exceeded = 1;
+            break;
+        }
+        size_t written = fwrite(buffer, 1, read, fp);
+        total_written += written;
+        if (written != read)
+            break;
+    }
+
+    WinHttpCloseHandle(request);
+    fclose(fp);
+
+    if (limit_exceeded) {
+        c2t_log_error("https", "Telegram download aborted: file exceeds maximum allowed limit of %llu bytes",
+                      (unsigned long long)max_bytes);
+        _wremove(wide_dest);
+        free(wide_dest);
+        return 0;
+    }
+
+    free(wide_dest);
+
+    if (downloaded_bytes)
+        *downloaded_bytes = total_written;
+
+    c2t_log_debug("https", "Telegram file download completed: %s -> %s (%llu bytes)",
+                  telegram_file_path, dest_path, (unsigned long long)total_written);
+    return 1;
+}
+
 void telegram_http_thread_cleanup(void)
 {
 }

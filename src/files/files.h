@@ -43,6 +43,9 @@ enum {
 [[nodiscard]] int c2t_file_get_info(const char *path, char *output,
                                     size_t capacity);
 
+[[nodiscard]] int c2t_file_save_uploaded(const char *file_id, const char *file_name,
+                                         const char *caption);
+
 [[nodiscard]] uint64_t c2t_files_get_total_bytes(void);
 [[nodiscard]] uint64_t c2t_files_get_total_files(void);
 

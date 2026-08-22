@@ -22,6 +22,7 @@
 
 #include <curl/curl.h>
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -345,6 +346,110 @@ int telegram_http_get(const char *token, const char *method_and_query,
         return 0;
     }
 
+    return 1;
+}
+
+typedef struct {
+    FILE *fp;
+    size_t total_written;
+    size_t max_bytes;
+    int limit_exceeded;
+} download_context_t;
+
+static size_t download_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
+{
+    if (nmemb && size > SIZE_MAX / nmemb) return 0;
+    size_t total = size * nmemb;
+    download_context_t *ctx = (download_context_t *)userdata;
+    if (!ctx || !ctx->fp) return 0;
+
+    if (ctx->max_bytes > 0 && ctx->total_written + total > ctx->max_bytes) {
+        ctx->limit_exceeded = 1;
+        return 0;
+    }
+
+    size_t written = fwrite(ptr, 1, total, ctx->fp);
+    ctx->total_written += written;
+    return written;
+}
+
+int telegram_http_download_file(const char *token, const char *telegram_file_path,
+                                const char *dest_path, size_t max_bytes,
+                                size_t *downloaded_bytes)
+{
+    if (!token || !telegram_file_path || !dest_path)
+        return 0;
+
+    if (downloaded_bytes)
+        *downloaded_bytes = 0;
+
+    CURL *curl = acquire_curl_handle();
+    if (!curl) {
+        c2t_log_error("https", "Cannot perform HTTP download: failed to allocate curl handle");
+        return 0;
+    }
+
+    FILE *fp = fopen(dest_path, "wb");
+    if (!fp) {
+        c2t_log_error("https", "Cannot open destination file '%s' for writing: %s",
+                      dest_path, strerror(errno));
+        return 0;
+    }
+
+    download_context_t ctx = {
+        .fp = fp,
+        .total_written = 0,
+        .max_bytes = max_bytes,
+        .limit_exceeded = 0
+    };
+
+    char url[600];
+    int url_length = snprintf(url, sizeof(url),
+                              "https://api.telegram.org/file/bot%s/%s",
+                              token, telegram_file_path);
+    if (url_length < 0 || (size_t)url_length >= sizeof(url)) {
+        fclose(fp);
+        (void)remove(dest_path);
+        return 0;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, download_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, C2T_USER_AGENT);
+
+    CURLcode result = curl_easy_perform(curl);
+    long status = 0;
+    if (result == CURLE_OK)
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+
+    fclose(fp);
+
+    if (result != CURLE_OK || status < 200 || status >= 300) {
+        if (ctx.limit_exceeded) {
+            c2t_log_error("https", "Telegram download aborted: file exceeds maximum allowed limit of %llu bytes",
+                          (unsigned long long)max_bytes);
+        } else {
+            c2t_log_error("https", "Telegram download failed: path=%s, HTTP=%ld, curl_error=%d",
+                          telegram_file_path, status, (int)result);
+        }
+        (void)remove(dest_path);
+        if (result != CURLE_OK) {
+            curl_easy_cleanup(thread_curl_handle);
+            thread_curl_handle = nullptr;
+        }
+        return 0;
+    }
+
+    if (downloaded_bytes)
+        *downloaded_bytes = ctx.total_written;
+
+    c2t_log_debug("https", "Telegram file download completed: %s -> %s (%llu bytes)",
+                  telegram_file_path, dest_path, (unsigned long long)ctx.total_written);
     return 1;
 }
 

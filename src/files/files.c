@@ -1167,6 +1167,187 @@ int c2t_file_get_info(const char *path_str, char *output, size_t capacity)
     return 1;
 }
 
+static int is_directory_path(const char *path)
+{
+    if (!path || !*path) return 0;
+    size_t len = strlen(path);
+    if (path[len - 1] == '/' || path[len - 1] == '\\')
+        return 1;
+
+    c2t_stat_t st;
+#ifdef _WIN32
+    wchar_t *wpath = utf8_path(path);
+    if (!wpath) return 0;
+    int res = _wstat64(wpath, &st);
+    free(wpath);
+    if (res == 0 && (st.st_mode & _S_IFDIR)) return 1;
+#else
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) return 1;
+#endif
+    return 0;
+}
+
+static void ensure_parent_dirs_exist(const char *filepath)
+{
+    if (!filepath) return;
+    char path_buf[1024];
+    snprintf(path_buf, sizeof(path_buf), "%s", filepath);
+    char *p = path_buf;
+
+#ifdef _WIN32
+    if (isalpha((unsigned char)p[0]) && p[1] == ':') {
+        p += 2;
+    }
+#endif
+
+    while (*p) {
+        if (*p == '/' || *p == '\\') {
+            char old = *p;
+            *p = '\0';
+            if (strlen(path_buf) > 0) {
+#ifdef _WIN32
+                wchar_t *wpath = utf8_path(path_buf);
+                if (wpath) {
+                    CreateDirectoryW(wpath, NULL);
+                    free(wpath);
+                }
+#else
+                (void)mkdir(path_buf, 0755);
+#endif
+            }
+            *p = old;
+        }
+        p++;
+    }
+}
+
+static void extract_clean_basename(const char *raw_name, char *out, size_t capacity)
+{
+    if (!out || capacity == 0) return;
+    out[0] = '\0';
+    if (!raw_name || !*raw_name) {
+        snprintf(out, capacity, "upload_%lld.bin", (long long)time(nullptr));
+        return;
+    }
+    const char *base = filename_from_path(raw_name);
+    while (isspace((unsigned char)*base)) base++;
+    if (!*base) {
+        snprintf(out, capacity, "upload_%lld.bin", (long long)time(nullptr));
+        return;
+    }
+    size_t len = 0;
+    while (base[len] && len + 1 < capacity) {
+        char c = base[len];
+        if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+            out[len] = '_';
+        } else {
+            out[len] = c;
+        }
+        len++;
+    }
+    out[len] = '\0';
+}
+
+int c2t_file_save_uploaded(const char *file_id, const char *file_name, const char *caption)
+{
+    const c2t_config_t *config = c2t_config_get();
+    if (!config->telegram_enabled || !config->telegram_bot_token || !config->telegram_chat_id) {
+        c2t_log_warning("files", "Cannot save uploaded file: Telegram unconfigured");
+        return 0;
+    }
+    if (!config->telegram_send_files) {
+        c2t_log_warning("files", "File upload ignored: file transfer is disabled in config");
+        telegram_send_html("⚠️ <b>File Upload Rejected</b>\n<i>File transfers are disabled on this daemon (--no-files).</i>");
+        return 0;
+    }
+    if (!file_id || !*file_id) {
+        c2t_log_error("files", "Cannot save upload: file_id is empty");
+        return 0;
+    }
+
+    char clean_name[256] = {};
+    extract_clean_basename(file_name, clean_name, sizeof(clean_name));
+
+    char target_path[1024] = {};
+    const char *cap = caption ? caption : "";
+    while (isspace((unsigned char)*cap)) cap++;
+
+    /* Check if caption has leading command prefix e.g. /upload or /put */
+    if (strncmp(cap, "/upload", 7) == 0 && (cap[7] == ' ' || cap[7] == '\0')) {
+        cap += 7;
+    } else if (strncmp(cap, "/put", 4) == 0 && (cap[4] == ' ' || cap[4] == '\0')) {
+        cap += 4;
+    } else if (strncmp(cap, "/save", 5) == 0 && (cap[5] == ' ' || cap[5] == '\0')) {
+        cap += 5;
+    } else if (strncmp(cap, "/file", 5) == 0 && (cap[5] == ' ' || cap[5] == '\0')) {
+        cap += 5;
+    } else if (strncmp(cap, "/sendfile", 9) == 0 && (cap[9] == ' ' || cap[9] == '\0')) {
+        cap += 9;
+    }
+    while (isspace((unsigned char)*cap)) cap++;
+
+    char *clean_cap = sanitize_input_path(cap);
+    if (clean_cap && *clean_cap) {
+        if (is_directory_path(clean_cap)) {
+            size_t dlen = strlen(clean_cap);
+            char sep = (clean_cap[dlen - 1] == '/' || clean_cap[dlen - 1] == '\\') ? '\0' : '/';
+            if (sep) {
+                snprintf(target_path, sizeof(target_path), "%s/%s", clean_cap, clean_name);
+            } else {
+                snprintf(target_path, sizeof(target_path), "%s%s", clean_cap, clean_name);
+            }
+        } else {
+            snprintf(target_path, sizeof(target_path), "%s", clean_cap);
+        }
+        free(clean_cap);
+    } else {
+        if (clean_cap) free(clean_cap);
+        snprintf(target_path, sizeof(target_path), "./%s", clean_name);
+    }
+
+    ensure_parent_dirs_exist(target_path);
+
+    c2t_log_info("files", "Downloading uploaded file '%s' (file_id: %s) to target '%s'...",
+                 clean_name, file_id, target_path);
+
+    size_t downloaded_bytes = 0;
+    int res = telegram_download_file(config->telegram_bot_token, file_id, target_path,
+                                     config->telegram_max_file_bytes, &downloaded_bytes);
+
+    if (!res) {
+        c2t_log_error("files", "Failed to download and save uploaded file '%s' to '%s'",
+                      clean_name, target_path);
+        char err_msg[1024];
+        snprintf(err_msg, sizeof(err_msg),
+                 "❌ <b>File Upload Failed</b>\n\n"
+                 "• <b>File:</b> <code>%s</code>\n"
+                 "• <b>Target Path:</b> <code>%s</code>\n"
+                 "• <b>Reason:</b> <i>Download or disk write failed (check permissions and max file size limit of %.1f MB).</i>",
+                 clean_name, target_path,
+                 (double)config->telegram_max_file_bytes / (1024.0 * 1024.0));
+        telegram_send_html(err_msg);
+        return 0;
+    }
+
+    char size_str[64] = {};
+    format_size_human((uint64_t)downloaded_bytes, size_str, sizeof(size_str));
+
+    c2t_log_info("files", "File '%s' successfully saved to '%s' (%llu bytes)",
+                 clean_name, target_path, (unsigned long long)downloaded_bytes);
+
+    char success_msg[1200];
+    snprintf(success_msg, sizeof(success_msg),
+             "📥 <b>File Uploaded Successfully</b>\n\n"
+             "• <b>Original File:</b> <code>%s</code>\n"
+             "• <b>Saved to:</b> <code>%s</code>\n"
+             "• <b>Size:</b> %s (<i>%llu bytes</i>)\n"
+             "• <b>Status:</b> 🟢 Written to disk",
+             clean_name, target_path, size_str, (unsigned long long)downloaded_bytes);
+    telegram_send_html(success_msg);
+
+    return 1;
+}
+
 uint64_t c2t_files_get_total_bytes(void)
 {
     files_lock();

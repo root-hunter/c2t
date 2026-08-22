@@ -43,24 +43,39 @@
                                                const c2t_clipboard_source_t *source);
 int telegram_send_html(const char *html_text);
 [[nodiscard]] int telegram_get_bot_username(const char *token, char *username_out, size_t capacity);
-typedef void (*telegram_update_callback_t)(int64_t update_id,
-                                          const char *chat_id,
-                                          const char *username,
-                                          const char *text,
-                                          void *user_data);
+[[nodiscard]] int telegram_get_file_path(const char *token, const char *file_id,
+                                         char *file_path_out, size_t capacity);
+[[nodiscard]] int telegram_download_file(const char *token, const char *file_id,
+                                         const char *dest_path, size_t max_bytes,
+                                         size_t *downloaded_bytes);
+
+typedef struct {
+    int64_t update_id;
+    const char *chat_id;
+    const char *username;
+    const char *text;
+    const char *caption;
+    const char *file_id;
+    const char *file_name;
+    size_t file_size;
+    const char *mime_type;
+} telegram_incoming_update_t;
+
+typedef void (*telegram_update_callback_t)(const telegram_incoming_update_t *update,
+                                           void *user_data);
 
 int telegram_poll_updates_callback(const char *token, int64_t *offset, int timeout_seconds,
                                   telegram_update_callback_t callback, void *user_data);
 [[nodiscard]] int telegram_poll_updates(const char *token, int64_t *offset,
-                                       char *chat_id_out, size_t chat_id_capacity,
-                                       char *username_out, size_t username_capacity,
-                                       char *text_out, size_t text_capacity);
+                                        char *chat_id_out, size_t chat_id_capacity,
+                                        char *username_out, size_t username_capacity,
+                                        char *text_out, size_t text_capacity);
 [[nodiscard]] int telegram_poll_updates_timeout(const char *token, int64_t *offset, int timeout_seconds,
-                                               char *chat_id_out, size_t chat_id_capacity,
-                                               char *username_out, size_t username_capacity,
-                                               char *text_out, size_t text_capacity);
+                                                char *chat_id_out, size_t chat_id_capacity,
+                                                char *username_out, size_t username_capacity,
+                                                char *text_out, size_t text_capacity);
 [[nodiscard]] int telegram_pair(const char *token, const char *expected_code,
-                               char *chat_id_out, size_t capacity, int timeout_seconds);
+                                char *chat_id_out, size_t capacity, int timeout_seconds);
 void telegram_cleanup(void);
 
 #endif
