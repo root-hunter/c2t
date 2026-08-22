@@ -46,13 +46,11 @@ static const unsigned char c2t_embedded_key[32] = {
  * Volatile reads prevent LTO from replacing the reserved bytes with constants.
  */
 #if defined(_MSC_VER)
-#pragma section(".c2tcfg", read)
-__declspec(allocate(".c2tcfg"))
 #define C2T_EMBEDDED_USED
 #elif defined(__APPLE__) && (defined(__GNUC__) || defined(__clang__))
-#define C2T_EMBEDDED_USED __attribute__((section("__DATA,__c2tcfg"), used))
+#define C2T_EMBEDDED_USED __attribute__((used))
 #elif defined(__GNUC__) || defined(__clang__)
-#define C2T_EMBEDDED_USED __attribute__((section(".c2tcfg"), used))
+#define C2T_EMBEDDED_USED __attribute__((used))
 #else
 #define C2T_EMBEDDED_USED
 #endif

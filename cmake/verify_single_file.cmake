@@ -42,15 +42,10 @@ if(PLATFORM STREQUAL "Linux")
             "${EXECUTABLE} was expected to use the glibc dynamic interpreter")
     endif()
 
-    execute_process(
-        COMMAND "${ANALYZER}" -S "${EXECUTABLE}"
-        RESULT_VARIABLE section_result
-        OUTPUT_VARIABLE sections
-        ERROR_VARIABLE section_error
-    )
-    if(NOT section_result EQUAL 0 OR NOT sections MATCHES "\\.c2tcfg")
+    file(READ "${EXECUTABLE}" executable_bytes HEX)
+    if(NOT executable_bytes MATCHES "43325443464700a731d56c92e84bf01d")
         message(FATAL_ERROR
-            "${EXECUTABLE} has no post-link configuration section: ${section_error}")
+            "${EXECUTABLE} has no post-link configuration region")
     endif()
 
     if(STANDALONE)
@@ -80,15 +75,10 @@ elseif(PLATFORM STREQUAL "Windows")
         endif()
     endforeach()
 
-    execute_process(
-        COMMAND "${ANALYZER}" -h "${EXECUTABLE}"
-        RESULT_VARIABLE section_result
-        OUTPUT_VARIABLE sections
-        ERROR_VARIABLE section_error
-    )
-    if(NOT section_result EQUAL 0 OR NOT sections MATCHES "\\.c2tcfg")
+    file(READ "${EXECUTABLE}" executable_bytes HEX)
+    if(NOT executable_bytes MATCHES "43325443464700a731d56c92e84bf01d")
         message(FATAL_ERROR
-            "${EXECUTABLE} has no post-link configuration section: ${section_error}")
+            "${EXECUTABLE} has no post-link configuration region")
     endif()
 
     message(STATUS "Single file verified with embedded configuration section: only Windows system DLLs are required")
@@ -102,10 +92,10 @@ elseif(PLATFORM STREQUAL "Darwin")
     if(NOT analyzer_result EQUAL 0)
         message(FATAL_ERROR "Unable to analyze ${EXECUTABLE}: ${analyzer_error}")
     endif()
-    if(NOT load_commands MATCHES "sectname __c2tcfg" OR
-       NOT load_commands MATCHES "segname __DATA")
+    file(READ "${EXECUTABLE}" executable_bytes HEX)
+    if(NOT executable_bytes MATCHES "43325443464700a731d56c92e84bf01d")
         message(FATAL_ERROR
-            "${EXECUTABLE} has no __DATA,__c2tcfg configuration section")
+            "${EXECUTABLE} has no configuration region")
     endif()
     if(NOT load_commands MATCHES "name /usr/lib/libSystem.B.dylib")
         message(FATAL_ERROR "${EXECUTABLE} has no macOS system runtime load command")

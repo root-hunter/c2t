@@ -111,11 +111,27 @@ else()
 endif()
 
 if(WIN32)
-    target_sources(c2t PRIVATE src/clipboard/clipboard_windows.c src/keyboard/keyboard_windows.c src/telegram/telegram_windows.c)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/c2t.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/c2t.rc"
+        @ONLY
+    )
+    target_sources(c2t PRIVATE
+        src/clipboard/clipboard_windows.c
+        src/keyboard/keyboard_windows.c
+        src/telegram/telegram_windows.c
+        "${CMAKE_CURRENT_BINARY_DIR}/c2t.rc"
+    )
     target_link_libraries(c2t PRIVATE user32 winhttp bcrypt)
 
     if(MINGW)
-        target_link_options(c2t PRIVATE -static -static-libgcc)
+        target_link_options(c2t PRIVATE
+            -static
+            -static-libgcc
+            -Wl,--dynamicbase
+            -Wl,--nxcompat
+            -Wl,--high-entropy-va
+        )
     endif()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include(CheckCSourceCompiles)
