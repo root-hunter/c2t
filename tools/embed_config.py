@@ -55,6 +55,8 @@ ALLOWED_KEYS = {
     "C2T_DELIVERY_ATTEMPTS",
     "C2T_RETRY_DELAY_MS",
     "C2T_KEYBOARD_FLUSH_MS",
+    "C2T_DAEMON_NAME",
+    "C2T_SUPERVISOR_NAME",
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_CHAT_ID",
 }
@@ -72,7 +74,11 @@ FLAG_KEYS = {
     "TELEGRAM_SEND_KEYBOARD",
     "C2T_DISABLE_KEYBOARD",
 }
-SIZE_KEYS = ALLOWED_KEYS - FLAG_KEYS - SENSITIVE_KEYS
+STRING_KEYS = {
+    "C2T_DAEMON_NAME",
+    "C2T_SUPERVISOR_NAME",
+}
+SIZE_KEYS = ALLOWED_KEYS - FLAG_KEYS - SENSITIVE_KEYS - STRING_KEYS
 
 
 class ProvisionError(Exception):
@@ -124,6 +130,8 @@ def parse_config(stream) -> dict[str, str]:
             raise ProvisionError(f"{key} must be 0 or 1")
         if key in SIZE_KEYS and (not value.isascii() or not value.isdecimal() or int(value) == 0):
             raise ProvisionError(f"{key} must be a positive decimal integer")
+        if key in STRING_KEYS and not re.match(r"^[a-zA-Z0-9_.-]{1,15}$", value):
+            raise ProvisionError(f"{key} must be 1-15 alphanumeric characters (_.- allowed)")
         if key == "TELEGRAM_BOT_TOKEN" and len(value.encode("utf-8")) >= 512:
             raise ProvisionError("TELEGRAM_BOT_TOKEN is too long")
         if key == "TELEGRAM_CHAT_ID" and len(value.encode("utf-8")) >= 128:

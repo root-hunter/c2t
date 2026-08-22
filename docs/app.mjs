@@ -76,6 +76,10 @@ function collectConfig() {
   for (const input of form.querySelectorAll('input[type="number"][data-key]')) {
     if (input.value !== "") config[input.dataset.key] = input.value;
   }
+  for (const input of form.querySelectorAll('input[type="text"][data-key]')) {
+    const val = input.value.trim();
+    if (val !== "") config[input.dataset.key] = val;
+  }
 
   const telegramEnabled = config.TELEGRAM_ENABLED === "1";
   const token = tokenInput.value.trim();

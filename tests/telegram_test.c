@@ -581,6 +581,34 @@ int main(void)
     unsetenv("C2T_KEYBOARD_FLUSH_MS");
     c2t_config_load_environment();
 
+    /* Process name configuration tests */
+    unsetenv("C2T_DAEMON_NAME");
+    unsetenv("C2T_SUPERVISOR_NAME");
+    c2t_config_load_environment();
+    if (strcmp(c2t_config_get()->daemon_name, "c2t") != 0 ||
+        strcmp(c2t_config_get()->supervisor_name, "t2c") != 0)
+        return fail("default process names");
+
+    setenv("C2T_DAEMON_NAME", "mydaemon", 1);
+    setenv("C2T_SUPERVISOR_NAME", "mysup", 1);
+    c2t_config_load_environment();
+    if (strcmp(c2t_config_get()->daemon_name, "mydaemon") != 0 ||
+        strcmp(c2t_config_get()->supervisor_name, "mysup") != 0)
+        return fail("custom process names env parsing");
+
+    char *proc_args[] = {(char *)"c2t", (char *)"--daemon-name", (char *)"clidaemon", (char *)"--supervisor-name", (char *)"clisup"};
+    unsetenv("C2T_DAEMON_NAME");
+    unsetenv("C2T_SUPERVISOR_NAME");
+    c2t_config_load_environment();
+    if (c2t_config_apply_arguments(5, proc_args) != nullptr ||
+        strcmp(c2t_config_get()->daemon_name, "clidaemon") != 0 ||
+        strcmp(c2t_config_get()->supervisor_name, "clisup") != 0)
+        return fail("process name cli arguments parsing");
+
+    unsetenv("C2T_DAEMON_NAME");
+    unsetenv("C2T_SUPERVISOR_NAME");
+    c2t_config_load_environment();
+
     /* Keyboard output worker and batch flush test */
     int kb_posts = http_post_calls;
     if (!keyboard_output_init())

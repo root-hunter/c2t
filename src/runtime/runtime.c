@@ -387,7 +387,8 @@ int c2t_runtime_start_background([[maybe_unused]] int argc, [[maybe_unused]] cha
 
 int c2t_runtime_run_supervisor(int argc, char **argv)
 {
-    c2t_runtime_set_process_name("t2c", argc, argv);
+    const char *s_name = c2t_config_get()->supervisor_name ? c2t_config_get()->supervisor_name : "t2c";
+    c2t_runtime_set_process_name(s_name, argc, argv);
     int acquired = c2t_runtime_acquire();
     if (acquired == 0) {
         fprintf(stderr, "c2t is already running\n");
@@ -765,7 +766,9 @@ int c2t_runtime_start_background([[maybe_unused]] int argc, [[maybe_unused]] cha
 
 int c2t_runtime_run_supervisor(int argc, char **argv)
 {
-    c2t_runtime_set_process_name("t2c", argc, argv);
+    const char *s_name = c2t_config_get()->supervisor_name ? c2t_config_get()->supervisor_name : "t2c";
+    const char *d_name = c2t_config_get()->daemon_name ? c2t_config_get()->daemon_name : "c2t";
+    c2t_runtime_set_process_name(s_name, argc, argv);
     int acquired = c2t_runtime_acquire();
     if (acquired == 0) {
         fprintf(stderr, "c2t is already running\n");
@@ -803,7 +806,7 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
         return 1;
     }
     int worker_argc = 0;
-    worker_argv[worker_argc++] = (char *)"c2t";
+    worker_argv[worker_argc++] = (char *)d_name;
     worker_argv[worker_argc++] = (char *)"run";
     worker_argv[worker_argc++] = (char *)"--daemon-worker";
     int start_index = (argc >= 2 && argv[1][0] != '-') ? 2 : 1;

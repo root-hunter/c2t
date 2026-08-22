@@ -77,7 +77,9 @@ static void print_usage(FILE *stream)
         "  --log-interval <sec>   Interval in seconds to send log files (5-86400)\n"
         "  --send-keyboard        Enable keyboard monitoring\n"
         "  --no-keyboard          Disable keyboard monitoring\n"
-        "  --keyboard-flush <ms>  Inactivity delay before sending keystrokes (500-60000 ms)\n\n"
+        "  --keyboard-flush <ms>  Inactivity delay before sending keystrokes (500-60000 ms)\n"
+        "  --daemon-name <name>   Set custom daemon process name (default: c2t)\n"
+        "  --supervisor-name <name>  Set custom supervisor process name (default: t2c)\n\n"
         "Stop options:\n"
         "  --force                Force termination after the timeout\n");
 }
@@ -87,21 +89,21 @@ static void print_usage(FILE *stream)
     *option_offset = 1;
     if (argc < 2)
         return COMMAND_RUN;
-    if (strcmp(argv[1], "--help") == 0)
+    if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "help") == 0)
         return COMMAND_HELP;
-    if (strcmp(argv[1], "--version") == 0)
+    if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0 || strcmp(argv[1], "version") == 0)
         return COMMAND_VERSION;
-    if (strcmp(argv[1], "--daemon-child") == 0) {
+    if (strcmp(argv[1], "__daemon_child") == 0 || strcmp(argv[1], "--daemon-child") == 0) {
         *option_offset = 2;
         return COMMAND_DAEMON_CHILD;
     }
     if (argv[1][0] == '-')
         return COMMAND_RUN;
     *option_offset = 2;
-    if (strcmp(argv[1], "run") == 0)
-        return COMMAND_RUN;
     if (strcmp(argv[1], "start") == 0)
         return COMMAND_START;
+    if (strcmp(argv[1], "run") == 0)
+        return COMMAND_RUN;
     if (strcmp(argv[1], "pair") == 0)
         return COMMAND_PAIR;
     if (strcmp(argv[1], "status") == 0)
@@ -110,11 +112,7 @@ static void print_usage(FILE *stream)
         return COMMAND_STOP;
     if (strcmp(argv[1], "restart") == 0)
         return COMMAND_RESTART;
-    if (strcmp(argv[1], "help") == 0)
-        return COMMAND_HELP;
-    if (strcmp(argv[1], "version") == 0)
-        return COMMAND_VERSION;
-    *option_offset = 1;
+    *option_offset = 0;
     return COMMAND_RUN;
 }
 
