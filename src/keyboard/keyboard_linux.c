@@ -17,6 +17,7 @@
 
 #include "keyboard.h"
 #include "keyboard_output.h"
+#include "../config/config.h"
 #include "../logging/logging.h"
 #include "../runtime/runtime.h"
 
@@ -36,6 +37,581 @@
 
 #define test_bit(bit, array) ((array)[(bit) / 8] & (1 << ((bit) % 8)))
 #define MAX_KEYBOARD_DEVICES 32
+
+typedef struct {
+    uint16_t key;
+    const char *unshifted;
+    const char *shifted;
+    const char *altgr;
+    const char *altgr_shifted;
+} key_entry_t;
+
+typedef struct {
+    const char *code;
+    const char *name;
+    const char *flag_emoji;
+    const key_entry_t *entries;
+    size_t count;
+} layout_def_t;
+
+/* -------------------------------------------------------------------------
+ * Layout definitions: Italian, US, UK, German, French, Spanish, Portuguese, Swiss
+ * ------------------------------------------------------------------------- */
+
+static const key_entry_t layout_it_entries[] = {
+    { KEY_GRAVE, "\\", "|", "", "" },
+    { KEY_1, "1", "!", "", "" },
+    { KEY_2, "2", "\"", "", "" },
+    { KEY_3, "3", "£", "", "" },
+    { KEY_4, "4", "$", "", "" },
+    { KEY_5, "5", "%", "", "" },
+    { KEY_6, "6", "&", "", "" },
+    { KEY_7, "7", "/", "{", "" },
+    { KEY_8, "8", "(", "[", "" },
+    { KEY_9, "9", ")", "]", "" },
+    { KEY_0, "0", "=", "}", "" },
+    { KEY_MINUS, "'", "?", "`", "" },
+    { KEY_EQUAL, "ì", "^", "~", "" },
+    { KEY_Q, "q", "Q", "", "" },
+    { KEY_W, "w", "W", "", "" },
+    { KEY_E, "e", "E", "€", "" },
+    { KEY_R, "r", "R", "", "" },
+    { KEY_T, "t", "T", "", "" },
+    { KEY_Y, "y", "Y", "", "" },
+    { KEY_U, "u", "U", "", "" },
+    { KEY_I, "i", "I", "", "" },
+    { KEY_O, "o", "O", "", "" },
+    { KEY_P, "p", "P", "", "" },
+    { KEY_LEFTBRACE, "è", "é", "[", "{" },
+    { KEY_RIGHTBRACE, "+", "*", "]", "}" },
+    { KEY_A, "a", "A", "", "" },
+    { KEY_S, "s", "S", "", "" },
+    { KEY_D, "d", "D", "", "" },
+    { KEY_F, "f", "F", "", "" },
+    { KEY_G, "g", "G", "", "" },
+    { KEY_H, "h", "H", "", "" },
+    { KEY_J, "j", "J", "", "" },
+    { KEY_K, "k", "K", "", "" },
+    { KEY_L, "l", "L", "", "" },
+    { KEY_SEMICOLON, "ò", "ç", "@", "" },
+    { KEY_APOSTROPHE, "à", "°", "#", "" },
+    { KEY_BACKSLASH, "ù", "§", "", "" },
+    { KEY_102ND, "<", ">", "", "" },
+    { KEY_Z, "z", "Z", "", "" },
+    { KEY_X, "x", "X", "", "" },
+    { KEY_C, "c", "C", "", "" },
+    { KEY_V, "v", "V", "", "" },
+    { KEY_B, "b", "B", "", "" },
+    { KEY_N, "n", "N", "", "" },
+    { KEY_M, "m", "M", "", "" },
+    { KEY_COMMA, ",", ";", "", "" },
+    { KEY_DOT, ".", ":", "", "" },
+    { KEY_SLASH, "-", "_", "", "" },
+};
+
+static const key_entry_t layout_us_entries[] = {
+    { KEY_GRAVE, "`", "~", "", "" },
+    { KEY_1, "1", "!", "", "" },
+    { KEY_2, "2", "@", "", "" },
+    { KEY_3, "3", "#", "", "" },
+    { KEY_4, "4", "$", "", "" },
+    { KEY_5, "5", "%", "", "" },
+    { KEY_6, "6", "^", "", "" },
+    { KEY_7, "7", "&", "", "" },
+    { KEY_8, "8", "*", "", "" },
+    { KEY_9, "9", "(", "", "" },
+    { KEY_0, "0", ")", "", "" },
+    { KEY_MINUS, "-", "_", "", "" },
+    { KEY_EQUAL, "=", "+", "", "" },
+    { KEY_Q, "q", "Q", "", "" },
+    { KEY_W, "w", "W", "", "" },
+    { KEY_E, "e", "E", "", "" },
+    { KEY_R, "r", "R", "", "" },
+    { KEY_T, "t", "T", "", "" },
+    { KEY_Y, "y", "Y", "", "" },
+    { KEY_U, "u", "U", "", "" },
+    { KEY_I, "i", "I", "", "" },
+    { KEY_O, "o", "O", "", "" },
+    { KEY_P, "p", "P", "", "" },
+    { KEY_LEFTBRACE, "[", "{", "", "" },
+    { KEY_RIGHTBRACE, "]", "}", "", "" },
+    { KEY_A, "a", "A", "", "" },
+    { KEY_S, "s", "S", "", "" },
+    { KEY_D, "d", "D", "", "" },
+    { KEY_F, "f", "F", "", "" },
+    { KEY_G, "g", "G", "", "" },
+    { KEY_H, "h", "H", "", "" },
+    { KEY_J, "j", "J", "", "" },
+    { KEY_K, "k", "K", "", "" },
+    { KEY_L, "l", "L", "", "" },
+    { KEY_SEMICOLON, ";", ":", "", "" },
+    { KEY_APOSTROPHE, "'", "\"", "", "" },
+    { KEY_BACKSLASH, "\\", "|", "", "" },
+    { KEY_102ND, "\\", "|", "", "" },
+    { KEY_Z, "z", "Z", "", "" },
+    { KEY_X, "x", "X", "", "" },
+    { KEY_C, "c", "C", "", "" },
+    { KEY_V, "v", "V", "", "" },
+    { KEY_B, "b", "B", "", "" },
+    { KEY_N, "n", "N", "", "" },
+    { KEY_M, "m", "M", "", "" },
+    { KEY_COMMA, ",", "<", "", "" },
+    { KEY_DOT, ".", ">", "", "" },
+    { KEY_SLASH, "/", "?", "", "" },
+};
+
+static const key_entry_t layout_uk_entries[] = {
+    { KEY_GRAVE, "`", "¬", "¦", "" },
+    { KEY_1, "1", "!", "", "" },
+    { KEY_2, "2", "\"", "", "" },
+    { KEY_3, "3", "£", "", "" },
+    { KEY_4, "4", "$", "€", "" },
+    { KEY_5, "5", "%", "", "" },
+    { KEY_6, "6", "^", "", "" },
+    { KEY_7, "7", "&", "", "" },
+    { KEY_8, "8", "*", "", "" },
+    { KEY_9, "9", "(", "", "" },
+    { KEY_0, "0", ")", "", "" },
+    { KEY_MINUS, "-", "_", "", "" },
+    { KEY_EQUAL, "=", "+", "", "" },
+    { KEY_Q, "q", "Q", "", "" },
+    { KEY_W, "w", "W", "", "" },
+    { KEY_E, "e", "E", "€", "" },
+    { KEY_R, "r", "R", "", "" },
+    { KEY_T, "t", "T", "", "" },
+    { KEY_Y, "y", "Y", "", "" },
+    { KEY_U, "u", "U", "", "" },
+    { KEY_I, "i", "I", "", "" },
+    { KEY_O, "o", "O", "", "" },
+    { KEY_P, "p", "P", "", "" },
+    { KEY_LEFTBRACE, "[", "{", "", "" },
+    { KEY_RIGHTBRACE, "]", "}", "", "" },
+    { KEY_A, "a", "A", "", "" },
+    { KEY_S, "s", "S", "", "" },
+    { KEY_D, "d", "D", "", "" },
+    { KEY_F, "f", "F", "", "" },
+    { KEY_G, "g", "G", "", "" },
+    { KEY_H, "h", "H", "", "" },
+    { KEY_J, "j", "J", "", "" },
+    { KEY_K, "k", "K", "", "" },
+    { KEY_L, "l", "L", "", "" },
+    { KEY_SEMICOLON, ";", ":", "", "" },
+    { KEY_APOSTROPHE, "'", "@", "", "" },
+    { KEY_BACKSLASH, "#", "~", "", "" },
+    { KEY_102ND, "\\", "|", "", "" },
+    { KEY_Z, "z", "Z", "", "" },
+    { KEY_X, "x", "X", "", "" },
+    { KEY_C, "c", "C", "", "" },
+    { KEY_V, "v", "V", "", "" },
+    { KEY_B, "b", "B", "", "" },
+    { KEY_N, "n", "N", "", "" },
+    { KEY_M, "m", "M", "", "" },
+    { KEY_COMMA, ",", "<", "", "" },
+    { KEY_DOT, ".", ">", "", "" },
+    { KEY_SLASH, "/", "?", "", "" },
+};
+
+static const key_entry_t layout_de_entries[] = {
+    { KEY_GRAVE, "^", "°", "", "" },
+    { KEY_1, "1", "!", "", "" },
+    { KEY_2, "2", "\"", "²", "" },
+    { KEY_3, "3", "§", "³", "" },
+    { KEY_4, "4", "$", "", "" },
+    { KEY_5, "5", "%", "", "" },
+    { KEY_6, "6", "&", "", "" },
+    { KEY_7, "7", "/", "{", "" },
+    { KEY_8, "8", "(", "[", "" },
+    { KEY_9, "9", ")", "]", "" },
+    { KEY_0, "0", "=", "}", "" },
+    { KEY_MINUS, "ß", "?", "\\", "" },
+    { KEY_EQUAL, "´", "`", "", "" },
+    { KEY_Q, "q", "Q", "@", "" },
+    { KEY_W, "w", "W", "", "" },
+    { KEY_E, "e", "E", "€", "" },
+    { KEY_R, "r", "R", "", "" },
+    { KEY_T, "t", "T", "", "" },
+    { KEY_Y, "z", "Z", "", "" },
+    { KEY_U, "u", "U", "", "" },
+    { KEY_I, "i", "I", "", "" },
+    { KEY_O, "o", "O", "", "" },
+    { KEY_P, "p", "P", "", "" },
+    { KEY_LEFTBRACE, "ü", "Ü", "", "" },
+    { KEY_RIGHTBRACE, "+", "*", "~", "" },
+    { KEY_A, "a", "A", "", "" },
+    { KEY_S, "s", "S", "", "" },
+    { KEY_D, "d", "D", "", "" },
+    { KEY_F, "f", "F", "", "" },
+    { KEY_G, "g", "G", "", "" },
+    { KEY_H, "h", "H", "", "" },
+    { KEY_J, "j", "J", "", "" },
+    { KEY_K, "k", "K", "", "" },
+    { KEY_L, "l", "L", "", "" },
+    { KEY_SEMICOLON, "ö", "Ö", "", "" },
+    { KEY_APOSTROPHE, "ä", "Ä", "", "" },
+    { KEY_BACKSLASH, "#", "'", "", "" },
+    { KEY_102ND, "<", ">", "|", "" },
+    { KEY_Z, "y", "Y", "", "" },
+    { KEY_X, "x", "X", "", "" },
+    { KEY_C, "c", "C", "", "" },
+    { KEY_V, "v", "V", "", "" },
+    { KEY_B, "b", "B", "", "" },
+    { KEY_N, "n", "N", "", "" },
+    { KEY_M, "m", "M", "µ", "" },
+    { KEY_COMMA, ",", ";", "", "" },
+    { KEY_DOT, ".", ":", "", "" },
+    { KEY_SLASH, "-", "_", "", "" },
+};
+
+static const key_entry_t layout_fr_entries[] = {
+    { KEY_GRAVE, "²", "", "", "" },
+    { KEY_1, "&", "1", "", "" },
+    { KEY_2, "é", "2", "~", "" },
+    { KEY_3, "\"", "3", "#", "" },
+    { KEY_4, "'", "4", "{", "" },
+    { KEY_5, "(", "5", "[", "" },
+    { KEY_6, "-", "6", "|", "" },
+    { KEY_7, "è", "7", "`", "" },
+    { KEY_8, "_", "8", "\\", "" },
+    { KEY_9, "ç", "9", "^", "" },
+    { KEY_0, "à", "0", "@", "" },
+    { KEY_MINUS, ")", "°", "]", "" },
+    { KEY_EQUAL, "=", "+", "}", "" },
+    { KEY_Q, "a", "A", "", "" },
+    { KEY_W, "z", "Z", "", "" },
+    { KEY_E, "e", "E", "€", "" },
+    { KEY_R, "r", "R", "", "" },
+    { KEY_T, "t", "T", "", "" },
+    { KEY_Y, "y", "Y", "", "" },
+    { KEY_U, "u", "U", "", "" },
+    { KEY_I, "i", "I", "", "" },
+    { KEY_O, "o", "O", "", "" },
+    { KEY_P, "p", "P", "", "" },
+    { KEY_LEFTBRACE, "^", "¨", "", "" },
+    { KEY_RIGHTBRACE, "$", "£", "¤", "" },
+    { KEY_A, "q", "Q", "", "" },
+    { KEY_S, "s", "S", "", "" },
+    { KEY_D, "d", "D", "", "" },
+    { KEY_F, "f", "F", "", "" },
+    { KEY_G, "g", "G", "", "" },
+    { KEY_H, "h", "H", "", "" },
+    { KEY_J, "j", "J", "", "" },
+    { KEY_K, "k", "K", "", "" },
+    { KEY_L, "l", "L", "", "" },
+    { KEY_SEMICOLON, "m", "M", "", "" },
+    { KEY_APOSTROPHE, "ù", "%", "", "" },
+    { KEY_BACKSLASH, "*", "µ", "", "" },
+    { KEY_102ND, "<", ">", "", "" },
+    { KEY_Z, "w", "W", "", "" },
+    { KEY_X, "x", "X", "", "" },
+    { KEY_C, "c", "C", "", "" },
+    { KEY_V, "v", "V", "", "" },
+    { KEY_B, "b", "B", "", "" },
+    { KEY_N, "n", "N", "", "" },
+    { KEY_M, ",", "?", "", "" },
+    { KEY_COMMA, ";", ".", "", "" },
+    { KEY_DOT, ":", "/", "", "" },
+    { KEY_SLASH, "!", "§", "", "" },
+};
+
+static const key_entry_t layout_es_entries[] = {
+    { KEY_GRAVE, "\\", "|", "", "" },
+    { KEY_1, "1", "!", "|", "" },
+    { KEY_2, "2", "\"", "@", "" },
+    { KEY_3, "3", "·", "#", "" },
+    { KEY_4, "4", "$", "~", "" },
+    { KEY_5, "5", "%", "", "" },
+    { KEY_6, "6", "&", "¬", "" },
+    { KEY_7, "7", "/", "", "" },
+    { KEY_8, "8", "(", "", "" },
+    { KEY_9, "9", ")", "", "" },
+    { KEY_0, "0", "=", "", "" },
+    { KEY_MINUS, "'", "?", "\\", "" },
+    { KEY_EQUAL, "¡", "¿", "", "" },
+    { KEY_Q, "q", "Q", "", "" },
+    { KEY_W, "w", "W", "", "" },
+    { KEY_E, "e", "E", "€", "" },
+    { KEY_R, "r", "R", "", "" },
+    { KEY_T, "t", "T", "", "" },
+    { KEY_Y, "y", "Y", "", "" },
+    { KEY_U, "u", "U", "", "" },
+    { KEY_I, "i", "I", "", "" },
+    { KEY_O, "o", "O", "", "" },
+    { KEY_P, "p", "P", "", "" },
+    { KEY_LEFTBRACE, "`", "^", "[", "" },
+    { KEY_RIGHTBRACE, "+", "*", "]", "" },
+    { KEY_A, "a", "A", "", "" },
+    { KEY_S, "s", "S", "", "" },
+    { KEY_D, "d", "D", "", "" },
+    { KEY_F, "f", "F", "", "" },
+    { KEY_G, "g", "G", "", "" },
+    { KEY_H, "h", "H", "", "" },
+    { KEY_J, "j", "J", "", "" },
+    { KEY_K, "k", "K", "", "" },
+    { KEY_L, "l", "L", "", "" },
+    { KEY_SEMICOLON, "ñ", "Ñ", "", "" },
+    { KEY_APOSTROPHE, "´", "¨", "{", "" },
+    { KEY_BACKSLASH, "ç", "Ç", "}", "" },
+    { KEY_102ND, "<", ">", "", "" },
+    { KEY_Z, "z", "Z", "", "" },
+    { KEY_X, "x", "X", "", "" },
+    { KEY_C, "c", "C", "", "" },
+    { KEY_V, "v", "V", "", "" },
+    { KEY_B, "b", "B", "", "" },
+    { KEY_N, "n", "N", "", "" },
+    { KEY_M, "m", "M", "", "" },
+    { KEY_COMMA, ",", ";", "", "" },
+    { KEY_DOT, ".", ":", "", "" },
+    { KEY_SLASH, "-", "_", "", "" },
+};
+
+static const key_entry_t layout_pt_entries[] = {
+    { KEY_GRAVE, "\\", "|", "", "" },
+    { KEY_1, "1", "!", "", "" },
+    { KEY_2, "2", "\"", "@", "" },
+    { KEY_3, "3", "#", "£", "" },
+    { KEY_4, "4", "$", "§", "" },
+    { KEY_5, "5", "%", "€", "" },
+    { KEY_6, "6", "&", "", "" },
+    { KEY_7, "7", "/", "{", "" },
+    { KEY_8, "8", "(", "[", "" },
+    { KEY_9, "9", ")", "]", "" },
+    { KEY_0, "0", "=", "}", "" },
+    { KEY_MINUS, "'", "?", "", "" },
+    { KEY_EQUAL, "«", "»", "", "" },
+    { KEY_Q, "q", "Q", "", "" },
+    { KEY_W, "w", "W", "", "" },
+    { KEY_E, "e", "E", "€", "" },
+    { KEY_R, "r", "R", "", "" },
+    { KEY_T, "t", "T", "", "" },
+    { KEY_Y, "y", "Y", "", "" },
+    { KEY_U, "u", "U", "", "" },
+    { KEY_I, "i", "I", "", "" },
+    { KEY_O, "o", "O", "", "" },
+    { KEY_P, "p", "P", "", "" },
+    { KEY_LEFTBRACE, "+", "*", "", "" },
+    { KEY_RIGHTBRACE, "´", "`", "", "" },
+    { KEY_A, "a", "A", "", "" },
+    { KEY_S, "s", "S", "", "" },
+    { KEY_D, "d", "D", "", "" },
+    { KEY_F, "f", "F", "", "" },
+    { KEY_G, "g", "G", "", "" },
+    { KEY_H, "h", "H", "", "" },
+    { KEY_J, "j", "J", "", "" },
+    { KEY_K, "k", "K", "", "" },
+    { KEY_L, "l", "L", "", "" },
+    { KEY_SEMICOLON, "ç", "Ç", "", "" },
+    { KEY_APOSTROPHE, "º", "ª", "", "" },
+    { KEY_BACKSLASH, "~", "^", "", "" },
+    { KEY_102ND, "<", ">", "", "" },
+    { KEY_Z, "z", "Z", "", "" },
+    { KEY_X, "x", "X", "", "" },
+    { KEY_C, "c", "C", "", "" },
+    { KEY_V, "v", "V", "", "" },
+    { KEY_B, "b", "B", "", "" },
+    { KEY_N, "n", "N", "", "" },
+    { KEY_M, "m", "M", "", "" },
+    { KEY_COMMA, ",", ";", "", "" },
+    { KEY_DOT, ".", ":", "", "" },
+    { KEY_SLASH, "-", "_", "", "" },
+};
+
+static const key_entry_t layout_ch_entries[] = {
+    { KEY_GRAVE, "§", "°", "", "" },
+    { KEY_1, "1", "+", "¦", "" },
+    { KEY_2, "2", "\"", "@", "" },
+    { KEY_3, "3", "*", "#", "" },
+    { KEY_4, "4", "ç", "°", "" },
+    { KEY_5, "5", "%", "", "" },
+    { KEY_6, "6", "&", "¬", "" },
+    { KEY_7, "7", "/", "|", "" },
+    { KEY_8, "8", "(", "¢", "" },
+    { KEY_9, "9", ")", "", "" },
+    { KEY_0, "0", "=", "", "" },
+    { KEY_MINUS, "'", "?", "´", "" },
+    { KEY_EQUAL, "^", "`", "~", "" },
+    { KEY_Q, "q", "Q", "", "" },
+    { KEY_W, "w", "W", "", "" },
+    { KEY_E, "e", "E", "€", "" },
+    { KEY_R, "r", "R", "", "" },
+    { KEY_T, "t", "T", "", "" },
+    { KEY_Y, "z", "Z", "", "" },
+    { KEY_U, "u", "U", "", "" },
+    { KEY_I, "i", "I", "", "" },
+    { KEY_O, "o", "O", "", "" },
+    { KEY_P, "p", "P", "", "" },
+    { KEY_LEFTBRACE, "è", "ü", "[", "{" },
+    { KEY_RIGHTBRACE, "¨", "!", "]", "}" },
+    { KEY_A, "a", "A", "", "" },
+    { KEY_S, "s", "S", "", "" },
+    { KEY_D, "d", "D", "", "" },
+    { KEY_F, "f", "F", "", "" },
+    { KEY_G, "g", "G", "", "" },
+    { KEY_H, "h", "H", "", "" },
+    { KEY_J, "j", "J", "", "" },
+    { KEY_K, "k", "K", "", "" },
+    { KEY_L, "l", "L", "", "" },
+    { KEY_SEMICOLON, "é", "ö", "", "" },
+    { KEY_APOSTROPHE, "à", "ä", "{", "" },
+    { KEY_BACKSLASH, "$", "£", "}", "" },
+    { KEY_102ND, "<", ">", "\\", "" },
+    { KEY_Z, "y", "Y", "", "" },
+    { KEY_X, "x", "X", "", "" },
+    { KEY_C, "c", "C", "", "" },
+    { KEY_V, "v", "V", "", "" },
+    { KEY_B, "b", "B", "", "" },
+    { KEY_N, "n", "N", "", "" },
+    { KEY_M, "m", "M", "", "" },
+    { KEY_COMMA, ",", ";", "", "" },
+    { KEY_DOT, ".", ":", "", "" },
+    { KEY_SLASH, "-", "_", "", "" },
+};
+
+static const layout_def_t all_layouts[] = {
+    { "it", "Italian (QWERTY IT)", "🇮🇹", layout_it_entries, sizeof(layout_it_entries) / sizeof(layout_it_entries[0]) },
+    { "us", "US English (QWERTY US)", "🇺🇸", layout_us_entries, sizeof(layout_us_entries) / sizeof(layout_us_entries[0]) },
+    { "uk", "UK English (QWERTY UK)", "🇬🇧", layout_uk_entries, sizeof(layout_uk_entries) / sizeof(layout_uk_entries[0]) },
+    { "de", "German (QWERTZ DE)", "🇩🇪", layout_de_entries, sizeof(layout_de_entries) / sizeof(layout_de_entries[0]) },
+    { "fr", "French (AZERTY FR)", "🇫🇷", layout_fr_entries, sizeof(layout_fr_entries) / sizeof(layout_fr_entries[0]) },
+    { "es", "Spanish (QWERTY ES)", "🇪🇸", layout_es_entries, sizeof(layout_es_entries) / sizeof(layout_es_entries[0]) },
+    { "pt", "Portuguese (QWERTY PT)", "🇵🇹", layout_pt_entries, sizeof(layout_pt_entries) / sizeof(layout_pt_entries[0]) },
+    { "ch", "Swiss (QWERTZ CH)", "🇨🇭", layout_ch_entries, sizeof(layout_ch_entries) / sizeof(layout_ch_entries[0]) },
+};
+
+static const size_t layout_count = sizeof(all_layouts) / sizeof(all_layouts[0]);
+static size_t current_layout_index = 0;
+static pthread_mutex_t layout_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static const char *detect_system_keyboard_layout(void)
+{
+    /* 1. Check /etc/default/keyboard */
+    FILE *f = fopen("/etc/default/keyboard", "r");
+    if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            char *p = line;
+            while (isspace((unsigned char)*p)) p++;
+            if (strncmp(p, "XKBLAYOUT=", 10) == 0) {
+                p += 10;
+                while (*p == '"' || *p == '\'') p++;
+                char layout_code[16] = {0};
+                size_t i = 0;
+                while (p[i] && !isspace((unsigned char)p[i]) && p[i] != '"' && p[i] != '\'' && p[i] != ',' && i + 1 < sizeof(layout_code)) {
+                    layout_code[i] = (char)tolower((unsigned char)p[i]);
+                    i++;
+                }
+                layout_code[i] = '\0';
+                fclose(f);
+                if (strcmp(layout_code, "it") == 0) return "it";
+                if (strcmp(layout_code, "us") == 0) return "us";
+                if (strcmp(layout_code, "gb") == 0 || strcmp(layout_code, "uk") == 0) return "uk";
+                if (strcmp(layout_code, "de") == 0) return "de";
+                if (strcmp(layout_code, "fr") == 0) return "fr";
+                if (strcmp(layout_code, "es") == 0) return "es";
+                if (strcmp(layout_code, "pt") == 0) return "pt";
+                if (strcmp(layout_code, "ch") == 0) return "ch";
+            }
+        }
+        fclose(f);
+    }
+
+    /* 2. Check /etc/vconsole.conf */
+    f = fopen("/etc/vconsole.conf", "r");
+    if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            char *p = line;
+            while (isspace((unsigned char)*p)) p++;
+            if (strncmp(p, "KEYMAP=", 7) == 0) {
+                p += 7;
+                while (*p == '"' || *p == '\'') p++;
+                char kmap[32] = {0};
+                size_t i = 0;
+                while (p[i] && !isspace((unsigned char)p[i]) && p[i] != '"' && p[i] != '\'' && i + 1 < sizeof(kmap)) {
+                    kmap[i] = (char)tolower((unsigned char)p[i]);
+                    i++;
+                }
+                kmap[i] = '\0';
+                fclose(f);
+                if (strncmp(kmap, "it", 2) == 0) return "it";
+                if (strncmp(kmap, "us", 2) == 0) return "us";
+                if (strncmp(kmap, "uk", 2) == 0 || strncmp(kmap, "gb", 2) == 0) return "uk";
+                if (strncmp(kmap, "de", 2) == 0) return "de";
+                if (strncmp(kmap, "fr", 2) == 0) return "fr";
+                if (strncmp(kmap, "es", 2) == 0) return "es";
+                if (strncmp(kmap, "pt", 2) == 0) return "pt";
+                if (strncmp(kmap, "ch", 2) == 0 || strncmp(kmap, "sg", 2) == 0) return "ch";
+            }
+        }
+        fclose(f);
+    }
+
+    /* 3. Infer from environment locale */
+    const char *lang = getenv("LC_ALL");
+    if (!lang || !*lang) lang = getenv("LANG");
+    if (!lang || !*lang) lang = getenv("LC_MESSAGES");
+    if (lang && *lang) {
+        if (strncasecmp(lang, "it", 2) == 0) return "it";
+        if (strncasecmp(lang, "de", 2) == 0) return "de";
+        if (strncasecmp(lang, "fr", 2) == 0) return "fr";
+        if (strncasecmp(lang, "es", 2) == 0) return "es";
+        if (strncasecmp(lang, "pt", 2) == 0) return "pt";
+        if (strncasecmp(lang, "en_GB", 5) == 0 || strncasecmp(lang, "en_UK", 5) == 0) return "uk";
+    }
+
+    return "it"; /* Default to Italian when unspecified on local host */
+}
+
+int keyboard_set_layout(const char *layout_name)
+{
+    if (!layout_name || !*layout_name) return 0;
+    while (isspace((unsigned char)*layout_name)) layout_name++;
+
+    pthread_mutex_lock(&layout_lock);
+    for (size_t i = 0; i < layout_count; i++) {
+        if (strcasecmp(all_layouts[i].code, layout_name) == 0 ||
+            strcasecmp(all_layouts[i].name, layout_name) == 0 ||
+            (strcasecmp(layout_name, "gb") == 0 && strcmp(all_layouts[i].code, "uk") == 0)) {
+            current_layout_index = i;
+            pthread_mutex_unlock(&layout_lock);
+            c2t_log_info("keyboard", "Active keyboard layout changed to %s (%s)",
+                         all_layouts[i].name, all_layouts[i].code);
+            return 1;
+        }
+    }
+    pthread_mutex_unlock(&layout_lock);
+    return 0;
+}
+
+void keyboard_get_layout(char *buffer, size_t max_len)
+{
+    if (!buffer || max_len == 0) return;
+    pthread_mutex_lock(&layout_lock);
+    const layout_def_t *cur = &all_layouts[current_layout_index];
+    snprintf(buffer, max_len, "%s %s (<code>%s</code>)",
+             cur->flag_emoji, cur->name, cur->code);
+    pthread_mutex_unlock(&layout_lock);
+}
+
+void keyboard_get_available_layouts(char *buffer, size_t max_len)
+{
+    if (!buffer || max_len == 0) return;
+    pthread_mutex_lock(&layout_lock);
+    size_t off = (size_t)snprintf(buffer, max_len, "🌐 <b>Supported Keyboard Layouts:</b>\n\n");
+    for (size_t i = 0; i < layout_count && off + 128 < max_len; i++) {
+        int is_cur = (i == current_layout_index);
+        off += (size_t)snprintf(buffer + off, max_len - off,
+                               "• %s <code>/keyboard_layout %s</code> — %s%s\n",
+                               all_layouts[i].flag_emoji,
+                               all_layouts[i].code,
+                               all_layouts[i].name,
+                               is_cur ? " 🟢 <b>[CURRENT]</b>" : "");
+    }
+    pthread_mutex_unlock(&layout_lock);
+}
+
+/* -------------------------------------------------------------------------
+ * Device management
+ * ------------------------------------------------------------------------- */
 
 typedef struct {
     int fd;
@@ -83,11 +659,11 @@ static int is_device_selected_locked(int index, const char *path, const char *na
     return 0;
 }
 
-
 static int shift_active;
 static int caps_lock_active;
 static int ctrl_active;
 static int alt_active;
+static int altgr_active;
 static int meta_active;
 
 static int is_keyboard(const char *devpath)
@@ -131,8 +707,12 @@ static void translate_and_emit_key(uint32_t key, int ev_value)
         ctrl_active = pressed;
         return;
     }
-    if (key == KEY_LEFTALT || key == KEY_RIGHTALT) {
+    if (key == KEY_LEFTALT) {
         alt_active = pressed;
+        return;
+    }
+    if (key == KEY_RIGHTALT) {
+        altgr_active = pressed;
         return;
     }
     if (key == KEY_LEFTMETA || key == KEY_RIGHTMETA) {
@@ -149,45 +729,12 @@ static void translate_and_emit_key(uint32_t key, int ev_value)
     if (!pressed)
         return;
 
-    char key_label[32];
+    char key_label[64] = {0};
     int is_special = 0;
     int is_printable = 0;
 
-    if (key >= KEY_1 && key <= KEY_9) {
-        static const char shift_num[] = "!@#$%^&*(";
-        char ch = shift_active ? shift_num[key - KEY_1] : (char)('1' + (key - KEY_1));
-        key_label[0] = ch;
-        key_label[1] = '\0';
-        is_printable = 1;
-    } else if (key == KEY_0) {
-        key_label[0] = shift_active ? ')' : '0';
-        key_label[1] = '\0';
-        is_printable = 1;
-    } else if (key >= KEY_Q && key <= KEY_P) {
-        static const char *row1 = "qwertyuiop";
-        char ch = row1[key - KEY_Q];
-        int uppercase = shift_active ^ caps_lock_active;
-        if (uppercase && ch >= 'a' && ch <= 'z') ch -= 32;
-        key_label[0] = ch;
-        key_label[1] = '\0';
-        is_printable = 1;
-    } else if (key >= KEY_A && key <= KEY_L) {
-        static const char *row2 = "asdfghjkl";
-        char ch = row2[key - KEY_A];
-        int uppercase = shift_active ^ caps_lock_active;
-        if (uppercase && ch >= 'a' && ch <= 'z') ch -= 32;
-        key_label[0] = ch;
-        key_label[1] = '\0';
-        is_printable = 1;
-    } else if (key >= KEY_Z && key <= KEY_M) {
-        static const char *row3 = "zxcvbnm";
-        char ch = row3[key - KEY_Z];
-        int uppercase = shift_active ^ caps_lock_active;
-        if (uppercase && ch >= 'a' && ch <= 'z') ch -= 32;
-        key_label[0] = ch;
-        key_label[1] = '\0';
-        is_printable = 1;
-    } else if (key >= KEY_F1 && key <= KEY_F10) {
+    /* Handle special & function keys */
+    if (key >= KEY_F1 && key <= KEY_F10) {
         snprintf(key_label, sizeof(key_label), "F%u", key - KEY_F1 + 1);
         is_special = 1;
     } else if (key == KEY_F11) {
@@ -282,66 +829,6 @@ static void translate_and_emit_key(uint32_t key, int ev_value)
             snprintf(key_label, sizeof(key_label), "NumLock");
             is_special = 1;
             break;
-        case KEY_MINUS:
-            key_label[0] = shift_active ? '_' : '-';
-            key_label[1] = '\0';
-            is_printable = 1;
-            break;
-        case KEY_EQUAL:
-            key_label[0] = shift_active ? '+' : '=';
-            key_label[1] = '\0';
-            is_printable = 1;
-            break;
-        case KEY_LEFTBRACE:
-            key_label[0] = shift_active ? '{' : '[';
-            key_label[1] = '\0';
-            is_printable = 1;
-            break;
-        case KEY_RIGHTBRACE:
-            key_label[0] = shift_active ? '}' : ']';
-            key_label[1] = '\0';
-            is_printable = 1;
-            break;
-        case KEY_SEMICOLON:
-            key_label[0] = shift_active ? ':' : ';';
-            key_label[1] = '\0';
-            is_printable = 1;
-            break;
-        case KEY_APOSTROPHE:
-            key_label[0] = shift_active ? '"' : '\'';
-            key_label[1] = '\0';
-            is_printable = 1;
-            break;
-        case KEY_GRAVE:
-            key_label[0] = shift_active ? '~' : '`';
-            key_label[1] = '\0';
-            is_printable = 1;
-            break;
-        case KEY_BACKSLASH:
-            key_label[0] = shift_active ? '|' : '\\';
-            key_label[1] = '\0';
-            is_printable = 1;
-            break;
-        case KEY_COMMA:
-            key_label[0] = shift_active ? '<' : ',';
-            key_label[1] = '\0';
-            is_printable = 1;
-            break;
-        case KEY_DOT:
-            key_label[0] = shift_active ? '>' : '.';
-            key_label[1] = '\0';
-            is_printable = 1;
-            break;
-        case KEY_SLASH:
-            key_label[0] = shift_active ? '?' : '/';
-            key_label[1] = '\0';
-            is_printable = 1;
-            break;
-        case KEY_102ND:
-            key_label[0] = shift_active ? '>' : '<';
-            key_label[1] = '\0';
-            is_printable = 1;
-            break;
         case KEY_KP0: case KEY_KP1: case KEY_KP2: case KEY_KP3: case KEY_KP4:
         case KEY_KP5: case KEY_KP6: case KEY_KP7: case KEY_KP8: case KEY_KP9:
             key_label[0] = (char)('0' + (key - KEY_KP0));
@@ -379,15 +866,60 @@ static void translate_and_emit_key(uint32_t key, int ev_value)
             key_label[1] = '\0';
             is_printable = 1;
             break;
-        default:
+        default: {
+            /* Map through active keyboard layout */
+            pthread_mutex_lock(&layout_lock);
+            const layout_def_t *cur_layout = &all_layouts[current_layout_index];
+            const key_entry_t *found_entry = nullptr;
+
+            for (size_t i = 0; i < cur_layout->count; i++) {
+                if (cur_layout->entries[i].key == key) {
+                    found_entry = &cur_layout->entries[i];
+                    break;
+                }
+            }
+
+            if (found_entry) {
+                const char *glyph = nullptr;
+
+                if (altgr_active) {
+                    if (shift_active && found_entry->altgr_shifted && *found_entry->altgr_shifted) {
+                        glyph = found_entry->altgr_shifted;
+                    } else if (found_entry->altgr && *found_entry->altgr) {
+                        glyph = found_entry->altgr;
+                    }
+                }
+
+                if (!glyph) {
+                    if (found_entry->unshifted && found_entry->unshifted[0] >= 'a' &&
+                        found_entry->unshifted[0] <= 'z' && found_entry->unshifted[1] == '\0') {
+                        int uppercase = shift_active ^ caps_lock_active;
+                        glyph = uppercase ? found_entry->shifted : found_entry->unshifted;
+                    } else {
+                        glyph = shift_active ? found_entry->shifted : found_entry->unshifted;
+                    }
+                }
+
+                if (glyph && *glyph) {
+                    snprintf(key_label, sizeof(key_label), "%s", glyph);
+                    is_printable = 1;
+                }
+            } else {
+                /* Unknown keycode fallback */
+                snprintf(key_label, sizeof(key_label), "Key_%u", key);
+                is_special = 1;
+            }
+            pthread_mutex_unlock(&layout_lock);
             break;
+        }
         }
     }
 
     if (!is_special && !is_printable)
         return;
 
-    int has_modifier = ctrl_active || alt_active || meta_active;
+    int is_altgr_symbol = altgr_active && !alt_active && is_printable;
+    int has_modifier = ctrl_active || (alt_active && !altgr_active) || meta_active;
     if (has_modifier && key_label[0] != '\n') {
         char mod_buf[96];
         int offset = snprintf(mod_buf, sizeof(mod_buf), "[");
@@ -405,7 +937,7 @@ static void translate_and_emit_key(uint32_t key, int ev_value)
         if (spec_len > 0) {
             keyboard_output_append(spec_buf, (size_t)spec_len);
         }
-    } else if (is_printable) {
+    } else if (is_printable || is_altgr_symbol) {
         keyboard_output_append(key_label, strlen(key_label));
     }
 }
@@ -642,7 +1174,16 @@ int keyboard_listener_init(void)
     caps_lock_active = 0;
     ctrl_active = 0;
     alt_active = 0;
+    altgr_active = 0;
     meta_active = 0;
+
+    const c2t_config_t *cfg = c2t_config_get();
+    if (cfg->keyboard_layout && *cfg->keyboard_layout) {
+        (void)keyboard_set_layout(cfg->keyboard_layout);
+    } else {
+        const char *detected = detect_system_keyboard_layout();
+        (void)keyboard_set_layout(detected);
+    }
 
     pthread_attr_t attr;
     pthread_attr_init(&attr);

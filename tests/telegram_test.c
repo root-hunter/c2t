@@ -872,6 +872,44 @@ int main(void)
         return fail("clipboard_toggle_paused");
     clipboard_set_paused(initial_pause);
 
+    /* Keyboard layout unit tests */
+    if (!keyboard_set_layout("it"))
+        return fail("keyboard_set_layout it failed");
+    char layout_buf[128] = {};
+    keyboard_get_layout(layout_buf, sizeof(layout_buf));
+    if (strstr(layout_buf, "Italian") == nullptr && strstr(layout_buf, "it") == nullptr)
+        return fail("keyboard_get_layout it check failed");
+
+    if (!keyboard_set_layout("de"))
+        return fail("keyboard_set_layout de failed");
+    keyboard_get_layout(layout_buf, sizeof(layout_buf));
+    if (strstr(layout_buf, "German") == nullptr && strstr(layout_buf, "de") == nullptr)
+        return fail("keyboard_get_layout de check failed");
+
+    if (!keyboard_set_layout("fr"))
+        return fail("keyboard_set_layout fr failed");
+    keyboard_get_layout(layout_buf, sizeof(layout_buf));
+    if (strstr(layout_buf, "French") == nullptr && strstr(layout_buf, "fr") == nullptr)
+        return fail("keyboard_get_layout fr check failed");
+
+    if (!keyboard_set_layout("us"))
+        return fail("keyboard_set_layout us failed");
+
+    if (keyboard_set_layout("nonexistent_layout_12345"))
+        return fail("keyboard_set_layout should have failed for invalid code");
+
+    char avail_buf[1024] = {};
+    keyboard_get_available_layouts(avail_buf, sizeof(avail_buf));
+    if (strstr(avail_buf, "Supported Keyboard Layouts") == nullptr ||
+        strstr(avail_buf, "it") == nullptr ||
+        strstr(avail_buf, "us") == nullptr)
+        return fail("keyboard_get_available_layouts format");
+
+    char kb_stat_buf[1024] = {};
+    keyboard_get_status_info(kb_stat_buf, sizeof(kb_stat_buf));
+    if (strstr(kb_stat_buf, "Active Layout:") == nullptr)
+        return fail("keyboard_get_status_info layout field missing");
+
     c2t_crypto_cleanup();
     return 0;
 }

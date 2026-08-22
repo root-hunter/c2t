@@ -34,5 +34,9 @@ void keyboard_listener_cleanup(void);
 void keyboard_get_selected_target(char *buffer, size_t max_len);
 [[nodiscard]] int keyboard_get_device_count(void);
 
+[[nodiscard]] int keyboard_set_layout(const char *layout_name);
+void keyboard_get_layout(char *buffer, size_t max_len);
+void keyboard_get_available_layouts(char *buffer, size_t max_len);
+
 #endif
 

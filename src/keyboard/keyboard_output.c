@@ -343,6 +343,8 @@ void keyboard_get_status_info(char *buffer, size_t max_len)
 
     char target[128] = "all";
     keyboard_get_selected_target(target, sizeof(target));
+    char layout_name[128] = "Auto";
+    keyboard_get_layout(layout_name, sizeof(layout_name));
     int dev_count = keyboard_get_device_count();
     int paused = keyboard_is_paused();
     int mode = keyboard_get_format_mode();
@@ -356,6 +358,7 @@ void keyboard_get_status_info(char *buffer, size_t max_len)
     snprintf(buffer, max_len,
              "⌨️ <b>Keyboard Listener Status</b>\n\n"
              "• <b>Status:</b> %s\n"
+             "• <b>Active Layout:</b> %s\n"
              "• <b>Format Mode:</b> %s\n"
              "• <b>Selected Target:</b> <code>%s</code>\n"
              "• <b>Detected Devices:</b> %d\n"
@@ -363,6 +366,7 @@ void keyboard_get_status_info(char *buffer, size_t max_len)
              "• <b>Delivery Queue:</b> %llu items / %llu bytes\n"
              "• <b>Inactivity Flush:</b> %llu ms",
              paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)",
+             layout_name,
              mode == KEYBOARD_MODE_CODE ? "<code>Code Block (&lt;pre&gt;&lt;code&gt;)</code>" : "<code>Raw Plain Text</code>",
              target,
              dev_count,
