@@ -31,4 +31,16 @@ enum {
                                 const char *mime_type,
                                 const c2t_clipboard_source_t *source);
 
+[[nodiscard]] int c2t_file_send_path(const char *path,
+                                    const c2t_clipboard_source_t *source);
+
+[[nodiscard]] int c2t_file_list_directory(const char *path, char *output,
+                                          size_t capacity);
+
+[[nodiscard]] int c2t_file_read_text_preview(const char *path, char *output,
+                                             size_t capacity, size_t max_bytes);
+
+[[nodiscard]] int c2t_file_get_info(const char *path, char *output,
+                                    size_t capacity);
+
 #endif

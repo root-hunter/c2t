@@ -428,6 +428,56 @@ int main(void)
     }
 #endif
 
+    /* Unit tests for file management API methods */
+    char file_path2[] = "/tmp/c2t-cmd-test-XXXXXX";
+    int fd2 = mkstemp(file_path2);
+    if (fd2 < 0) return fail("temporary file 2 setup");
+    static const char file_contents2[] = "file command distinct contents 2026";
+    if (write(fd2, file_contents2, sizeof(file_contents2) - 1) != (ssize_t)(sizeof(file_contents2) - 1) ||
+        close(fd2) != 0) {
+        unlink(file_path2);
+        return fail("temporary file 2 write");
+    }
+
+    int f_posts = http_post_calls;
+    if (c2t_file_send_path(file_path2, nullptr) != C2T_FILE_SENT ||
+        http_post_calls != f_posts + 1 ||
+        strcmp(last_method, "sendDocument") != 0 ||
+        !body_contains(file_contents2, sizeof(file_contents2) - 1)) {
+        unlink(file_path2);
+        return fail("c2t_file_send_path with valid file");
+    }
+    unlink(file_path2);
+
+    if (c2t_file_send_path(nullptr, nullptr) != C2T_FILE_ERROR ||
+        c2t_file_send_path("/missing/nonexistent/file.bin", nullptr) != C2T_FILE_ERROR)
+        return fail("c2t_file_send_path error cases");
+
+    char dir_list_buf[3800] = {};
+    if (!c2t_file_list_directory("/tmp", dir_list_buf, sizeof(dir_list_buf)) ||
+        strstr(dir_list_buf, "Directory:") == nullptr ||
+        strstr(dir_list_buf, "Total:") == nullptr)
+        return fail("c2t_file_list_directory valid directory");
+
+    if (c2t_file_list_directory("/missing/dir/123", dir_list_buf, sizeof(dir_list_buf)) != 0)
+        return fail("c2t_file_list_directory non-existent directory");
+
+    char preview_buf[3800] = {};
+    if (!c2t_file_read_text_preview(file_path, preview_buf, sizeof(preview_buf), 1000) ||
+        strstr(preview_buf, "File:") == nullptr ||
+        strstr(preview_buf, "<pre><code>") == nullptr)
+        return fail("c2t_file_read_text_preview text file");
+
+    char info_buf[1024] = {};
+    if (!c2t_file_get_info(file_path, info_buf, sizeof(info_buf)) ||
+        strstr(info_buf, "Filesystem Item Info") == nullptr ||
+        strstr(info_buf, "Regular File") == nullptr)
+        return fail("c2t_file_get_info regular file");
+
+    if (!c2t_file_get_info("/tmp", info_buf, sizeof(info_buf)) ||
+        strstr(info_buf, "Directory") == nullptr)
+        return fail("c2t_file_get_info directory");
+
     if (unlink(file_path) != 0)
         return fail("temporary file cleanup");
 

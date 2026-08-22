@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -33,7 +34,9 @@
 #include <sys/stat.h>
 typedef struct _stat64 c2t_stat_t;
 #else
+#include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
 typedef struct stat c2t_stat_t;
 #endif
 
@@ -85,6 +88,67 @@ typedef struct stat c2t_stat_t;
     }
     *output = '\0';
     return 1;
+}
+
+[[nodiscard]] static char *sanitize_input_path(const char *raw_path)
+{
+    if (!raw_path)
+        return nullptr;
+    const char *text = raw_path;
+    size_t length = strlen(text);
+    while (length > 0 && isspace((unsigned char)*text)) {
+        ++text;
+        --length;
+    }
+    while (length > 0 && isspace((unsigned char)text[length - 1]))
+        --length;
+    if (length == 0 || memchr(text, '\0', length))
+        return nullptr;
+
+    if (length >= 2 && ((text[0] == '"' && text[length - 1] == '"') ||
+                        (text[0] == '\'' && text[length - 1] == '\''))) {
+        ++text;
+        length -= 2;
+    }
+    while (length > 0 && isspace((unsigned char)*text)) {
+        ++text;
+        --length;
+    }
+    while (length > 0 && isspace((unsigned char)text[length - 1]))
+        --length;
+    if (length == 0)
+        return nullptr;
+
+    char *path = malloc(length + 1);
+    if (!path)
+        return nullptr;
+    memcpy(path, text, length);
+    path[length] = '\0';
+
+    int uri = length >= 7 && ascii_equal_nocase(path, "file://", 7);
+    if (uri) {
+        char *uri_path = path + 7;
+        size_t uri_path_length = strlen(uri_path);
+        if (uri_path_length >= 10 &&
+            ascii_equal_nocase(uri_path, "localhost/", 10))
+            uri_path += 9;
+        else if (*uri_path != '/') {
+            free(path);
+            return nullptr;
+        }
+        memmove(path, uri_path, strlen(uri_path) + 1);
+#ifdef _WIN32
+        if (strlen(path) >= 3 && path[0] == '/' &&
+            isalpha((unsigned char)path[1]) &&
+            path[2] == ':')
+            memmove(path, path + 1, strlen(path));
+#endif
+    }
+    if (!decode_path(path, uri)) {
+        free(path);
+        return nullptr;
+    }
+    return path;
 }
 
 [[nodiscard]] static char *clipboard_path(const void *data, size_t length,
@@ -463,4 +527,552 @@ int c2t_file_try_clipboard_path(const void *data, size_t length,
     free(contents);
     free(path);
     return result ? C2T_FILE_SENT : C2T_FILE_ERROR;
+}
+
+static void format_size_human(uint64_t bytes, char *buf, size_t capacity)
+{
+    if (!buf || capacity == 0) return;
+    if (bytes < 1024) {
+        snprintf(buf, capacity, "%llu B", (unsigned long long)bytes);
+    } else if (bytes < 1024 * 1024) {
+        snprintf(buf, capacity, "%.1f KB", (double)bytes / 1024.0);
+    } else if (bytes < 1024ULL * 1024 * 1024) {
+        snprintf(buf, capacity, "%.2f MB", (double)bytes / (1024.0 * 1024.0));
+    } else {
+        snprintf(buf, capacity, "%.2f GB", (double)bytes / (1024.0 * 1024.0 * 1024.0));
+    }
+}
+
+int c2t_file_send_path(const char *path_str, const c2t_clipboard_source_t *source)
+{
+    const c2t_config_t *config = c2t_config_get();
+    if (!path_str || !*path_str) {
+        telegram_send_html("⚠️ <b>No path specified.</b>\n"
+                           "<i>Usage:</i> <code>/getfile &lt;file_path&gt;</code>");
+        return C2T_FILE_ERROR;
+    }
+
+    char *clean_path = sanitize_input_path(path_str);
+    if (!clean_path) {
+        telegram_send_html("⚠️ <b>Invalid file path specified.</b>");
+        return C2T_FILE_ERROR;
+    }
+
+    char error_msg[512] = {};
+    unsigned char *contents = nullptr;
+    size_t file_length = 0;
+    int read_result = read_file(clean_path, config, &contents, &file_length,
+                                error_msg, sizeof(error_msg));
+
+    if (read_result != READ_FILE_OK) {
+        send_file_error_telegram(clean_path, error_msg, source);
+        free(clean_path);
+        return C2T_FILE_ERROR;
+    }
+
+    const char *filename = filename_from_path(clean_path);
+    const char *mime = mime_from_filename(filename);
+    c2t_log_info("files", "Delivering requested file: name=%s, type=%s, size=%llu bytes (path: %s)",
+                 filename, mime, (unsigned long long)file_length, clean_path);
+
+    int result = telegram_send_file(contents, file_length, mime, filename, source);
+    if (!result) {
+        send_file_error_telegram(clean_path, "Failed to upload file to Telegram", source);
+    }
+    free(contents);
+    free(clean_path);
+    return result ? C2T_FILE_SENT : C2T_FILE_ERROR;
+}
+
+#ifndef _WIN32
+static int list_dir_posix(const char *clean_path, char *output, size_t capacity)
+{
+    DIR *dir = opendir(clean_path);
+    if (!dir) {
+        snprintf(output, capacity, "⚠️ <b>Cannot open directory:</b> <code>%s</code>\n<b>Error:</b> %s",
+                 clean_path, strerror(errno));
+        return 0;
+    }
+
+    size_t offset = 0;
+    static const char header_fmt[] = "📁 <b>Directory:</b> <code>";
+    memcpy(output, header_fmt, sizeof(header_fmt) - 1);
+    offset = sizeof(header_fmt) - 1;
+    append_escaped_html(output, &offset, capacity, clean_path);
+    static const char header_end[] = "</code>\n\n";
+    if (offset + sizeof(header_end) - 1 < capacity) {
+        memcpy(output + offset, header_end, sizeof(header_end) - 1);
+        offset += sizeof(header_end) - 1;
+    }
+
+    struct dirent *entry;
+    size_t dir_count = 0;
+    size_t file_count = 0;
+    uint64_t total_bytes = 0;
+    size_t displayed_count = 0;
+    int truncated = 0;
+
+    while ((entry = readdir(dir)) != nullptr) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        char entry_full_path[1024];
+        snprintf(entry_full_path, sizeof(entry_full_path), "%s/%s", clean_path, entry->d_name);
+
+        struct stat st;
+        int is_dir = 0;
+        uint64_t sz = 0;
+        if (stat(entry_full_path, &st) == 0) {
+            is_dir = S_ISDIR(st.st_mode);
+            if (!is_dir) {
+                sz = (uint64_t)st.st_size;
+                total_bytes += sz;
+            }
+        }
+#ifdef _DIRENT_HAVE_D_TYPE
+        else if (entry->d_type == DT_DIR) {
+            is_dir = 1;
+        }
+#endif
+        if (is_dir) {
+            dir_count++;
+        } else {
+            file_count++;
+        }
+
+        if (!truncated && offset + 128 < capacity - 256) {
+            char line[256];
+            char size_str[32] = {};
+            if (is_dir) {
+                snprintf(line, sizeof(line), "📁 <code>%s/</code>\n", entry->d_name);
+            } else {
+                format_size_human(sz, size_str, sizeof(size_str));
+                snprintf(line, sizeof(line), "📄 <code>%s</code> <i>(%s)</i>\n", entry->d_name, size_str);
+            }
+            size_t l_len = strlen(line);
+            if (offset + l_len < capacity - 256) {
+                memcpy(output + offset, line, l_len);
+                offset += l_len;
+                displayed_count++;
+            } else {
+                truncated = 1;
+            }
+        } else {
+            truncated = 1;
+        }
+    }
+    closedir(dir);
+
+    if (dir_count == 0 && file_count == 0) {
+        static const char empty_msg[] = "<i>(Directory is empty)</i>\n";
+        if (offset + sizeof(empty_msg) - 1 < capacity - 128) {
+            memcpy(output + offset, empty_msg, sizeof(empty_msg) - 1);
+            offset += sizeof(empty_msg) - 1;
+        }
+    } else if (truncated) {
+        char more_buf[128];
+        snprintf(more_buf, sizeof(more_buf), "<i>... and %zu more items</i>\n", (dir_count + file_count) - displayed_count);
+        size_t m_len = strlen(more_buf);
+        if (offset + m_len < capacity - 128) {
+            memcpy(output + offset, more_buf, m_len);
+            offset += m_len;
+        }
+    }
+
+    char total_sz_str[32];
+    format_size_human(total_bytes, total_sz_str, sizeof(total_sz_str));
+    char footer[128];
+    snprintf(footer, sizeof(footer), "\n📊 <b>Total:</b> %zu dirs, %zu files (%s)",
+             dir_count, file_count, total_sz_str);
+    size_t f_len = strlen(footer);
+    if (offset + f_len < capacity) {
+        memcpy(output + offset, footer, f_len);
+        offset += f_len;
+    }
+    output[offset] = '\0';
+    return 1;
+}
+#else
+static int list_dir_windows(const char *clean_path, char *output, size_t capacity)
+{
+    wchar_t *wide_dir = utf8_path(clean_path);
+    if (!wide_dir) {
+        snprintf(output, capacity, "⚠️ <b>Invalid directory path</b>");
+        return 0;
+    }
+
+    size_t wide_len = wcslen(wide_dir);
+    wchar_t search_pattern[MAX_PATH + 4];
+    if (wide_len >= MAX_PATH - 3) {
+        free(wide_dir);
+        snprintf(output, capacity, "⚠️ <b>Directory path too long</b>");
+        return 0;
+    }
+    wcscpy(search_pattern, wide_dir);
+    if (search_pattern[wide_len - 1] != L'\\' && search_pattern[wide_len - 1] != L'/') {
+        wcscat(search_pattern, L"\\*");
+    } else {
+        wcscat(search_pattern, L"*");
+    }
+    free(wide_dir);
+
+    WIN32_FIND_DATAW find_data;
+    HANDLE find_handle = FindFirstFileW(search_pattern, &find_data);
+    if (find_handle == INVALID_HANDLE_VALUE) {
+        snprintf(output, capacity, "⚠️ <b>Cannot open directory:</b> <code>%s</code>\n<b>Error:</b> %lu",
+                 clean_path, (unsigned long)GetLastError());
+        return 0;
+    }
+
+    size_t offset = 0;
+    static const char header_fmt[] = "📁 <b>Directory:</b> <code>";
+    memcpy(output, header_fmt, sizeof(header_fmt) - 1);
+    offset = sizeof(header_fmt) - 1;
+    append_escaped_html(output, &offset, capacity, clean_path);
+    static const char header_end[] = "</code>\n\n";
+    if (offset + sizeof(header_end) - 1 < capacity) {
+        memcpy(output + offset, header_end, sizeof(header_end) - 1);
+        offset += sizeof(header_end) - 1;
+    }
+
+    size_t dir_count = 0;
+    size_t file_count = 0;
+    uint64_t total_bytes = 0;
+    size_t displayed_count = 0;
+    int truncated = 0;
+
+    do {
+        if (wcscmp(find_data.cFileName, L".") == 0 || wcscmp(find_data.cFileName, L"..") == 0)
+            continue;
+
+        char utf8_name[MAX_PATH * 4] = {};
+        WideCharToMultiByte(CP_UTF8, 0, find_data.cFileName, -1, utf8_name, sizeof(utf8_name), nullptr, nullptr);
+
+        int is_dir = (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        uint64_t sz = ((uint64_t)find_data.nFileSizeHigh << 32) | find_data.nFileSizeLow;
+        if (is_dir) {
+            dir_count++;
+        } else {
+            file_count++;
+            total_bytes += sz;
+        }
+
+        if (!truncated && offset + 128 < capacity - 256) {
+            char line[512];
+            char size_str[32] = {};
+            if (is_dir) {
+                snprintf(line, sizeof(line), "📁 <code>%s/</code>\n", utf8_name);
+            } else {
+                format_size_human(sz, size_str, sizeof(size_str));
+                snprintf(line, sizeof(line), "📄 <code>%s</code> <i>(%s)</i>\n", utf8_name, size_str);
+            }
+            size_t l_len = strlen(line);
+            if (offset + l_len < capacity - 256) {
+                memcpy(output + offset, line, l_len);
+                offset += l_len;
+                displayed_count++;
+            } else {
+                truncated = 1;
+            }
+        } else {
+            truncated = 1;
+        }
+    } while (FindNextFileW(find_handle, &find_data));
+
+    FindClose(find_handle);
+
+    if (dir_count == 0 && file_count == 0) {
+        static const char empty_msg[] = "<i>(Directory is empty)</i>\n";
+        if (offset + sizeof(empty_msg) - 1 < capacity - 128) {
+            memcpy(output + offset, empty_msg, sizeof(empty_msg) - 1);
+            offset += sizeof(empty_msg) - 1;
+        }
+    } else if (truncated) {
+        char more_buf[128];
+        snprintf(more_buf, sizeof(more_buf), "<i>... and %zu more items</i>\n", (dir_count + file_count) - displayed_count);
+        size_t m_len = strlen(more_buf);
+        if (offset + m_len < capacity - 128) {
+            memcpy(output + offset, more_buf, m_len);
+            offset += m_len;
+        }
+    }
+
+    char total_sz_str[32];
+    format_size_human(total_bytes, total_sz_str, sizeof(total_sz_str));
+    char footer[128];
+    snprintf(footer, sizeof(footer), "\n📊 <b>Total:</b> %zu dirs, %zu files (%s)",
+             dir_count, file_count, total_sz_str);
+    size_t f_len = strlen(footer);
+    if (offset + f_len < capacity) {
+        memcpy(output + offset, footer, f_len);
+        offset += f_len;
+    }
+    output[offset] = '\0';
+    return 1;
+}
+#endif
+
+int c2t_file_list_directory(const char *path_str, char *output, size_t capacity)
+{
+    if (!output || capacity < 64)
+        return 0;
+    output[0] = '\0';
+
+    const char *target = (path_str && *path_str) ? path_str : ".";
+    char *clean_path = sanitize_input_path(target);
+    if (!clean_path) {
+        clean_path = strdup(target);
+        if (!clean_path) return 0;
+    }
+
+    int res = 0;
+#ifdef _WIN32
+    res = list_dir_windows(clean_path, output, capacity);
+#else
+    res = list_dir_posix(clean_path, output, capacity);
+#endif
+    free(clean_path);
+    return res;
+}
+
+int c2t_file_read_text_preview(const char *path_str, char *output, size_t capacity, size_t max_bytes)
+{
+    if (!output || capacity < 64)
+        return 0;
+    output[0] = '\0';
+
+    if (!path_str || !*path_str) {
+        snprintf(output, capacity, "⚠️ <b>No path specified.</b>\n<i>Usage:</i> <code>/cat &lt;file_path&gt;</code>");
+        return 0;
+    }
+
+    char *clean_path = sanitize_input_path(path_str);
+    if (!clean_path) {
+        snprintf(output, capacity, "⚠️ <b>Invalid file path</b>");
+        return 0;
+    }
+
+    c2t_stat_t st;
+    FILE *f = nullptr;
+#ifdef _WIN32
+    wchar_t *wide = utf8_path(clean_path);
+    if (!wide) {
+        free(clean_path);
+        snprintf(output, capacity, "⚠️ <b>Invalid UTF-8 file path</b>");
+        return 0;
+    }
+    int stat_res = _wstat64(wide, &st);
+    int saved_errno = errno;
+    if (stat_res == 0) f = _wfopen(wide, L"rb");
+    free(wide);
+#else
+    int stat_res = stat(clean_path, &st);
+    int saved_errno = errno;
+    if (stat_res == 0) f = fopen(clean_path, "rb");
+#endif
+
+    if (stat_res != 0 || !f) {
+        if (f) fclose(f);
+        snprintf(output, capacity, "⚠️ <b>Cannot access file:</b> <code>%s</code>\n<b>Error:</b> %s",
+                 clean_path, strerror(saved_errno));
+        free(clean_path);
+        return 0;
+    }
+
+#ifdef _WIN32
+    if ((st.st_mode & _S_IFMT) != _S_IFREG) {
+#else
+    if (!S_ISREG(st.st_mode)) {
+#endif
+        fclose(f);
+        snprintf(output, capacity, "⚠️ <code>%s</code> <b>is not a regular file.</b>", clean_path);
+        free(clean_path);
+        return 0;
+    }
+
+    size_t limit = max_bytes > 0 && max_bytes < 3200 ? max_bytes : 3000;
+    unsigned char buf[3500];
+    size_t bytes_read = fread(buf, 1, limit, f);
+    fclose(f);
+
+    /* Check for binary content */
+    for (size_t i = 0; i < bytes_read; ++i) {
+        if (buf[i] == 0) {
+            snprintf(output, capacity,
+                     "⚠️ <b>Binary File:</b> <code>%s</code> (size: %llu bytes)\n"
+                     "<i>File contains binary data and cannot be displayed as text.\n"
+                     "Use <code>/getfile %s</code> to download it.</i>",
+                     clean_path, (unsigned long long)st.st_size, clean_path);
+            free(clean_path);
+            return 1;
+        }
+    }
+
+    size_t offset = 0;
+    static const char pfx[] = "📄 <b>File:</b> <code>";
+    memcpy(output, pfx, sizeof(pfx) - 1);
+    offset = sizeof(pfx) - 1;
+    append_escaped_html(output, &offset, capacity, clean_path);
+
+    char size_note[64];
+    snprintf(size_note, sizeof(size_note), "</code> (<i>%llu bytes</i>)\n<pre><code>",
+             (unsigned long long)st.st_size);
+    size_t sn_len = strlen(size_note);
+    if (offset + sn_len < capacity) {
+        memcpy(output + offset, size_note, sn_len);
+        offset += sn_len;
+    }
+
+    /* Append content escaped */
+    char temp_str[3500];
+    if (bytes_read >= sizeof(temp_str)) bytes_read = sizeof(temp_str) - 1;
+    memcpy(temp_str, buf, bytes_read);
+    temp_str[bytes_read] = '\0';
+    append_escaped_html(output, &offset, capacity - 128, temp_str);
+
+    static const char sfx[] = "</code></pre>";
+    if (offset + sizeof(sfx) - 1 < capacity) {
+        memcpy(output + offset, sfx, sizeof(sfx) - 1);
+        offset += sizeof(sfx) - 1;
+    }
+
+    if ((uint64_t)bytes_read < (uint64_t)st.st_size) {
+        static const char trunc_msg[] = "\n<i>[Truncated. Use /getfile to download the complete file]</i>";
+        if (offset + sizeof(trunc_msg) - 1 < capacity) {
+            memcpy(output + offset, trunc_msg, sizeof(trunc_msg) - 1);
+            offset += sizeof(trunc_msg) - 1;
+        }
+    }
+
+    output[offset] = '\0';
+    free(clean_path);
+    return 1;
+}
+
+int c2t_file_get_info(const char *path_str, char *output, size_t capacity)
+{
+    if (!output || capacity < 64)
+        return 0;
+    output[0] = '\0';
+
+    if (!path_str || !*path_str) {
+        snprintf(output, capacity, "⚠️ <b>No path specified.</b>\n<i>Usage:</i> <code>/fileinfo &lt;path&gt;</code>");
+        return 0;
+    }
+
+    char *clean_path = sanitize_input_path(path_str);
+    if (!clean_path) {
+        snprintf(output, capacity, "⚠️ <b>Invalid path</b>");
+        return 0;
+    }
+
+    c2t_stat_t st;
+#ifdef _WIN32
+    wchar_t *wide = utf8_path(clean_path);
+    if (!wide) {
+        free(clean_path);
+        snprintf(output, capacity, "⚠️ <b>Invalid UTF-8 path</b>");
+        return 0;
+    }
+    int stat_res = _wstat64(wide, &st);
+    int saved_errno = errno;
+    free(wide);
+#else
+    int stat_res = stat(clean_path, &st);
+    int saved_errno = errno;
+#endif
+
+    if (stat_res != 0) {
+        snprintf(output, capacity, "⚠️ <b>Cannot access:</b> <code>%s</code>\n<b>Error:</b> %s",
+                 clean_path, strerror(saved_errno));
+        free(clean_path);
+        return 0;
+    }
+
+    const char *type_str = "Other / Unknown";
+    const char *type_icon = "❓";
+#ifdef _WIN32
+    if ((st.st_mode & _S_IFMT) == _S_IFDIR) {
+        type_str = "Directory";
+        type_icon = "📁";
+    } else if ((st.st_mode & _S_IFMT) == _S_IFREG) {
+        type_str = "Regular File";
+        type_icon = "📄";
+    }
+#else
+    if (S_ISDIR(st.st_mode)) {
+        type_str = "Directory";
+        type_icon = "📁";
+    } else if (S_ISREG(st.st_mode)) {
+        type_str = "Regular File";
+        type_icon = "📄";
+    } else if (S_ISLNK(st.st_mode)) {
+        type_str = "Symbolic Link";
+        type_icon = "🔗";
+    } else if (S_ISCHR(st.st_mode)) {
+        type_str = "Character Device";
+        type_icon = "🔌";
+    } else if (S_ISBLK(st.st_mode)) {
+        type_str = "Block Device";
+        type_icon = "💾";
+    } else if (S_ISFIFO(st.st_mode)) {
+        type_str = "FIFO / Named Pipe";
+        type_icon = "🚰";
+    } else if (S_ISSOCK(st.st_mode)) {
+        type_str = "Socket";
+        type_icon = "🌐";
+    }
+#endif
+
+    char size_str[32];
+    format_size_human((uint64_t)st.st_size, size_str, sizeof(size_str));
+
+    const char *filename = filename_from_path(clean_path);
+    const char *mime = mime_from_filename(filename);
+
+    char time_str[64] = "Unknown";
+    struct tm tm_buf;
+#ifdef _WIN32
+    if (gmtime_s(&tm_buf, &st.st_mtime) == 0) {
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S UTC", &tm_buf);
+    }
+#else
+    if (gmtime_r(&st.st_mtime, &tm_buf) != nullptr) {
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S UTC", &tm_buf);
+    }
+#endif
+
+    char perm_str[32] = {};
+#ifdef _WIN32
+    snprintf(perm_str, sizeof(perm_str), "%s", (st.st_mode & _S_IWRITE) ? "Read/Write" : "Read-Only");
+#else
+    snprintf(perm_str, sizeof(perm_str), "%c%c%c%c%c%c%c%c%c%c (%04o)",
+             S_ISDIR(st.st_mode) ? 'd' : (S_ISLNK(st.st_mode) ? 'l' : '-'),
+             (st.st_mode & S_IRUSR) ? 'r' : '-',
+             (st.st_mode & S_IWUSR) ? 'w' : '-',
+             (st.st_mode & S_IXUSR) ? 'x' : '-',
+             (st.st_mode & S_IRGRP) ? 'r' : '-',
+             (st.st_mode & S_IWGRP) ? 'w' : '-',
+             (st.st_mode & S_IXGRP) ? 'x' : '-',
+             (st.st_mode & S_IROTH) ? 'r' : '-',
+             (st.st_mode & S_IWOTH) ? 'w' : '-',
+             (st.st_mode & S_IXOTH) ? 'x' : '-',
+             (unsigned int)(st.st_mode & 07777));
+#endif
+
+    snprintf(output, capacity,
+             "ℹ️ <b>Filesystem Item Info</b>\n\n"
+             "• <b>Path:</b> <code>%s</code>\n"
+             "• <b>Name:</b> <code>%s</code>\n"
+             "• <b>Type:</b> %s %s\n"
+             "• <b>Size:</b> %s (<i>%llu bytes</i>)\n"
+             "• <b>MIME Type:</b> <code>%s</code>\n"
+             "• <b>Permissions:</b> <code>%s</code>\n"
+             "• <b>Modified:</b> <code>%s</code>",
+             clean_path, filename, type_icon, type_str,
+             size_str, (unsigned long long)st.st_size,
+             mime, perm_str, time_str);
+
+    free(clean_path);
+    return 1;
 }
