@@ -63,10 +63,15 @@ test("browser patch writes a valid encrypted configuration into the release bina
   const encryptedPayload = output.subarray(offset + 32, offset + 32 + 12 + payload.length);
   assert.equal(view.getUint32(offset + 24, true), crc32(encryptedPayload));
 
-  // Ensure secrets are NOT in plaintext in the binary
+  // Ensure secrets are NOT in plaintext in the binary or embedded region
   const binaryString = new TextDecoder("utf-8", { fatal: false }).decode(output);
   assert.ok(!binaryString.includes("123456:test-token"));
-  assert.ok(!binaryString.includes("TELEGRAM_BOT_TOKEN="));
+
+  const regionString = new TextDecoder("utf-8", { fatal: false }).decode(
+    output.subarray(offset + 32, offset + 32 + 4096),
+  );
+  assert.ok(!regionString.includes("TELEGRAM_BOT_TOKEN="));
+  assert.ok(!regionString.includes("123456:test-token"));
 
   // Decrypt and verify matching plaintext
   const nonce = encryptedPayload.subarray(0, 12);
