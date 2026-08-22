@@ -96,6 +96,10 @@ int telegram_http_get([[maybe_unused]] const char *token, const char *method_and
     return 1;
 }
 
+void telegram_http_thread_cleanup(void)
+{
+}
+
 void telegram_http_cleanup(void)
 {
 }

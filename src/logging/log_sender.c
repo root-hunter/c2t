@@ -20,6 +20,7 @@
 #include "logging.h"
 #include "../runtime/runtime.h"
 #include "../telegram/telegram.h"
+#include "../telegram/telegram_platform.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -270,7 +271,7 @@ static void *log_sender_worker_func([[maybe_unused]] void *context)
         if (is_stopping)
             break;
     }
-
+    telegram_http_thread_cleanup();
 #ifdef _WIN32
     return 0;
 #else
@@ -300,7 +301,11 @@ int c2t_log_sender_init(void)
     worker_thread = CreateThread(nullptr, 0, log_sender_worker_func, nullptr, 0, nullptr);
     worker_started = worker_thread != nullptr;
 #else
-    worker_started = pthread_create(&worker_thread, nullptr, log_sender_worker_func, nullptr) == 0;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 128 * 1024);
+    worker_started = pthread_create(&worker_thread, &attr, log_sender_worker_func, nullptr) == 0;
+    pthread_attr_destroy(&attr);
 #endif
 
     if (!worker_started)

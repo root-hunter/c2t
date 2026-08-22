@@ -29,6 +29,9 @@
 
 #ifndef _WIN32
 #include <signal.h>
+#if defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>
+#endif
 #endif
 
 #define C2T_START_TIMEOUT_MS 10000U
@@ -237,6 +240,11 @@ static void print_usage(FILE *stream)
 
 int main(int argc, char **argv)
 {
+#if defined(__linux__) && defined(__GLIBC__)
+    mallopt(M_ARENA_MAX, 1);
+    mallopt(M_TRIM_THRESHOLD, 64 * 1024);
+    mallopt(M_MMAP_THRESHOLD, 64 * 1024);
+#endif
     int option_offset;
     command_t command = parse_command(argc, argv, &option_offset);
     if (command == COMMAND_HELP) {

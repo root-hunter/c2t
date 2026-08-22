@@ -224,6 +224,10 @@ int telegram_http_get(const char *token, const char *method_and_query,
     return 1;
 }
 
+void telegram_http_thread_cleanup(void)
+{
+}
+
 void telegram_http_cleanup(void)
 {
     c2t_log_debug("https", "Cleaning up WinHTTP transport");

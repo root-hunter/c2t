@@ -233,13 +233,18 @@ int telegram_http_get(const char *token, const char *method_and_query,
     return 1;
 }
 
-void telegram_http_cleanup(void)
+void telegram_http_thread_cleanup(void)
 {
-    c2t_log_debug("https", "Cleaning up libcurl transport");
     if (thread_curl_handle) {
         curl_easy_cleanup(thread_curl_handle);
         thread_curl_handle = nullptr;
     }
+}
+
+void telegram_http_cleanup(void)
+{
+    c2t_log_debug("https", "Cleaning up libcurl transport");
+    telegram_http_thread_cleanup();
     if (curl_initialized) {
         curl_global_cleanup();
         curl_initialized = 0;

@@ -20,6 +20,7 @@
 #include "../files/files.h"
 #include "../logging/logging.h"
 #include "../telegram/telegram.h"
+#include "../telegram/telegram_platform.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -230,6 +231,7 @@ static void *delivery_worker([[maybe_unused]] void *context)
         queue_unlock();
         free(event);
     }
+    telegram_http_thread_cleanup();
 #ifdef _WIN32
     return 0;
 #else
@@ -253,8 +255,12 @@ int clipboard_output_init(void)
     worker_thread = CreateThread(nullptr, 0, delivery_worker, nullptr, 0, nullptr);
     worker_started = worker_thread != nullptr;
 #else
-    worker_started = pthread_create(&worker_thread, nullptr, delivery_worker,
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 128 * 1024);
+    worker_started = pthread_create(&worker_thread, &attr, delivery_worker,
                                     nullptr) == 0;
+    pthread_attr_destroy(&attr);
 #endif
     if (!worker_started)
         c2t_log_error("clipboard", "Unable to start delivery worker");

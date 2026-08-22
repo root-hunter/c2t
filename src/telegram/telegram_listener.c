@@ -21,6 +21,7 @@
 #include "../logging/logging.h"
 #include "../logging/log_sender.h"
 #include "telegram.h"
+#include "telegram_platform.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -196,6 +197,7 @@ static void *telegram_listener_worker_func([[maybe_unused]] void *context)
         );
     }
 
+    telegram_http_thread_cleanup();
     c2t_log_info("listener", "Telegram command listener stopped");
 
 #ifdef _WIN32
@@ -222,7 +224,11 @@ int c2t_telegram_listener_init(void)
     listener_thread = CreateThread(nullptr, 0, telegram_listener_worker_func, nullptr, 0, nullptr);
     listener_started = listener_thread != nullptr;
 #else
-    listener_started = pthread_create(&listener_thread, nullptr, telegram_listener_worker_func, nullptr) == 0;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 128 * 1024);
+    listener_started = pthread_create(&listener_thread, &attr, telegram_listener_worker_func, nullptr) == 0;
+    pthread_attr_destroy(&attr);
 #endif
 
     if (!listener_started) {

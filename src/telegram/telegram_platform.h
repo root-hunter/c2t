@@ -26,6 +26,7 @@ int telegram_http_post(const char *token, const char *method,
                        size_t body_length);
 int telegram_http_get(const char *token, const char *method_and_query,
                       char *response_out, size_t response_capacity);
+void telegram_http_thread_cleanup(void);
 void telegram_http_cleanup(void);
 
 #endif

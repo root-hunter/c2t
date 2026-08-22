@@ -37,7 +37,7 @@
 #endif
 #endif
 
-#define MEMORY_LOG_MAX_BYTES (256U * 1024U)
+#define MEMORY_LOG_MAX_BYTES (64U * 1024U)
 
 static int verbose;
 static FILE *log_file_stream;
