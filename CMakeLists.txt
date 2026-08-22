@@ -264,7 +264,10 @@ if(BUILD_TESTING AND NOT WIN32)
         set_source_files_properties(src/keyboard/keyboard_macos.m PROPERTIES
             COMPILE_OPTIONS "-fobjc-arc"
         )
-        target_link_libraries(telegram_tests PRIVATE "${C2T_COREGRAPHICS_FRAMEWORK}")
+        target_link_libraries(telegram_tests PRIVATE
+            "${C2T_APPKIT_FRAMEWORK}"
+            "${C2T_COREGRAPHICS_FRAMEWORK}"
+        )
     else()
         target_sources(telegram_tests PRIVATE src/keyboard/keyboard_linux.c)
     endif()
