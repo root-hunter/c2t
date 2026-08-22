@@ -178,6 +178,92 @@ int telegram_http_post(const char *token, const char *method,
     return 1;
 }
 
+static size_t curl_stream_read_cb(char *buffer, size_t size, size_t nitems, void *userdata)
+{
+    if (size > 0 && nitems > SIZE_MAX / size)
+        return CURL_READFUNC_ABORT;
+    size_t max_bytes = size * nitems;
+    c2t_stream_t *stream = (c2t_stream_t *)userdata;
+    if (!stream || !stream->read)
+        return 0;
+    return stream->read(stream->user_data, buffer, max_bytes);
+}
+
+int telegram_http_post_stream(const char *token, const char *method,
+                              const char *content_type, c2t_stream_t *stream)
+{
+    if (!token || !method || !content_type || !stream || !stream->read)
+        return 0;
+
+    CURL *curl = acquire_curl_handle();
+    if (!curl) {
+        c2t_log_error("https", "Cannot perform HTTP POST stream: failed to allocate curl handle");
+        return 0;
+    }
+
+    c2t_log_debug("https", "POST stream %s (%llu-byte stream, content-type=%s)",
+                  method, (unsigned long long)stream->total_size, content_type);
+    char url[320];
+    int url_length = snprintf(url, sizeof(url),
+                              "https://api.telegram.org/bot%s/%s",
+                              token, method);
+    if (url_length < 0 || (size_t)url_length >= sizeof(url)) {
+        return 0;
+    }
+
+    char content_type_header[192];
+    int header_length = snprintf(content_type_header,
+                                 sizeof(content_type_header),
+                                 "Content-Type: %s", content_type);
+    if (header_length < 0 || (size_t)header_length >= sizeof(content_type_header)) {
+        return 0;
+    }
+    struct curl_slist *request_headers = curl_slist_append(nullptr, content_type_header);
+    if (!request_headers) {
+        return 0;
+    }
+
+    response_buffer_t response = {};
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, request_headers);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_READFUNCTION, curl_stream_read_cb);
+    curl_easy_setopt(curl, CURLOPT_READDATA, stream);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)stream->total_size);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, capture_response);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, C2T_USER_AGENT);
+
+    CURLcode result = curl_easy_perform(curl);
+    long status = 0;
+    if (result == CURLE_OK)
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    if (result != CURLE_OK || status < 200 || status >= 300) {
+        sanitize_response(&response);
+        if (response.length)
+            c2t_log_error("https", "Telegram stream request failed: method=%s, "
+                          "HTTP=%ld, curl_error=%d, response=%s", method,
+                          status, (int)result, response.data);
+        else
+            c2t_log_error("https", "Telegram stream request failed: method=%s, "
+                          "HTTP=%ld, curl_error=%d", method, status,
+                          (int)result);
+        curl_slist_free_all(request_headers);
+        if (result != CURLE_OK) {
+            curl_easy_cleanup(thread_curl_handle);
+            thread_curl_handle = nullptr;
+        }
+        return 0;
+    }
+    c2t_log_debug("https", "Telegram stream request completed: method=%s, HTTP=%ld",
+                  method, status);
+    curl_slist_free_all(request_headers);
+    return 1;
+}
+
 int telegram_http_get(const char *token, const char *method_and_query,
                       char *response_out, size_t response_capacity)
 {

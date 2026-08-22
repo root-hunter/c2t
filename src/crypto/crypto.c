@@ -273,3 +273,129 @@ int c2t_crypto_decrypt(const void *ciphertext, size_t len,
     chacha20_crypt(session_key, nonce, 1, ciphertext, plaintext, len);
     return 1;
 }
+
+int c2t_crypto_decrypt_offset(const void *ciphertext, size_t offset, size_t len,
+                                     const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
+                                     void *plaintext)
+{
+    if (!crypto_initialized) {
+        if (!c2t_crypto_init())
+            return 0;
+    }
+    if (len == 0)
+        return 1;
+    if (!ciphertext || !nonce || !plaintext)
+        return 0;
+
+    uint32_t initial_counter = 1 + (uint32_t)(offset / 64);
+    size_t skip = offset % 64;
+
+    if (skip == 0) {
+        chacha20_crypt(session_key, nonce, initial_counter, ciphertext, plaintext, len);
+    } else {
+        uint32_t state[16], block[16];
+        unsigned char keystream[64];
+
+        state[0] = 0x61707865;
+        state[1] = 0x3330322d;
+        state[2] = 0x79622d32;
+        state[3] = 0x6b206574;
+
+        for (size_t i = 0; i < 8; ++i)
+            state[4 + i] = load32_le(session_key + i * 4);
+
+        state[12] = initial_counter;
+        state[13] = load32_le(nonce);
+        state[14] = load32_le(nonce + 4);
+        state[15] = load32_le(nonce + 8);
+
+        chacha20_block(block, state);
+        for (size_t i = 0; i < 16; ++i)
+            store32_le(keystream + i * 4, block[i]);
+
+        const unsigned char *in_bytes = (const unsigned char *)ciphertext;
+        unsigned char *out_bytes = (unsigned char *)plaintext;
+
+        size_t first_avail = 64 - skip;
+        size_t first_chunk = len < first_avail ? len : first_avail;
+        for (size_t i = 0; i < first_chunk; ++i)
+            out_bytes[i] = in_bytes[i] ^ keystream[skip + i];
+
+        c2t_secure_zero(keystream, sizeof(keystream));
+        c2t_secure_zero(block, sizeof(block));
+        c2t_secure_zero(state, sizeof(state));
+
+        if (len > first_chunk) {
+            chacha20_crypt(session_key, nonce, initial_counter + 1,
+                           in_bytes + first_chunk, out_bytes + first_chunk,
+                           len - first_chunk);
+        }
+    }
+    return 1;
+}
+
+void c2t_encrypted_stream_init(c2t_encrypted_stream_t *stream,
+                               const char *prefix, size_t prefix_len,
+                               const unsigned char *ciphertext, size_t ciphertext_len,
+                               const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
+                               const char *suffix, size_t suffix_len)
+{
+    if (!stream)
+        return;
+    stream->prefix = prefix;
+    stream->prefix_len = prefix_len;
+    stream->ciphertext = ciphertext;
+    stream->ciphertext_len = ciphertext_len;
+    if (nonce)
+        memcpy(stream->nonce, nonce, C2T_CRYPTO_NONCE_SIZE);
+    else
+        memset(stream->nonce, 0, C2T_CRYPTO_NONCE_SIZE);
+    stream->suffix = suffix;
+    stream->suffix_len = suffix_len;
+    stream->offset = 0;
+}
+
+size_t c2t_encrypted_stream_read(void *user_data, void *buffer, size_t max_len)
+{
+    c2t_encrypted_stream_t *stream = (c2t_encrypted_stream_t *)user_data;
+    if (!stream || !buffer || max_len == 0)
+        return 0;
+
+    size_t total_written = 0;
+    unsigned char *out = (unsigned char *)buffer;
+
+    while (total_written < max_len) {
+        size_t current = stream->offset;
+        size_t remaining_wanted = max_len - total_written;
+
+        if (current < stream->prefix_len) {
+            size_t avail = stream->prefix_len - current;
+            size_t chunk = remaining_wanted < avail ? remaining_wanted : avail;
+            memcpy(out + total_written, stream->prefix + current, chunk);
+            stream->offset += chunk;
+            total_written += chunk;
+        } else if (current < stream->prefix_len + stream->ciphertext_len) {
+            size_t cipher_offset = current - stream->prefix_len;
+            size_t avail = stream->ciphertext_len - cipher_offset;
+            size_t chunk = remaining_wanted < avail ? remaining_wanted : avail;
+
+            if (!c2t_crypto_decrypt_offset(stream->ciphertext + cipher_offset, cipher_offset,
+                                          chunk, stream->nonce, out + total_written)) {
+                break;
+            }
+            stream->offset += chunk;
+            total_written += chunk;
+        } else if (current < stream->prefix_len + stream->ciphertext_len + stream->suffix_len) {
+            size_t suffix_offset = current - stream->prefix_len - stream->ciphertext_len;
+            size_t avail = stream->suffix_len - suffix_offset;
+            size_t chunk = remaining_wanted < avail ? remaining_wanted : avail;
+            memcpy(out + total_written, stream->suffix + suffix_offset, chunk);
+            stream->offset += chunk;
+            total_written += chunk;
+        } else {
+            break;
+        }
+    }
+
+    return total_written;
+}

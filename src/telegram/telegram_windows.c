@@ -154,6 +154,108 @@ int telegram_http_post(const char *token, const char *method,
     return 1;
 }
 
+int telegram_http_post_stream(const char *token, const char *method,
+                              const char *content_type, c2t_stream_t *stream)
+{
+    if (!token || !method || !content_type || !stream || !stream->read)
+        return 0;
+
+    c2t_log_debug("https", "POST stream %s (%llu-byte stream, content-type=%s)",
+                  method, (unsigned long long)stream->total_size, content_type);
+    int token_length = MultiByteToWideChar(CP_UTF8, 0, token, -1, NULL, 0);
+    if (token_length <= 0 || token_length > 257 || stream->total_size > UINT32_MAX)
+        return 0;
+
+    wchar_t path[300];
+    static const wchar_t prefix[] = L"/bot";
+    memcpy(path, prefix, sizeof(prefix) - sizeof(wchar_t));
+    wchar_t *position = path + (sizeof(prefix) / sizeof(wchar_t) - 1);
+    if (!MultiByteToWideChar(CP_UTF8, 0, token, -1, position,
+                             (int)(300 - (position - path))))
+        return 0;
+    position += token_length - 1;
+    *position++ = L'/';
+    int method_length = MultiByteToWideChar(
+        CP_UTF8, 0, method, -1, position, (int)(300 - (position - path)));
+    if (method_length <= 0)
+        return 0;
+
+    HINTERNET request = WinHttpOpenRequest(
+        connection, L"POST", path, NULL, WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+    if (!request)
+        return 0;
+
+    int header_size = MultiByteToWideChar(CP_UTF8, 0, content_type, -1, NULL, 0);
+    wchar_t *header = header_size > 0 ?
+        malloc(((size_t)header_size + 14) * sizeof(wchar_t)) : NULL;
+    if (!header) {
+        WinHttpCloseHandle(request);
+        return 0;
+    }
+    memcpy(header, L"Content-Type: ", 14 * sizeof(wchar_t));
+    MultiByteToWideChar(CP_UTF8, 0, content_type, -1, header + 14, header_size);
+
+    BOOL success = WinHttpSendRequest(
+        request, header, (DWORD)-1L, WINHTTP_NO_REQUEST_DATA, 0,
+        (DWORD)stream->total_size, 0);
+    free(header);
+
+    if (success && stream->total_size > 0) {
+        unsigned char chunk_buf[16384];
+        c2t_secure_lock(chunk_buf, sizeof(chunk_buf));
+        size_t total_sent = 0;
+        while (success && total_sent < stream->total_size) {
+            size_t read_bytes = stream->read(stream->user_data, chunk_buf, sizeof(chunk_buf));
+            if (read_bytes == 0) {
+                success = FALSE;
+                break;
+            }
+            DWORD written = 0;
+            if (!WinHttpWriteData(request, chunk_buf, (DWORD)read_bytes, &written) || written != read_bytes) {
+                success = FALSE;
+            }
+            c2t_secure_zero(chunk_buf, sizeof(chunk_buf));
+            total_sent += read_bytes;
+        }
+        c2t_secure_unlock(chunk_buf, sizeof(chunk_buf));
+    }
+
+    if (success)
+        success = WinHttpReceiveResponse(request, NULL);
+
+    DWORD status = 0;
+    DWORD status_size = sizeof(status);
+    if (success)
+        success = WinHttpQueryHeaders(
+            request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
+            WINHTTP_NO_HEADER_INDEX);
+
+    DWORD request_error = success ? ERROR_SUCCESS : GetLastError();
+    if (!success || status < 200 || status >= 300) {
+        char response[TELEGRAM_RESPONSE_CAPACITY] = {0};
+        if (success)
+            read_error_response(request, response);
+        if (*response)
+            c2t_log_error("https", "Telegram stream request failed: method=%s, "
+                          "HTTP=%lu, winhttp_error=%lu, response=%s", method,
+                          (unsigned long)status, (unsigned long)request_error,
+                          response);
+        else
+            c2t_log_error("https", "Telegram stream request failed: method=%s, "
+                          "HTTP=%lu, winhttp_error=%lu", method,
+                          (unsigned long)status,
+                          (unsigned long)request_error);
+        WinHttpCloseHandle(request);
+        return 0;
+    }
+    WinHttpCloseHandle(request);
+    c2t_log_debug("https", "Telegram stream request completed: method=%s, HTTP=%lu",
+                  method, (unsigned long)status);
+    return 1;
+}
+
 int telegram_http_get(const char *token, const char *method_and_query,
                       char *response_out, size_t response_capacity)
 {

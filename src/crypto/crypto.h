@@ -23,6 +23,25 @@
 #define C2T_CRYPTO_KEY_SIZE 32U
 #define C2T_CRYPTO_NONCE_SIZE 12U
 
+typedef size_t (*c2t_stream_read_fn)(void *user_data, void *buffer, size_t max_len);
+
+typedef struct {
+    c2t_stream_read_fn read;
+    size_t total_size;
+    void *user_data;
+} c2t_stream_t;
+
+typedef struct {
+    const char *prefix;
+    size_t prefix_len;
+    const unsigned char *ciphertext;
+    size_t ciphertext_len;
+    unsigned char nonce[C2T_CRYPTO_NONCE_SIZE];
+    const char *suffix;
+    size_t suffix_len;
+    size_t offset;
+} c2t_encrypted_stream_t;
+
 [[nodiscard]] int c2t_crypto_init(void);
 void c2t_crypto_cleanup(void);
 
@@ -39,5 +58,17 @@ void c2t_secure_unlock(void *ptr, size_t len);
 [[nodiscard]] int c2t_crypto_decrypt(const void *ciphertext, size_t len,
                                      const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
                                      void *plaintext);
+
+[[nodiscard]] int c2t_crypto_decrypt_offset(const void *ciphertext, size_t offset, size_t len,
+                                            const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
+                                            void *plaintext);
+
+void c2t_encrypted_stream_init(c2t_encrypted_stream_t *stream,
+                               const char *prefix, size_t prefix_len,
+                               const unsigned char *ciphertext, size_t ciphertext_len,
+                               const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
+                               const char *suffix, size_t suffix_len);
+
+size_t c2t_encrypted_stream_read(void *user_data, void *buffer, size_t max_len);
 
 #endif

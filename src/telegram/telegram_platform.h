@@ -19,11 +19,14 @@
 #define C2T_TELEGRAM_PLATFORM_H
 
 #include <stddef.h>
+#include "../crypto/crypto.h"
 
 int telegram_http_init(void);
 int telegram_http_post(const char *token, const char *method,
                        const char *content_type, const void *body,
                        size_t body_length);
+int telegram_http_post_stream(const char *token, const char *method,
+                              const char *content_type, c2t_stream_t *stream);
 int telegram_http_get(const char *token, const char *method_and_query,
                       char *response_out, size_t response_capacity);
 void telegram_http_thread_cleanup(void);

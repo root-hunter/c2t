@@ -79,6 +79,23 @@ int telegram_http_post([[maybe_unused]] const char *token, const char *method,
     return http_post_result;
 }
 
+int telegram_http_post_stream([[maybe_unused]] const char *token, const char *method,
+                              const char *content_type, c2t_stream_t *stream)
+{
+    if (!stream || !stream->read)
+        return 0;
+    ++http_post_calls;
+    snprintf(last_method, sizeof(last_method), "%s", method);
+    snprintf(last_content_type, sizeof(last_content_type), "%s", content_type);
+    free(last_body);
+    last_body = malloc(stream->total_size ? stream->total_size : 1);
+    if (!last_body)
+        return 0;
+    size_t read_bytes = stream->read(stream->user_data, last_body, stream->total_size);
+    last_body_length = read_bytes;
+    return http_post_result;
+}
+
 int telegram_http_get([[maybe_unused]] const char *token, const char *method_and_query,
                       char *response_out, size_t response_capacity)
 {
@@ -546,6 +563,33 @@ int main(void)
     for (size_t i = 0; i < sizeof(decrypted); ++i) {
         if (decrypted[i] != 0)
             return fail("c2t_secure_zero failed");
+    }
+
+    /* Test offset decryption & streaming read */
+    const char *stream_payload = "Stream Decryption On-The-Fly Test Payload 2026!";
+    size_t payload_len = strlen(stream_payload);
+    unsigned char enc_buf[128] = {0};
+    if (!c2t_crypto_encrypt(stream_payload, payload_len, test_nonce, enc_buf))
+        return fail("c2t_crypto_encrypt for stream test");
+
+    unsigned char offset_dec[128] = {0};
+    /* Decrypt from offset 7 */
+    if (!c2t_crypto_decrypt_offset(enc_buf + 7, 7, payload_len - 7, test_nonce, offset_dec))
+        return fail("c2t_crypto_decrypt_offset");
+
+    if (memcmp(stream_payload + 7, offset_dec, payload_len - 7) != 0)
+        return fail("offset decryption mismatch");
+
+    c2t_encrypted_stream_t enc_st;
+    c2t_encrypted_stream_init(&enc_st, "PREFIX:", 7, enc_buf, payload_len, test_nonce, ":SUFFIX", 7);
+    unsigned char st_out[256] = {0};
+    size_t total_read = c2t_encrypted_stream_read(&enc_st, st_out, sizeof(st_out));
+    if (total_read != 7 + payload_len + 7)
+        return fail("encrypted stream read total bytes mismatch");
+    if (memcmp(st_out, "PREFIX:", 7) != 0 ||
+        memcmp(st_out + 7, stream_payload, payload_len) != 0 ||
+        memcmp(st_out + 7 + payload_len, ":SUFFIX", 7) != 0) {
+        return fail("encrypted stream content mismatch");
     }
 
     c2t_crypto_cleanup();

@@ -807,6 +807,142 @@ static int send_file(const void *data, size_t length, const char *mime_type,
     return result;
 }
 
+static int send_encrypted_file(const void *encrypted_data, size_t length,
+                               const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
+                               const char *mime_type,
+                               const char *requested_filename, int allow_photo,
+                               const c2t_clipboard_source_t *source)
+{
+    const char *method;
+    const char *field;
+    const char *filename;
+    if (requested_filename) {
+        method = "sendDocument";
+        field = "document";
+        filename = requested_filename;
+    } else if (allow_photo && mime_is(mime_type, "image/png")) {
+        method = "sendPhoto";
+        field = "photo";
+        filename = "clipboard.png";
+    } else if (allow_photo && mime_is(mime_type, "image/jpeg")) {
+        method = "sendPhoto";
+        field = "photo";
+        filename = "clipboard.jpg";
+    } else {
+        method = "sendDocument";
+        field = "document";
+        if (mime_is(mime_type, "image/bmp"))
+            filename = "clipboard.bmp";
+        else if (mime_is(mime_type, "image/webp"))
+            filename = "clipboard.webp";
+        else if (mime_is(mime_type, "image/gif"))
+            filename = "clipboard.gif";
+        else if (mime_has_prefix(mime_type, "text/"))
+            filename = "clipboard.txt";
+        else
+            filename = "clipboard.bin";
+    }
+
+    char safe_filename[256];
+    sanitize_filename(filename, safe_filename);
+
+    char boundary[48];
+    char source_text[TELEGRAM_MAX_CAPTION_BYTES + 1];
+    size_t source_length = format_source(source, source_text);
+    unsigned int suffix_val = 0;
+    do {
+        snprintf(boundary, sizeof(boundary), "c2tBoundary%u", suffix_val++);
+    } while (contains_bytes((const unsigned char *)source_text, source_length, boundary));
+
+    static const char first_format[] =
+        "--%s\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n"
+        "%s\r\n--%s\r\nContent-Disposition: form-data; name=\"%s\"; "
+        "filename=\"%s\"\r\nContent-Type: %s\r\n\r\n";
+    static const char caption_format[] =
+        "--%s\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n"
+        "%s\r\n--%s\r\nContent-Disposition: form-data; name=\"caption\""
+        "\r\n\r\n%s\r\n--%s\r\nContent-Disposition: form-data; "
+        "name=\"%s\"; filename=\"%s\"\r\nContent-Type: %s\r\n\r\n";
+    const char *prefix_format = source_length ? caption_format : first_format;
+    char prefix_buf[2048];
+    int prefix_length = source_length
+        ? snprintf(prefix_buf, sizeof(prefix_buf), prefix_format, boundary, chat_id, boundary,
+                   source_text, boundary, field, safe_filename, mime_type)
+        : snprintf(prefix_buf, sizeof(prefix_buf), prefix_format, boundary, chat_id, boundary, field,
+                   safe_filename, mime_type);
+
+    char suffix_buf[64];
+    int suffix_length = snprintf(suffix_buf, sizeof(suffix_buf), "\r\n--%s--\r\n", boundary);
+    if (prefix_length < 0 || (size_t)prefix_length >= sizeof(prefix_buf) ||
+        suffix_length < 0 || (size_t)suffix_length >= sizeof(suffix_buf))
+        return 0;
+
+    c2t_encrypted_stream_t enc_stream;
+    c2t_encrypted_stream_init(&enc_stream, prefix_buf, (size_t)prefix_length,
+                             encrypted_data, length, nonce,
+                             suffix_buf, (size_t)suffix_length);
+
+    c2t_stream_t stream;
+    stream.read = c2t_encrypted_stream_read;
+    stream.total_size = (size_t)prefix_length + length + (size_t)suffix_length;
+    stream.user_data = &enc_stream;
+
+    char content_type[96];
+    snprintf(content_type, sizeof(content_type),
+             "multipart/form-data; boundary=%s", boundary);
+
+    return telegram_http_post_stream(bot_token, method, content_type, &stream);
+}
+
+int telegram_send_encrypted_data(const void *encrypted_data, size_t length,
+                                 const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
+                                 const char *mime_type,
+                                 const c2t_clipboard_source_t *source)
+{
+    if (!initialized || length == 0)
+        return 1;
+    if (!encrypted_data || !nonce || !mime_type)
+        return 0;
+
+    if (mime_has_prefix(mime_type, "text/") && length < TELEGRAM_MAX_CHARACTERS) {
+        char text_buf[TELEGRAM_MAX_CHARACTERS + 1];
+        c2t_secure_lock(text_buf, sizeof(text_buf));
+        if (!c2t_crypto_decrypt(encrypted_data, length, nonce, text_buf)) {
+            c2t_secure_unlock(text_buf, sizeof(text_buf));
+            return 0;
+        }
+        text_buf[length] = '\0';
+        int res = telegram_send(text_buf, length, source);
+        c2t_secure_zero(text_buf, sizeof(text_buf));
+        c2t_secure_unlock(text_buf, sizeof(text_buf));
+        return res;
+    }
+
+    c2t_log_info("telegram", "Streaming encrypted content (%s, %llu bytes)",
+                 mime_type, (unsigned long long)length);
+    int result = send_encrypted_file(encrypted_data, length, nonce, mime_type, nullptr, 1, source);
+    c2t_log_info("telegram", "Encrypted delivery %s", result ? "completed" : "failed");
+    return result;
+}
+
+int telegram_send_encrypted_file(const void *encrypted_data, size_t length,
+                                 const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
+                                 const char *mime_type,
+                                 const char *filename,
+                                 const c2t_clipboard_source_t *source)
+{
+    if (!initialized)
+        return 1;
+    if ((!encrypted_data && length != 0) || !nonce || !mime_type || !filename || !*filename)
+        return 0;
+
+    c2t_log_info("telegram", "Streaming encrypted file: name=%s, type=%s, size=%llu bytes",
+                 filename, mime_type, (unsigned long long)length);
+    int result = send_encrypted_file(encrypted_data, length, nonce, mime_type, filename, 0, source);
+    c2t_log_info("telegram", "Encrypted file delivery %s", result ? "completed" : "failed");
+    return result;
+}
+
 int telegram_init(void)
 {
     telegram_lock();

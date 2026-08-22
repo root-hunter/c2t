@@ -162,16 +162,22 @@ static void retry_delay(size_t attempt)
 #endif
 }
 
-static int deliver_payload(const void *data, size_t length, const char *mime_type,
-                           const c2t_clipboard_source_t *source)
+static int deliver_encrypted_payload(const clipboard_event_t *event,
+                                     const c2t_clipboard_source_t *source)
 {
-    int file_result = c2t_file_try_clipboard_path(
-        data, length, mime_type, source);
-    if (file_result != C2T_FILE_NOT_HANDLED) {
-        return file_result == C2T_FILE_SENT;
+    if (event->length > 0 && event->length < 1024) {
+        unsigned char path_buf[1024];
+        if (c2t_crypto_decrypt(event->encrypted_data, event->length, event->nonce, path_buf)) {
+            int file_result = c2t_file_try_clipboard_path(path_buf, event->length, event->mime_type, source);
+            c2t_secure_zero(path_buf, sizeof(path_buf));
+            if (file_result != C2T_FILE_NOT_HANDLED) {
+                return file_result == C2T_FILE_SENT;
+            }
+        }
     }
 
-    return telegram_send_data(data, length, mime_type, source);
+    return telegram_send_encrypted_data(event->encrypted_data, event->length,
+                                        event->nonce, event->mime_type, source);
 }
 
 static void deliver_event(const clipboard_event_t *event)
@@ -179,24 +185,25 @@ static void deliver_event(const clipboard_event_t *event)
     const c2t_clipboard_source_t *source =
         event->has_source ? &event->source : nullptr;
 
-    unsigned char *plaintext = nullptr;
-    if (event->length > 0) {
-        plaintext = malloc(event->length);
-        if (!plaintext) {
-            c2t_log_error("clipboard", "Failed to allocate memory for event decryption");
-            return;
-        }
-        if (!c2t_crypto_decrypt(event->encrypted_data, event->length, event->nonce, plaintext)) {
-            c2t_log_error("clipboard", "Failed to decrypt clipboard payload in RAM");
-            free(plaintext);
-            return;
-        }
-    }
-
     if (strncmp(event->mime_type, "text/", 5) == 0) {
-        if (event->length > 0 && plaintext &&
-            fwrite(plaintext, 1, event->length, stdout) != event->length)
-            c2t_log_warning("clipboard", "Unable to write content to stdout");
+        if (event->length > 0) {
+            unsigned char chunk_buf[1024];
+            c2t_secure_lock(chunk_buf, sizeof(chunk_buf));
+            size_t written = 0;
+            while (written < event->length) {
+                size_t chunk = event->length - written < sizeof(chunk_buf)
+                    ? event->length - written : sizeof(chunk_buf);
+                if (!c2t_crypto_decrypt_offset(event->encrypted_data + written, written,
+                                              chunk, event->nonce, chunk_buf)) {
+                    break;
+                }
+                if (fwrite(chunk_buf, 1, chunk, stdout) != chunk)
+                    c2t_log_warning("clipboard", "Unable to write content chunk to stdout");
+                c2t_secure_zero(chunk_buf, sizeof(chunk_buf));
+                written += chunk;
+            }
+            c2t_secure_unlock(chunk_buf, sizeof(chunk_buf));
+        }
         if (fputc('\n', stdout) == EOF || fflush(stdout) == EOF)
             c2t_log_warning("clipboard", "Unable to flush stdout");
     } else {
@@ -204,11 +211,7 @@ static void deliver_event(const clipboard_event_t *event)
     }
 
     for (size_t attempt = 1; attempt <= delivery_attempts; ++attempt) {
-        if (deliver_payload(plaintext, event->length, event->mime_type, source)) {
-            if (plaintext) {
-                c2t_secure_zero(plaintext, event->length);
-                free(plaintext);
-            }
+        if (deliver_encrypted_payload(event, source)) {
             return;
         }
         if (attempt < delivery_attempts) {
@@ -221,10 +224,6 @@ static void deliver_event(const clipboard_event_t *event)
     }
     c2t_log_error("clipboard", "Clipboard delivery failed after %llu attempts",
                   (unsigned long long)delivery_attempts);
-    if (plaintext) {
-        c2t_secure_zero(plaintext, event->length);
-        free(plaintext);
-    }
 }
 
 #ifdef _WIN32
