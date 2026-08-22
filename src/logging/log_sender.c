@@ -82,7 +82,7 @@ static void sender_wait(size_t seconds)
 static void sender_signal(void) { (void)pthread_cond_signal(&sender_condition); }
 #endif
 
-#define LOG_TEXT_MAX_THRESHOLD (25 * 1024)
+#define LOG_TEXT_MAX_THRESHOLD (8 * 1024)
 #define LOG_CHUNK_TARGET_CHARS 3200
 
 static int send_log_text_chunks(const char *buffer, size_t length)
