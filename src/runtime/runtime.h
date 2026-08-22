@@ -29,6 +29,7 @@ typedef enum {
 typedef struct {
     c2t_runtime_state_t state;
     unsigned long process_id;
+    unsigned long supervisor_pid;
 } c2t_runtime_status_t;
 
 enum {

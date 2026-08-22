@@ -107,30 +107,35 @@ def main():
             assert auto_restart_start.returncode == 0, auto_restart_start
             assert "started (PID " in auto_restart_start.stdout
 
-            auto_status = invoke(executable, "status", environment=environment)
-            assert auto_status.returncode == 0 and "running" in auto_status.stdout
+            auto_status_1 = invoke(executable, "status", environment=environment)
+            assert auto_status_1.returncode == 0 and "running" in auto_status_1.stdout
+            worker_pid_1 = int(auto_status_1.stdout.split("PID ")[1].split(")")[0])
 
-            # Extract supervisor PID from status output: "c2t is running (PID <pid>)"
-            supervisor_pid = int(auto_status.stdout.split("PID ")[1].split(")")[0])
+            # 1. Kill with standard SIGTERM (like 'kill <PID>')
+            import signal
+            os.kill(worker_pid_1, signal.SIGTERM)
+            time.sleep(1.5)  # Wait for supervisor 1s sleep and respawn
 
-            # Find worker child process of supervisor
-            try:
-                children_raw = subprocess.check_output(
-                    ["pgrep", "-P", str(supervisor_pid)], text=True).strip()
-                worker_pids = [int(p) for p in children_raw.splitlines() if p.isdigit()]
-            except subprocess.CalledProcessError:
-                worker_pids = []
+            auto_status_2 = invoke(executable, "status", environment=environment)
+            assert auto_status_2.returncode == 0 and "running" in auto_status_2.stdout
+            worker_pid_2 = int(auto_status_2.stdout.split("PID ")[1].split(")")[0])
+            assert worker_pid_2 != worker_pid_1
 
-            if worker_pids:
-                import signal
-                os.kill(worker_pids[0], signal.SIGKILL)
-                time.sleep(1.5)  # Wait for supervisor 1s sleep and respawn
+            # 2. Kill with SIGKILL (like 'kill -9 <PID>')
+            os.kill(worker_pid_2, signal.SIGKILL)
+            time.sleep(1.5)  # Wait for supervisor 1s sleep and respawn
 
-                post_kill_status = invoke(executable, "status", environment=environment)
-                assert post_kill_status.returncode == 0 and "running" in post_kill_status.stdout
+            auto_status_3 = invoke(executable, "status", environment=environment)
+            assert auto_status_3.returncode == 0 and "running" in auto_status_3.stdout
+            worker_pid_3 = int(auto_status_3.stdout.split("PID ")[1].split(")")[0])
+            assert worker_pid_3 != worker_pid_2
 
+            # 3. Clean stop with 'c2t stop'
             auto_stop = invoke(executable, "stop", environment=environment)
             assert auto_stop.returncode == 0, auto_stop
+
+            stopped_status = invoke(executable, "status", environment=environment)
+            assert stopped_status.returncode == 3 and "stopped" in stopped_status.stdout
         finally:
             invoke(executable, "stop", "--force", environment=environment)
 

@@ -80,30 +80,41 @@ static void sleep_ms(unsigned int milliseconds)
 
     char state[16] = "starting";
     unsigned long pid = 0;
+    unsigned long supervisor_pid = 0;
     char line[128] = {};
     while (fgets(line, sizeof(line), stream)) {
+        if (sscanf(line, "supervisor_pid=%lu", &supervisor_pid) == 1)
+            continue;
         if (sscanf(line, "pid=%lu", &pid) == 1)
             continue;
         (void)sscanf(line, "state=%15s", state);
     }
     fclose(stream);
     status->process_id = pid;
+    status->supervisor_pid = supervisor_pid;
     status->state = strcmp(state, "running") == 0
         ? C2T_RUNTIME_RUNNING : C2T_RUNTIME_STARTING;
     return pid != 0;
 }
 
-[[nodiscard]] static int state_write(const char *state, unsigned long pid)
+[[nodiscard]] static int state_write_extended(const char *state, unsigned long pid, unsigned long supervisor_pid)
 {
     FILE *stream = fopen(state_path, "wb");
     if (!stream)
         return 0;
-    int written = fprintf(stream, "pid=%lu\nstate=%s\n", pid, state) > 0;
+    int written = supervisor_pid != 0
+        ? (fprintf(stream, "pid=%lu\nsupervisor_pid=%lu\nstate=%s\n", pid, supervisor_pid, state) > 0)
+        : (fprintf(stream, "pid=%lu\nstate=%s\n", pid, state) > 0);
     if (fflush(stream) != 0)
         written = 0;
     if (fclose(stream) != 0)
         written = 0;
     return written;
+}
+
+[[nodiscard]] static int state_write(const char *state, unsigned long pid)
+{
+    return state_write_extended(state, pid, 0);
 }
 
 #ifdef _WIN32
@@ -419,7 +430,7 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
             continue;
         }
 
-        c2t_runtime_mark_running();
+        (void)state_write_extended("running", process.dwProcessId, GetCurrentProcessId());
         c2t_log_info("supervisor", "Spawned worker daemon (PID %lu)", process.dwProcessId);
 
         HANDLE handles[2] = { stop_event, process.hProcess };
@@ -445,17 +456,14 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
         if (c2t_runtime_stop_requested())
             break;
 
-        if (exit_code == 0) {
-            c2t_log_info("supervisor", "Worker daemon exited cleanly");
-            break;
-        }
         if (exit_code == 2 || exit_code == 4) {
             c2t_log_error("supervisor", "Worker daemon exited with fatal status %lu", exit_code);
             c2t_runtime_release();
             return (int)exit_code;
         }
 
-        c2t_log_warning("supervisor", "Worker daemon exited unexpectedly (code %lu). Respawning in 1s...", exit_code);
+        c2t_log_warning("supervisor", "Worker daemon exited (code %lu). Respawning in 1s...", exit_code);
+        (void)state_write_extended("starting", GetCurrentProcessId(), GetCurrentProcessId());
         sleep_ms(1000);
     }
 
@@ -643,8 +651,14 @@ int c2t_runtime_stop(unsigned int timeout_ms, int force)
     int running = c2t_runtime_get_status(&status);
     if (running <= 0)
         return running;
-    if (!status.process_id || kill((pid_t)status.process_id, SIGTERM) != 0)
-        return errno == ESRCH ? 0 : -1;
+    pid_t target_pid = status.supervisor_pid ? (pid_t)status.supervisor_pid : (pid_t)status.process_id;
+    if (!target_pid || kill(target_pid, SIGTERM) != 0) {
+        if (status.process_id && kill((pid_t)status.process_id, SIGTERM) != 0)
+            return errno == ESRCH ? 0 : -1;
+    }
+    if (status.process_id && target_pid != (pid_t)status.process_id)
+        kill((pid_t)status.process_id, SIGTERM);
+
     unsigned int elapsed = 0;
     while (elapsed < timeout_ms) {
         if (c2t_runtime_get_status(&status) == 0)
@@ -652,10 +666,12 @@ int c2t_runtime_stop(unsigned int timeout_ms, int force)
         sleep_ms(100);
         elapsed += 100;
     }
-    if (!force || !status.process_id)
+    if (!force)
         return -2;
-    if (kill((pid_t)status.process_id, SIGKILL) != 0 && errno != ESRCH)
-        return -1;
+    if (status.supervisor_pid)
+        kill((pid_t)status.supervisor_pid, SIGKILL);
+    if (status.process_id)
+        kill((pid_t)status.process_id, SIGKILL);
     elapsed = 0;
     while (elapsed < 5000) {
         if (c2t_runtime_get_status(&status) == 0)
@@ -786,7 +802,7 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
             _exit(1);
         }
 
-        c2t_runtime_mark_running();
+        (void)state_write_extended("running", (unsigned long)pid, (unsigned long)getpid());
         c2t_log_info("supervisor", "Spawned worker daemon (PID %lu)", (unsigned long)pid);
 
         int status = 0;
@@ -803,17 +819,13 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
 
         if (WIFEXITED(status)) {
             int exit_code = WEXITSTATUS(status);
-            if (exit_code == 0) {
-                c2t_log_info("supervisor", "Worker daemon (PID %lu) exited cleanly", (unsigned long)pid);
-                break;
-            }
             if (exit_code == 2 || exit_code == 4) {
                 c2t_log_error("supervisor", "Worker daemon (PID %lu) exited with fatal status %d", (unsigned long)pid, exit_code);
                 free(worker_argv);
                 c2t_runtime_release();
                 return exit_code;
             }
-            c2t_log_warning("supervisor", "Worker daemon (PID %lu) exited with error status %d. Respawning in 1s...", (unsigned long)pid, exit_code);
+            c2t_log_warning("supervisor", "Worker daemon (PID %lu) terminated with exit code %d. Respawning in 1s...", (unsigned long)pid, exit_code);
         } else if (WIFSIGNALED(status)) {
             int termsig = WTERMSIG(status);
             c2t_log_warning("supervisor", "Worker daemon (PID %lu) killed by signal %d. Respawning in 1s...", (unsigned long)pid, termsig);
@@ -821,6 +833,7 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
             c2t_log_warning("supervisor", "Worker daemon (PID %lu) terminated unexpectedly. Respawning in 1s...", (unsigned long)pid);
         }
 
+        (void)state_write_extended("starting", (unsigned long)getpid(), (unsigned long)getpid());
         sleep_ms(1000);
     }
 
