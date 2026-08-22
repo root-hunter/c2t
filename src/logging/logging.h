@@ -21,7 +21,7 @@
 #include <stddef.h>
 
 void c2t_log_init(void);
-int c2t_log_is_verbose(void);
+[[nodiscard]] int c2t_log_is_verbose(void);
 
 #if defined(__GNUC__) || defined(__clang__)
 #define C2T_PRINTF_FORMAT(format_index, arguments_index) \
@@ -39,7 +39,7 @@ void c2t_log_info(const char *component, const char *format, ...)
 void c2t_log_debug(const char *component, const char *format, ...)
     C2T_PRINTF_FORMAT(2, 3);
 
-char *c2t_log_get_unread(size_t *out_length);
+[[nodiscard]] char *c2t_log_get_unread(size_t *out_length);
 void c2t_log_advance_read_offset(size_t bytes_consumed);
 void c2t_log_cleanup(void);
 

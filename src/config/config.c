@@ -29,29 +29,29 @@
 #include <stdio.h>
 #endif
 
-#define TELEGRAM_DEFAULT_MAX_FILE_BYTES (50U * 1024U * 1024U)
-#define TELEGRAM_DEFAULT_LOG_INTERVAL_SEC 3600U
-#define TELEGRAM_MIN_LOG_INTERVAL_SEC 5U
-#define TELEGRAM_MAX_LOG_INTERVAL_SEC 86400U
-#define C2T_DEFAULT_QUEUE_MAX_BYTES (64U * 1024U * 1024U)
-#define C2T_DEFAULT_QUEUE_MAX_ITEMS 128U
-#define C2T_DEFAULT_DELIVERY_ATTEMPTS 3U
-#define C2T_DEFAULT_RETRY_DELAY_MS 500U
-#define C2T_MAX_DELIVERY_ATTEMPTS 10U
-#define C2T_MAX_RETRY_DELAY_MS 60000U
+constexpr size_t TELEGRAM_DEFAULT_MAX_FILE_BYTES = 50U * 1024U * 1024U;
+constexpr size_t TELEGRAM_DEFAULT_LOG_INTERVAL_SEC = 3600U;
+constexpr size_t TELEGRAM_MIN_LOG_INTERVAL_SEC = 5U;
+constexpr size_t TELEGRAM_MAX_LOG_INTERVAL_SEC = 86400U;
+constexpr size_t C2T_DEFAULT_QUEUE_MAX_BYTES = 64U * 1024U * 1024U;
+constexpr size_t C2T_DEFAULT_QUEUE_MAX_ITEMS = 128U;
+constexpr size_t C2T_DEFAULT_DELIVERY_ATTEMPTS = 3U;
+constexpr size_t C2T_DEFAULT_RETRY_DELAY_MS = 500U;
+constexpr size_t C2T_MAX_DELIVERY_ATTEMPTS = 10U;
+constexpr size_t C2T_MAX_RETRY_DELAY_MS = 60000U;
 
 static c2t_config_t config;
 static char embedded_bot_token[512];
 static char embedded_chat_id[128];
 
 #ifdef __APPLE__
-#define C2T_SIDECAR_CAPACITY 4096U
+constexpr size_t C2T_SIDECAR_CAPACITY = 4096U;
 static char sidecar[C2T_SIDECAR_CAPACITY + 1];
 static size_t sidecar_length;
 
 static void load_sidecar(const char *executable_path)
 {
-    char executable[4096];
+    char executable[4096] = {};
     uint32_t capacity = (uint32_t)sizeof(executable);
     if (_NSGetExecutablePath(executable, &capacity) != 0) {
         if (!executable_path || strlen(executable_path) >= sizeof(executable))
@@ -80,7 +80,7 @@ static void load_sidecar(const char *executable_path)
     sidecar[sidecar_length] = '\0';
 }
 
-static int sidecar_get(const char *name, char *output, size_t capacity)
+[[nodiscard]] static int sidecar_get(const char *name, char *output, size_t capacity)
 {
     size_t name_length = strlen(name);
     size_t position = 0;
@@ -108,8 +108,8 @@ static int sidecar_get(const char *name, char *output, size_t capacity)
 }
 #endif
 
-static const char *configured_value(const char *name, char *embedded,
-                                    size_t embedded_capacity)
+[[nodiscard]] static const char *configured_value(const char *name, char *embedded,
+                                                 size_t embedded_capacity)
 {
     const char *value = getenv(name);
     if (value)
@@ -120,19 +120,19 @@ static const char *configured_value(const char *name, char *embedded,
 #endif
     if (c2t_embedded_config_get(name, embedded, embedded_capacity))
         return embedded;
-    return NULL;
+    return nullptr;
 }
 
-static int configured_flag(const char *name)
+[[nodiscard]] static int configured_flag(const char *name)
 {
-    char embedded[16];
+    char embedded[16] = {};
     const char *value = configured_value(name, embedded, sizeof(embedded));
     return value && *value && strcmp(value, "0") != 0;
 }
 
-static size_t configured_size(const char *name, size_t fallback)
+[[nodiscard]] static size_t configured_size(const char *name, size_t fallback)
 {
-    char embedded[32];
+    char embedded[32] = {};
     const char *value = configured_value(name, embedded, sizeof(embedded));
     if (!value || !*value || *value == '-')
         return fallback;
@@ -145,12 +145,10 @@ static size_t configured_size(const char *name, size_t fallback)
     return (size_t)parsed;
 }
 
-void c2t_config_load(const char *executable_path)
+void c2t_config_load([[maybe_unused]] const char *executable_path)
 {
 #ifdef __APPLE__
     load_sidecar(executable_path);
-#else
-    (void)executable_path;
 #endif
     config.verbose = configured_flag("C2T_VERBOSE");
     config.log_file = configured_flag("C2T_LOG_FILE");
@@ -189,7 +187,7 @@ void c2t_config_load(const char *executable_path)
 
 void c2t_config_load_environment(void)
 {
-    c2t_config_load(NULL);
+    c2t_config_load(nullptr);
 }
 
 const char *c2t_config_apply_arguments(int argc, char **argv)
@@ -225,7 +223,7 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
             return argv[index];
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 static char dynamic_chat_id[128];

@@ -36,7 +36,7 @@
 #include <windows.h>
 #endif
 
-#define MAX_LOG_READ_BYTES (5U * 1024U * 1024U)
+constexpr size_t MAX_LOG_READ_BYTES = 5U * 1024U * 1024U;
 
 static int worker_started;
 static int stopping;
@@ -82,10 +82,10 @@ static void sender_wait(size_t seconds)
 static void sender_signal(void) { (void)pthread_cond_signal(&sender_condition); }
 #endif
 
-#define LOG_TEXT_MAX_THRESHOLD (8 * 1024)
-#define LOG_CHUNK_TARGET_CHARS 3200
+constexpr size_t LOG_TEXT_MAX_THRESHOLD = 8 * 1024;
+constexpr size_t LOG_CHUNK_TARGET_CHARS = 3200;
 
-static int send_log_text_chunks(const char *buffer, size_t length)
+[[nodiscard]] static int send_log_text_chunks(const char *buffer, size_t length)
 {
     size_t offset = 0;
     int chunk_index = 0;
@@ -147,7 +147,7 @@ static int send_log_text_chunks(const char *buffer, size_t length)
 static int send_log_payload(int on_demand)
 {
     const char *path = c2t_runtime_log_path();
-    char *buffer = NULL;
+    char *buffer = nullptr;
     size_t unread_bytes = 0;
     int is_file_source = 0;
 
@@ -198,9 +198,9 @@ static int send_log_payload(int on_demand)
 
     /* If sending as text chunks failed or buffer was larger than threshold: send as .log file */
     if (!sent) {
-        char filename[64];
-        time_t now = time(NULL);
-        struct tm utc_tm;
+        char filename[64] = {};
+        time_t now = time(nullptr);
+        struct tm utc_tm = {};
 #ifdef _WIN32
         gmtime_s(&utc_tm, &now);
 #else
@@ -213,7 +213,7 @@ static int send_log_payload(int on_demand)
         c2t_log_info("log_sender", "Sending log file to Telegram (%llu bytes, name=%s)",
                      (unsigned long long)unread_bytes, filename);
 
-        sent = telegram_send_file(buffer, unread_bytes, "text/plain", filename, NULL);
+        sent = telegram_send_file(buffer, unread_bytes, "text/plain", filename, nullptr);
     }
 
     if (sent) {
@@ -247,12 +247,11 @@ int c2t_log_sender_dispatch_now(void)
 }
 
 #ifdef _WIN32
-static DWORD WINAPI log_sender_worker_func(void *context)
+static DWORD WINAPI log_sender_worker_func([[maybe_unused]] void *context)
 #else
-static void *log_sender_worker_func(void *context)
+static void *log_sender_worker_func([[maybe_unused]] void *context)
 #endif
 {
-    (void)context;
     const c2t_config_t *config = c2t_config_get();
 
     for (;;) {
@@ -275,7 +274,7 @@ static void *log_sender_worker_func(void *context)
 #ifdef _WIN32
     return 0;
 #else
-    return NULL;
+    return nullptr;
 #endif
 }
 
@@ -298,10 +297,10 @@ int c2t_log_sender_init(void)
                  (unsigned long long)config->telegram_log_interval_sec);
 
 #ifdef _WIN32
-    worker_thread = CreateThread(NULL, 0, log_sender_worker_func, NULL, 0, NULL);
-    worker_started = worker_thread != NULL;
+    worker_thread = CreateThread(nullptr, 0, log_sender_worker_func, nullptr, 0, nullptr);
+    worker_started = worker_thread != nullptr;
 #else
-    worker_started = pthread_create(&worker_thread, NULL, log_sender_worker_func, NULL) == 0;
+    worker_started = pthread_create(&worker_thread, nullptr, log_sender_worker_func, nullptr) == 0;
 #endif
 
     if (!worker_started)
@@ -323,9 +322,9 @@ void c2t_log_sender_cleanup(void)
 #ifdef _WIN32
     WaitForSingleObject(worker_thread, INFINITE);
     CloseHandle(worker_thread);
-    worker_thread = NULL;
+    worker_thread = nullptr;
 #else
-    (void)pthread_join(worker_thread, NULL);
+    (void)pthread_join(worker_thread, nullptr);
 #endif
 
     worker_started = 0;

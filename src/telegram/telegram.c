@@ -48,11 +48,11 @@ static void telegram_lock(void)
 static void telegram_unlock(void) { LeaveCriticalSection(&telegram_mutex); }
 #endif
 
-#define TELEGRAM_MAX_CHARACTERS 4096
-#define TELEGRAM_MAX_CAPTION_BYTES 1023
-#define TELEGRAM_DEDUP_TABLE_SIZE 2048
-#define TELEGRAM_DEDUP_TABLE_MASK (TELEGRAM_DEDUP_TABLE_SIZE - 1)
-#define TELEGRAM_DEDUPLICATION_CAPACITY 1024
+constexpr size_t TELEGRAM_MAX_CHARACTERS = 4096;
+constexpr size_t TELEGRAM_MAX_CAPTION_BYTES = 1023;
+constexpr size_t TELEGRAM_DEDUP_TABLE_SIZE = 2048;
+constexpr size_t TELEGRAM_DEDUP_TABLE_MASK = (TELEGRAM_DEDUP_TABLE_SIZE - 1);
+constexpr size_t TELEGRAM_DEDUPLICATION_CAPACITY = 1024;
 
 static const char *bot_token;
 static const char *chat_id;
@@ -619,19 +619,19 @@ static int send_rich_text(const char *text, size_t length, int *recognized)
             *recognized = 1;
             c2t_log_info("telegram", "Recognized vCard contact");
             return send_contact(phone, phone_length, name, name_length,
-                                trimmed_length <= 2048 ? trimmed : NULL,
+                                trimmed_length <= 2048 ? trimmed : nullptr,
                                 trimmed_length);
         }
     }
 
-    char phone[17];
+    char phone[17] = {};
     size_t phone_length;
     if (parse_phone(trimmed, trimmed_length, phone, &phone_length)) {
         static const char contact_name[] = "Clipboard";
         *recognized = 1;
         c2t_log_info("telegram", "Recognized phone number as contact");
         return send_contact(phone, phone_length, contact_name,
-                            sizeof(contact_name) - 1, NULL, 0);
+                            sizeof(contact_name) - 1, nullptr, 0);
     }
 
     char latitude[32];
@@ -831,8 +831,8 @@ int telegram_init(void)
     if (!chat_id || !chat_is_valid(chat_id)) {
         telegram_unlock();
         c2t_log_info("telegram", "TELEGRAM_CHAT_ID is missing; entering auto-pairing mode...");
-        char paired_chat_id[128] = {0};
-        if (telegram_pair(bot_token, NULL, paired_chat_id, sizeof(paired_chat_id), 60)) {
+        char paired_chat_id[128] = {};
+        if (telegram_pair(bot_token, nullptr, paired_chat_id, sizeof(paired_chat_id), 60)) {
             telegram_lock();
             chat_id = config->telegram_chat_id;
         } else {
@@ -943,7 +943,7 @@ int telegram_send_data(const void *data, size_t length, const char *mime_type,
         c2t_log_info("telegram", "Uploading file (%s, %llu bytes)", mime_type,
                      (unsigned long long)length);
         int result = finish_send(
-            &pending, send_file(data, length, mime_type, NULL, 1, source));
+            &pending, send_file(data, length, mime_type, nullptr, 1, source));
         c2t_log_info("telegram", "File delivery %s",
                      result ? "completed" : "failed");
         return result;
@@ -1065,7 +1065,7 @@ static int parse_json_chat_id_in_range(const char *start, const char *end, char 
     if (!start || !end || start >= end || !output || capacity == 0) return 0;
     output[0] = '\0';
 
-    const char *chat_pos = NULL;
+    const char *chat_pos = nullptr;
     char chat_pattern[] = "\"chat\"";
     for (const char *p = start; p + 6 <= end; p++) {
         if (memcmp(p, chat_pattern, 6) == 0) {
@@ -1084,7 +1084,7 @@ static int parse_json_chat_id_in_range(const char *start, const char *end, char 
     }
     if (!chat_pos) chat_pos = start;
 
-    const char *id_pos = NULL;
+    const char *id_pos = nullptr;
     char id_pattern[] = "\"id\"";
     for (const char *p = chat_pos; p + 4 <= end; p++) {
         if (memcmp(p, id_pattern, 4) == 0) {
@@ -1116,7 +1116,7 @@ int telegram_get_bot_username(const char *token, char *username_out, size_t capa
         temp_http = 1;
     }
 
-    char response[2048] = {0};
+    char response[2048] = {};
     int res = telegram_http_get(token, "getMe", response, sizeof(response));
     if (temp_http && !initialized) {
         telegram_http_cleanup();
@@ -1144,7 +1144,7 @@ int telegram_poll_updates_callback(const char *token, int64_t *offset, int timeo
         snprintf(query, sizeof(query), "getUpdates?timeout=%d", timeout_seconds);
     }
 
-    char response[32768] = {0};
+    char response[32768] = {};
     int res = telegram_http_get(token, query, response, sizeof(response));
     if (temp_http && !initialized) {
         telegram_http_cleanup();
@@ -1164,15 +1164,15 @@ int telegram_poll_updates_callback(const char *token, int64_t *offset, int timeo
     while (curr) {
         const char *id_ptr = curr + 11;
         while (*id_ptr == ' ' || *id_ptr == ':') id_ptr++;
-        int64_t uid = strtoll(id_ptr, NULL, 10);
+        int64_t uid = strtoll(id_ptr, nullptr, 10);
         if (uid > max_update_id) max_update_id = uid;
 
         const char *next = strstr(curr + 11, "\"update_id\"");
         const char *block_end = next ? next : (response + strlen(response));
 
-        char item_chat_id[128] = {0};
-        char item_username[128] = {0};
-        char item_text[512] = {0};
+        char item_chat_id[128] = {};
+        char item_username[128] = {};
+        char item_text[512] = {};
 
         parse_json_chat_id_in_range(curr, block_end, item_chat_id, sizeof(item_chat_id));
         parse_json_field_in_range(curr, block_end, "username", item_username, sizeof(item_username));
@@ -1203,11 +1203,10 @@ typedef struct {
     int found;
 } single_poll_ctx_t;
 
-static void single_poll_callback(int64_t update_id, const char *chat_id,
+static void single_poll_callback([[maybe_unused]] int64_t update_id, const char *chat_id,
                                  const char *username, const char *text,
                                  void *user_data)
 {
-    (void)update_id;
     single_poll_ctx_t *ctx = (single_poll_ctx_t *)user_data;
     if (ctx->found) return;
 
@@ -1266,18 +1265,18 @@ int telegram_pair(const char *token, const char *expected_code,
         initialized = 1;
     }
 
-    char bot_username[128] = {0};
+    char bot_username[128] = {};
     if (!telegram_get_bot_username(token, bot_username, sizeof(bot_username))) {
         c2t_log_error("pairing", "[PAIRING] Could not fetch Telegram Bot profile via getMe");
         if (!was_initialized) telegram_http_cleanup();
         return 0;
     }
 
-    char code_buf[64] = {0};
+    char code_buf[64] = {};
     if (expected_code && *expected_code) {
         snprintf(code_buf, sizeof(code_buf), "%s", expected_code);
     } else {
-        srand((unsigned int)time(NULL));
+        srand((unsigned int)time(nullptr));
         snprintf(code_buf, sizeof(code_buf), "c2t_%04x%04x", rand() % 0xffff, rand() % 0xffff);
     }
 
@@ -1292,9 +1291,9 @@ int telegram_pair(const char *token, const char *expected_code,
 
     int64_t offset = 0;
     int elapsed = 0;
-    char found_chat_id[128] = {0};
-    char found_username[128] = {0};
-    char found_text[256] = {0};
+    char found_chat_id[128] = {};
+    char found_username[128] = {};
+    char found_text[256] = {};
 
     while (elapsed < timeout_seconds) {
         if (telegram_poll_updates(token, &offset, found_chat_id, sizeof(found_chat_id),
@@ -1310,7 +1309,7 @@ int telegram_pair(const char *token, const char *expected_code,
                 chat_id = c2t_config_get()->telegram_chat_id;
 
                 /* Send confirmation message to Telegram chat */
-                char confirm_msg[512];
+                char confirm_msg[512] = {};
                 snprintf(confirm_msg, sizeof(confirm_msg),
                          "✅ c2t paired successfully!\nDevice connected to %s (Chat ID: %s).",
                          found_username[0] ? found_username : "user", found_chat_id);
@@ -1345,8 +1344,8 @@ void telegram_cleanup(void)
         telegram_http_cleanup();
     initialized = 0;
     deduplicate = 0;
-    bot_token = NULL;
-    chat_id = NULL;
+    bot_token = nullptr;
+    chat_id = nullptr;
     telegram_unlock();
     clear_sent_contents();
 }

@@ -33,10 +33,10 @@
 #include <poll.h>
 #include <sys/uio.h>
 
-#define XFIXES_QUERY_VERSION 0
-#define XFIXES_SELECT_SELECTION_INPUT 2
-#define XFIXES_SELECTION_NOTIFY 0
-#define XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER 1
+constexpr uint8_t XFIXES_QUERY_VERSION = 0;
+constexpr uint8_t XFIXES_SELECT_SELECTION_INPUT = 2;
+constexpr uint8_t XFIXES_SELECTION_NOTIFY = 0;
+constexpr uint32_t XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER = 1;
 
 typedef struct {
     uint8_t major_opcode;
@@ -99,13 +99,14 @@ static size_t copy_property_text(const char *value, size_t length,
     return copied;
 }
 
-static xcb_get_property_reply_t *window_property(
+[[nodiscard]] static xcb_get_property_reply_t *get_property(
     xcb_connection_t *connection, xcb_window_t window, xcb_atom_t property,
-    xcb_atom_t type)
+    xcb_atom_t type, uint32_t offset, uint32_t length, int delete_property)
 {
     xcb_get_property_cookie_t cookie = xcb_get_property(
-        connection, 0, window, property, type, 0, 2048);
-    return xcb_get_property_reply(connection, cookie, NULL);
+        connection, (uint8_t)delete_property, window, property, type, offset,
+        length);
+    return xcb_get_property_reply(connection, cookie, nullptr);
 }
 
 static int capture_window(xcb_connection_t *connection,
@@ -114,13 +115,13 @@ static int capture_window(xcb_connection_t *connection,
                           xcb_atom_t class_atom, xcb_atom_t pid_atom,
                           c2t_clipboard_source_t *source)
 {
-    xcb_get_property_reply_t *name = window_property(
-        connection, source_window, name_atom, XCB_GET_PROPERTY_TYPE_ANY);
+    xcb_get_property_reply_t *name = get_property(
+        connection, source_window, name_atom, XCB_GET_PROPERTY_TYPE_ANY, 0, 2048, 0);
     if (!name || name->format != 8 ||
         xcb_get_property_value_length(name) == 0) {
         free(name);
-        name = window_property(connection, source_window, wm_name_atom,
-                               XCB_GET_PROPERTY_TYPE_ANY);
+        name = get_property(connection, source_window, wm_name_atom,
+                               XCB_GET_PROPERTY_TYPE_ANY, 0, 2048, 0);
     }
     if (name && name->format == 8) {
         copy_property_text(xcb_get_property_value(name),
@@ -129,8 +130,8 @@ static int capture_window(xcb_connection_t *connection,
     }
     free(name);
 
-    xcb_get_property_reply_t *window_class = window_property(
-        connection, source_window, class_atom, XCB_GET_PROPERTY_TYPE_ANY);
+    xcb_get_property_reply_t *window_class = get_property(
+        connection, source_window, class_atom, XCB_GET_PROPERTY_TYPE_ANY, 0, 2048, 0);
     if (window_class && window_class->format == 8) {
         const char *value = xcb_get_property_value(window_class);
         size_t length = (size_t)xcb_get_property_value_length(window_class);
@@ -153,8 +154,8 @@ static int capture_window(xcb_connection_t *connection,
     }
     free(window_class);
 
-    xcb_get_property_reply_t *pid = window_property(
-        connection, source_window, pid_atom, XCB_ATOM_CARDINAL);
+    xcb_get_property_reply_t *pid = get_property(
+        connection, source_window, pid_atom, XCB_ATOM_CARDINAL, 0, 4, 0);
     if (pid && pid->format == 32 &&
         xcb_get_property_value_length(pid) >= (int)sizeof(uint32_t)) {
         const void *pid_val = xcb_get_property_value(pid);
@@ -177,8 +178,8 @@ static int capture_source(xcb_connection_t *connection, xcb_window_t root,
         return 0;
 
     xcb_window_t active_window = XCB_WINDOW_NONE;
-    xcb_get_property_reply_t *active = window_property(
-        connection, root, active_window_atom, XCB_ATOM_WINDOW);
+    xcb_get_property_reply_t *active = get_property(
+        connection, root, active_window_atom, XCB_ATOM_WINDOW, 0, 4, 0);
     if (active && active->format == 32 &&
         xcb_get_property_value_length(active) >= (int)sizeof(xcb_window_t)) {
         xcb_window_t candidate;
@@ -207,12 +208,12 @@ static int capture_source(xcb_connection_t *connection, xcb_window_t root,
     return captured;
 }
 
-static xcb_atom_t intern_atom(xcb_connection_t *connection, const char *name)
+[[nodiscard]] static xcb_atom_t intern_atom(xcb_connection_t *connection, const char *name)
 {
     xcb_intern_atom_cookie_t cookie =
         xcb_intern_atom(connection, 0, (uint16_t)strlen(name), name);
     xcb_intern_atom_reply_t *reply =
-        xcb_intern_atom_reply(connection, cookie, NULL);
+        xcb_intern_atom_reply(connection, cookie, nullptr);
     if (!reply)
         return XCB_ATOM_NONE;
 
@@ -221,8 +222,8 @@ static xcb_atom_t intern_atom(xcb_connection_t *connection, const char *name)
     return atom;
 }
 
-static int xfixes_listen(xcb_connection_t *connection, xcb_window_t window,
-                         xcb_atom_t selection, uint8_t *event_type)
+[[nodiscard]] static int xfixes_listen(xcb_connection_t *connection, xcb_window_t window,
+                                      xcb_atom_t selection, uint8_t *event_type)
 {
     const xcb_query_extension_reply_t *extension =
         xcb_get_extension_data(connection, &xfixes_extension);
@@ -239,12 +240,12 @@ static int xfixes_listen(xcb_connection_t *connection, xcb_window_t window,
     struct iovec version_parts[4];
     version_parts[2].iov_base = &version_request;
     version_parts[2].iov_len = sizeof(version_request);
-    version_parts[3].iov_base = NULL;
+    version_parts[3].iov_base = nullptr;
     version_parts[3].iov_len = 0;
 
     unsigned int sequence = xcb_send_request(
         connection, XCB_REQUEST_CHECKED, version_parts + 2, &version_protocol);
-    xcb_generic_error_t *error = NULL;
+    xcb_generic_error_t *error = nullptr;
     void *reply = xcb_wait_for_reply(connection, sequence, &error);
     if (!reply || error) {
         free(reply);
@@ -264,7 +265,7 @@ static int xfixes_listen(xcb_connection_t *connection, xcb_window_t window,
     struct iovec select_parts[4];
     select_parts[2].iov_base = &select_request;
     select_parts[2].iov_len = sizeof(select_request);
-    select_parts[3].iov_base = NULL;
+    select_parts[3].iov_base = nullptr;
     select_parts[3].iov_len = 0;
 
     sequence = xcb_send_request(
@@ -321,11 +322,8 @@ static int read_property(xcb_connection_t *connection, xcb_window_t window,
     uint32_t long_length = limit / 4 + (limit % 4 != 0);
     if (limit / 4 > UINT32_MAX)
         long_length = UINT32_MAX;
-    xcb_get_property_cookie_t cookie = xcb_get_property(
-        connection, 1, window, property,
-        XCB_GET_PROPERTY_TYPE_ANY, 0, long_length);
-    xcb_get_property_reply_t *reply =
-        xcb_get_property_reply(connection, cookie, NULL);
+    xcb_get_property_reply_t *reply = get_property(
+        connection, window, property, XCB_GET_PROPERTY_TYPE_ANY, 0, long_length, 1);
     if (!reply)
         return 0;
 
@@ -392,10 +390,8 @@ static xcb_atom_t select_target(xcb_connection_t *connection,
                                 size_t supported_count,
                                 const char **mime_type)
 {
-    xcb_get_property_cookie_t cookie = xcb_get_property(
-        connection, 1, window, property, XCB_ATOM_ATOM, 0, UINT32_MAX);
-    xcb_get_property_reply_t *reply =
-        xcb_get_property_reply(connection, cookie, NULL);
+    xcb_get_property_reply_t *reply = get_property(
+        connection, window, property, XCB_ATOM_ATOM, 0, UINT32_MAX, 0);
     if (!reply || reply->format != 32) {
         free(reply);
         return XCB_ATOM_NONE;
@@ -430,7 +426,7 @@ static int clipboard_listen_once(void)
     }
     c2t_log_debug("x11", "Connecting to the X11 display");
     int screen_number = 0;
-    xcb_connection_t *connection = xcb_connect(NULL, &screen_number);
+    xcb_connection_t *connection = xcb_connect(nullptr, &screen_number);
     if (xcb_connection_has_error(connection)) {
         c2t_log_error("x11", "Unable to open the X11 display");
         xcb_disconnect(connection);
@@ -448,56 +444,42 @@ static int clipboard_listen_once(void)
     }
 
     xcb_window_t window = xcb_generate_id(connection);
-    uint32_t event_mask = XCB_EVENT_MASK_PROPERTY_CHANGE;
-    xcb_create_window(
-        connection, XCB_COPY_FROM_PARENT, window, screens.data->root,
-        0, 0, 1, 1, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
-        screens.data->root_visual, XCB_CW_EVENT_MASK, &event_mask);
+    uint32_t mask = XCB_CW_EVENT_MASK;
+    uint32_t values[] = {XCB_EVENT_MASK_PROPERTY_CHANGE};
+    xcb_create_window(connection, XCB_COPY_FROM_PARENT, window,
+                      screens.data->root, 0, 0, 1, 1, 0,
+                      XCB_WINDOW_CLASS_INPUT_ONLY, screens.data->root_visual,
+                      mask, values);
 
     xcb_atom_t clipboard = intern_atom(connection, "CLIPBOARD");
     xcb_atom_t targets = intern_atom(connection, "TARGETS");
-    xcb_atom_t target_utf8_mime =
-        intern_atom(connection, "text/plain;charset=utf-8");
-    xcb_atom_t target_utf8 = intern_atom(connection, "UTF8_STRING");
-    xcb_atom_t target_text = intern_atom(connection, "text/plain");
-    xcb_atom_t target_vcard = intern_atom(connection, "text/vcard");
-    xcb_atom_t target_x_vcard = intern_atom(connection, "text/x-vcard");
-    xcb_atom_t target_uri_list = c2t_config_get()->telegram_send_files
-        ? intern_atom(connection, "text/uri-list") : XCB_ATOM_NONE;
-    xcb_atom_t target_png = intern_atom(connection, "image/png");
-    xcb_atom_t target_jpeg = intern_atom(connection, "image/jpeg");
-    xcb_atom_t target_webp = intern_atom(connection, "image/webp");
-    xcb_atom_t target_gif = intern_atom(connection, "image/gif");
-    xcb_atom_t target_bmp = intern_atom(connection, "image/bmp");
-    xcb_atom_t active_window_atom =
-        intern_atom(connection, "_NET_ACTIVE_WINDOW");
+    xcb_atom_t incr = intern_atom(connection, "INCR");
+    xcb_atom_t property = intern_atom(connection, "C2T_SELECTION");
+    xcb_atom_t active_window_atom = intern_atom(connection, "_NET_ACTIVE_WINDOW");
     xcb_atom_t name_atom = intern_atom(connection, "_NET_WM_NAME");
     xcb_atom_t wm_name_atom = intern_atom(connection, "WM_NAME");
     xcb_atom_t class_atom = intern_atom(connection, "WM_CLASS");
     xcb_atom_t pid_atom = intern_atom(connection, "_NET_WM_PID");
-    clipboard_target_t supported[] = {
-        {target_uri_list, "text/uri-list"},
-        {target_vcard, "text/vcard"},
-        {target_x_vcard, "text/x-vcard"},
-        {target_png, "image/png"},
-        {target_jpeg, "image/jpeg"},
-        {target_webp, "image/webp"},
-        {target_gif, "image/gif"},
-        {target_bmp, "image/bmp"},
-        {target_utf8_mime, "text/plain;charset=utf-8"},
-        {target_utf8, "text/plain;charset=utf-8"},
-        {target_text, "text/plain"}
-    };
 
-    xcb_atom_t property = intern_atom(connection, "C2C_CLIPBOARD");
-    xcb_atom_t incr = intern_atom(connection, "INCR");
     if (clipboard == XCB_ATOM_NONE || targets == XCB_ATOM_NONE ||
-        target_utf8 == XCB_ATOM_NONE ||
-        property == XCB_ATOM_NONE || incr == XCB_ATOM_NONE) {
-        c2t_log_error("x11", "Unable to initialize required X11 atoms");
+        incr == XCB_ATOM_NONE || property == XCB_ATOM_NONE) {
+        c2t_log_error("x11", "Unable to intern standard X11 selection atoms");
         xcb_disconnect(connection);
         return 1;
     }
+
+    clipboard_target_t supported[] = {
+        {intern_atom(connection, "UTF8_STRING"), "text/plain;charset=utf-8"},
+        {intern_atom(connection, "text/plain;charset=utf-8"),
+         "text/plain;charset=utf-8"},
+        {intern_atom(connection, "text/plain"), "text/plain"},
+        {intern_atom(connection, "STRING"), "text/plain"},
+        {intern_atom(connection, "TEXT"), "text/plain"},
+        {intern_atom(connection, "image/png"), "image/png"},
+        {intern_atom(connection, "image/jpeg"), "image/jpeg"},
+        {intern_atom(connection, "image/bmp"), "image/bmp"},
+        {intern_atom(connection, "image/webp"), "image/webp"}
+    };
 
     uint8_t xfixes_event_type;
     if (!xfixes_listen(connection, window, clipboard, &xfixes_event_type)) {
@@ -510,9 +492,9 @@ static int clipboard_listen_once(void)
 
     int incremental = 0;
     xcb_atom_t requested_target = XCB_ATOM_NONE;
-    const char *mime_type = NULL;
-    clipboard_transfer_t transfer = {0};
-    c2t_clipboard_source_t source = {0};
+    const char *mime_type = nullptr;
+    clipboard_transfer_t transfer = {};
+    c2t_clipboard_source_t source = {};
     int has_source = 0;
     xcb_generic_event_t *event;
 
@@ -549,7 +531,7 @@ static int clipboard_listen_once(void)
                 incremental = 0;
                 transfer.length = 0;
                 requested_target = targets;
-                mime_type = NULL;
+                mime_type = nullptr;
                 has_source = capture_source(
                     connection, screens.data->root, selection->owner,
                     active_window_atom, name_atom, wm_name_atom, class_atom,
@@ -580,7 +562,7 @@ static int clipboard_listen_once(void)
             } else if (selection->property != XCB_ATOM_NONE && mime_type) {
                 incremental = read_property(
                     connection, window, property, incr, 0, &transfer,
-                    requested_target, mime_type, has_source ? &source : NULL);
+                    requested_target, mime_type, has_source ? &source : nullptr);
             }
         } else if (event_type == XCB_PROPERTY_NOTIFY && incremental) {
             xcb_property_notify_event_t *property_event = (void *)event;
@@ -588,7 +570,7 @@ static int clipboard_listen_once(void)
                 property_event->state == XCB_PROPERTY_NEW_VALUE) {
                 incremental = read_property(
                     connection, window, property, incr, 1, &transfer,
-                    requested_target, mime_type, has_source ? &source : NULL);
+                    requested_target, mime_type, has_source ? &source : nullptr);
             }
         }
 

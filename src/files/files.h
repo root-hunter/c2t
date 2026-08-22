@@ -27,7 +27,7 @@ enum {
     C2T_FILE_ERROR = -1
 };
 
-int c2t_file_try_clipboard_path(const void *data, size_t length,
+[[nodiscard]] int c2t_file_try_clipboard_path(const void *data, size_t length,
                                 const char *mime_type,
                                 const c2t_clipboard_source_t *source);
 

@@ -35,8 +35,8 @@
 #include <windows.h>
 #endif
 
-#define DUPLICATE_WINDOW_MS 500
-#define C2T_MIME_CAPACITY 128
+constexpr size_t DUPLICATE_WINDOW_MS = 500;
+constexpr size_t C2T_MIME_CAPACITY = 128;
 
 typedef struct clipboard_event {
     struct clipboard_event *next;
@@ -175,7 +175,7 @@ static int deliver_payload(const clipboard_event_t *event,
 static void deliver_event(const clipboard_event_t *event)
 {
     const c2t_clipboard_source_t *source =
-        event->has_source ? &event->source : NULL;
+        event->has_source ? &event->source : nullptr;
 
     if (strncmp(event->mime_type, "text/", 5) == 0) {
         if (event->length > 0 &&
@@ -203,12 +203,11 @@ static void deliver_event(const clipboard_event_t *event)
 }
 
 #ifdef _WIN32
-static DWORD WINAPI delivery_worker(void *context)
+static DWORD WINAPI delivery_worker([[maybe_unused]] void *context)
 #else
-static void *delivery_worker(void *context)
+static void *delivery_worker([[maybe_unused]] void *context)
 #endif
 {
-    (void)context;
     for (;;) {
         queue_lock();
         while (!queue_head && !stopping)
@@ -220,7 +219,7 @@ static void *delivery_worker(void *context)
         clipboard_event_t *event = queue_head;
         queue_head = event->next;
         if (!queue_head)
-            queue_tail = NULL;
+            queue_tail = nullptr;
         queue_unlock();
 
         deliver_event(event);
@@ -234,7 +233,7 @@ static void *delivery_worker(void *context)
 #ifdef _WIN32
     return 0;
 #else
-    return NULL;
+    return nullptr;
 #endif
 }
 
@@ -251,11 +250,11 @@ int clipboard_output_init(void)
 #ifdef _WIN32
     InitializeCriticalSection(&queue_mutex);
     InitializeConditionVariable(&queue_condition);
-    worker_thread = CreateThread(NULL, 0, delivery_worker, NULL, 0, NULL);
-    worker_started = worker_thread != NULL;
+    worker_thread = CreateThread(nullptr, 0, delivery_worker, nullptr, 0, nullptr);
+    worker_started = worker_thread != nullptr;
 #else
-    worker_started = pthread_create(&worker_thread, NULL, delivery_worker,
-                                    NULL) == 0;
+    worker_started = pthread_create(&worker_thread, nullptr, delivery_worker,
+                                    nullptr) == 0;
 #endif
     if (!worker_started)
         c2t_log_error("clipboard", "Unable to start delivery worker");
@@ -320,7 +319,7 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
         length == last_duplicate_length && now_ms >= last_duplicate_time_ms) {
         if (now_ms - last_duplicate_time_ms < DUPLICATE_WINDOW_MS) {
             c2t_log_debug("clipboard",
-                          "Ignoring repeated platform event within %d ms",
+                          "Ignoring repeated platform event within %zu ms",
                           DUPLICATE_WINDOW_MS);
             return;
         }
@@ -346,11 +345,11 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
         c2t_log_error("clipboard", "Not enough memory to queue clipboard data");
         return;
     }
-    event->next = NULL;
+    event->next = nullptr;
     event->length = length;
     event->allocation_size = allocation_size;
     memcpy(event->mime_type, mime_type, mime_length + 1);
-    event->has_source = source != NULL;
+    event->has_source = source != nullptr;
     if (source)
         event->source = *source;
     else
@@ -389,10 +388,10 @@ void clipboard_output_cleanup(void)
 #ifdef _WIN32
     WaitForSingleObject(worker_thread, INFINITE);
     CloseHandle(worker_thread);
-    worker_thread = NULL;
+    worker_thread = nullptr;
     DeleteCriticalSection(&queue_mutex);
 #else
-    (void)pthread_join(worker_thread, NULL);
+    (void)pthread_join(worker_thread, nullptr);
 #endif
     worker_started = 0;
     
@@ -403,8 +402,8 @@ void clipboard_output_cleanup(void)
         free(current);
         current = next;
     }
-    queue_head = NULL;
-    queue_tail = NULL;
+    queue_head = nullptr;
+    queue_tail = nullptr;
     queue_bytes = 0;
     queue_items = 0;
     queue_unlock();

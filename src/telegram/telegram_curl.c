@@ -25,18 +25,18 @@
 #include <stdio.h>
 #include <string.h>
 
-#define TELEGRAM_RESPONSE_CAPACITY 1024
+constexpr size_t TELEGRAM_RESPONSE_CAPACITY = 1024;
 
 static int curl_initialized;
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
-static _Thread_local CURL *thread_curl_handle = NULL;
+static _Thread_local CURL *thread_curl_handle = nullptr;
 #elif defined(_MSC_VER)
-static __declspec(thread) CURL *thread_curl_handle = NULL;
+static __declspec(thread) CURL *thread_curl_handle = nullptr;
 #elif defined(__GNUC__) || defined(__clang__)
-static __thread CURL *thread_curl_handle = NULL;
+static __thread CURL *thread_curl_handle = nullptr;
 #else
-static CURL *thread_curl_handle = NULL;
+static CURL *thread_curl_handle = nullptr;
 #endif
 
 typedef struct {
@@ -133,12 +133,12 @@ int telegram_http_post(const char *token, const char *method,
         return 0;
     }
     struct curl_slist *request_headers =
-        curl_slist_append(NULL, content_type_header);
+        curl_slist_append(nullptr, content_type_header);
     if (!request_headers) {
         return 0;
     }
 
-    response_buffer_t response = {{0}, 0};
+    response_buffer_t response = {};
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, request_headers);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
@@ -168,7 +168,7 @@ int telegram_http_post(const char *token, const char *method,
         curl_slist_free_all(request_headers);
         if (result != CURLE_OK) {
             curl_easy_cleanup(thread_curl_handle);
-            thread_curl_handle = NULL;
+            thread_curl_handle = nullptr;
         }
         return 0;
     }
@@ -201,7 +201,7 @@ int telegram_http_get(const char *token, const char *method_and_query,
         return 0;
     }
 
-    response_buffer_t response = {{0}, 0};
+    response_buffer_t response = {};
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, capture_response);
@@ -222,7 +222,7 @@ int telegram_http_get(const char *token, const char *method_and_query,
                       method_and_query, status, (int)result);
         if (result != CURLE_OK) {
             curl_easy_cleanup(thread_curl_handle);
-            thread_curl_handle = NULL;
+            thread_curl_handle = nullptr;
         }
         return 0;
     }
@@ -238,7 +238,7 @@ void telegram_http_cleanup(void)
     c2t_log_debug("https", "Cleaning up libcurl transport");
     if (thread_curl_handle) {
         curl_easy_cleanup(thread_curl_handle);
-        thread_curl_handle = NULL;
+        thread_curl_handle = nullptr;
     }
     if (curl_initialized) {
         curl_global_cleanup();

@@ -38,14 +38,14 @@
 #include <unistd.h>
 #endif
 
-#define C2T_PATH_CAPACITY 4096
+constexpr size_t C2T_PATH_CAPACITY = 4096;
 
 static char state_path[C2T_PATH_CAPACITY];
 static char lock_path[C2T_PATH_CAPACITY];
 static char log_path[C2T_PATH_CAPACITY];
 static int paths_ready;
 
-static int format_path(char *output, size_t capacity, const char *format, ...)
+[[nodiscard]] static int format_path(char *output, size_t capacity, const char *format, ...)
 {
     va_list arguments;
     va_start(arguments, format);
@@ -68,7 +68,7 @@ static void sleep_ms(unsigned int milliseconds)
 #endif
 }
 
-static int state_read(c2t_runtime_status_t *status)
+[[nodiscard]] static int state_read(c2t_runtime_status_t *status)
 {
     FILE *stream = fopen(state_path, "rb");
     if (!stream)
@@ -76,7 +76,7 @@ static int state_read(c2t_runtime_status_t *status)
 
     char state[16] = "starting";
     unsigned long pid = 0;
-    char line[128];
+    char line[128] = {};
     while (fgets(line, sizeof(line), stream)) {
         if (sscanf(line, "pid=%lu", &pid) == 1)
             continue;
@@ -89,7 +89,7 @@ static int state_read(c2t_runtime_status_t *status)
     return pid != 0;
 }
 
-static int state_write(const char *state, unsigned long pid)
+[[nodiscard]] static int state_write(const char *state, unsigned long pid)
 {
     FILE *stream = fopen(state_path, "wb");
     if (!stream)
@@ -109,7 +109,7 @@ static HANDLE stop_event;
 static const char mutex_name[] = "Local\\c2t-daemon-instance-v1";
 static const char event_name[] = "Local\\c2t-daemon-stop-v1";
 
-static int prepare_paths(void)
+[[nodiscard]] static int prepare_paths(void)
 {
     if (paths_ready)
         return 1;
@@ -118,10 +118,10 @@ static int prepare_paths(void)
         base = getenv("TEMP");
     if (!base || !*base)
         return 0;
-    char directory[C2T_PATH_CAPACITY];
+    char directory[C2T_PATH_CAPACITY] = {};
     if (!format_path(directory, sizeof(directory), "%s\\c2t", base))
         return 0;
-    if (!CreateDirectoryA(directory, NULL) &&
+    if (!CreateDirectoryA(directory, nullptr) &&
         GetLastError() != ERROR_ALREADY_EXISTS)
         return 0;
     DWORD session_id = 0;
@@ -152,21 +152,21 @@ int c2t_runtime_acquire(void)
 {
     if (!prepare_paths())
         return -1;
-    instance_mutex = CreateMutexA(NULL, FALSE, mutex_name);
+    instance_mutex = CreateMutexA(nullptr, FALSE, mutex_name);
     if (!instance_mutex)
         return -1;
     DWORD mutex_result = WaitForSingleObject(instance_mutex, 0);
     if (mutex_result == WAIT_TIMEOUT) {
         CloseHandle(instance_mutex);
-        instance_mutex = NULL;
+        instance_mutex = nullptr;
         return 0;
     }
     if (mutex_result != WAIT_OBJECT_0 && mutex_result != WAIT_ABANDONED) {
         CloseHandle(instance_mutex);
-        instance_mutex = NULL;
+        instance_mutex = nullptr;
         return -1;
     }
-    stop_event = CreateEventA(NULL, TRUE, FALSE, event_name);
+    stop_event = CreateEventA(nullptr, TRUE, FALSE, event_name);
     if (stop_event)
         ResetEvent(stop_event);
     if (!stop_event || !state_write("starting", GetCurrentProcessId())) {
@@ -189,11 +189,11 @@ void c2t_runtime_release(void)
         DeleteFileA(state_path);
         if (stop_event) {
             CloseHandle(stop_event);
-            stop_event = NULL;
+            stop_event = nullptr;
         }
         ReleaseMutex(instance_mutex);
         CloseHandle(instance_mutex);
-        instance_mutex = NULL;
+        instance_mutex = nullptr;
     }
 }
 
@@ -293,15 +293,15 @@ static int append_quoted(char *command, size_t capacity, const char *argument)
     return 1;
 }
 
-int c2t_runtime_start_background(int argc, char **argv,
+int c2t_runtime_start_background([[maybe_unused]] int argc, [[maybe_unused]] char **argv,
                                  unsigned int timeout_ms)
 {
     c2t_runtime_status_t status;
     int current = c2t_runtime_get_status(&status);
     if (current != 0)
         return current > 0 ? C2T_BACKGROUND_PARENT : C2T_BACKGROUND_ERROR;
-    char executable[C2T_PATH_CAPACITY];
-    DWORD length = GetModuleFileNameA(NULL, executable, sizeof(executable));
+    char executable[C2T_PATH_CAPACITY] = {};
+    DWORD length = GetModuleFileNameA(nullptr, executable, sizeof(executable));
     if (!length || length >= sizeof(executable))
         return C2T_BACKGROUND_ERROR;
     char command[32768] = "";
@@ -315,17 +315,17 @@ int c2t_runtime_start_background(int argc, char **argv,
 
     if (!prepare_paths())
         return C2T_BACKGROUND_ERROR;
-    SECURITY_ATTRIBUTES security = {sizeof(security), NULL, TRUE};
+    SECURITY_ATTRIBUTES security = {sizeof(security), nullptr, TRUE};
     HANDLE log = c2t_config_get()->log_file
         ? CreateFileA(log_path, FILE_APPEND_DATA,
                       FILE_SHARE_READ | FILE_SHARE_WRITE, &security,
-                      OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL)
+                      OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr)
         : CreateFileA("NUL", FILE_APPEND_DATA,
                       FILE_SHARE_READ | FILE_SHARE_WRITE, &security,
-                      OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                      OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     HANDLE input = CreateFileA("NUL", GENERIC_READ,
                                FILE_SHARE_READ | FILE_SHARE_WRITE, &security,
-                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (log == INVALID_HANDLE_VALUE || input == INVALID_HANDLE_VALUE) {
         if (log != INVALID_HANDLE_VALUE)
             CloseHandle(log);
@@ -333,16 +333,16 @@ int c2t_runtime_start_background(int argc, char **argv,
             CloseHandle(input);
         return C2T_BACKGROUND_ERROR;
     }
-    STARTUPINFOA startup = {0};
+    STARTUPINFOA startup = {};
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES;
     startup.hStdInput = input;
     startup.hStdOutput = log;
     startup.hStdError = log;
     PROCESS_INFORMATION process;
-    BOOL created = CreateProcessA(executable, command, NULL, NULL, TRUE,
+    BOOL created = CreateProcessA(executable, command, nullptr, nullptr, TRUE,
         CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
-        NULL, NULL, &startup, &process);
+        nullptr, nullptr, &startup, &process);
     CloseHandle(log);
     CloseHandle(input);
     if (!created)
@@ -372,7 +372,7 @@ static int lock_descriptor = -1;
 static int stop_pipe[2] = {-1, -1};
 static volatile sig_atomic_t stopping;
 
-static int secure_directory(const char *path)
+[[nodiscard]] static int secure_directory(const char *path)
 {
     if (mkdir(path, 0700) != 0 && errno != EEXIST)
         return 0;
@@ -383,7 +383,7 @@ static int secure_directory(const char *path)
     return 1;
 }
 
-static int owned_directory(const char *path)
+[[nodiscard]] static int owned_directory(const char *path)
 {
     if (mkdir(path, 0700) != 0 && errno != EEXIST)
         return 0;
@@ -392,11 +392,11 @@ static int owned_directory(const char *path)
         info.st_uid == geteuid();
 }
 
-static int prepare_paths(void)
+[[nodiscard]] static int prepare_paths(void)
 {
     if (paths_ready)
         return 1;
-    char directory[C2T_PATH_CAPACITY];
+    char directory[C2T_PATH_CAPACITY] = {};
     const char *runtime = getenv("XDG_RUNTIME_DIR");
     if (runtime && *runtime == '/') {
         if (!format_path(directory, sizeof(directory), "%s/c2t", runtime))
@@ -415,14 +415,14 @@ static int prepare_paths(void)
 
     const char *state_home = getenv("XDG_STATE_HOME");
     const char *home = getenv("HOME");
-    char log_directory[C2T_PATH_CAPACITY];
+    char log_directory[C2T_PATH_CAPACITY] = {};
     if (state_home && *state_home == '/') {
         if (!format_path(log_directory, sizeof(log_directory), "%s/c2t",
                           state_home))
             return 0;
     } else if (home && *home == '/') {
-        char local[C2T_PATH_CAPACITY];
-        char state[C2T_PATH_CAPACITY];
+        char local[C2T_PATH_CAPACITY] = {};
+        char state[C2T_PATH_CAPACITY] = {};
         if (!format_path(local, sizeof(local), "%s/.local", home) ||
             !format_path(state, sizeof(state), "%s/.local/state", home) ||
             !owned_directory(local) || !owned_directory(state) ||
@@ -440,9 +440,8 @@ static int prepare_paths(void)
     return 1;
 }
 
-static void stop_handler(int signal_number)
+static void stop_handler([[maybe_unused]] int signal_number)
 {
-    (void)signal_number;
     stopping = 1;
     if (stop_pipe[1] >= 0) {
         char notify_byte = 1;
@@ -477,8 +476,8 @@ int c2t_runtime_acquire(void)
     memset(&action, 0, sizeof(action));
     action.sa_handler = stop_handler;
     sigemptyset(&action.sa_mask);
-    if (sigaction(SIGTERM, &action, NULL) != 0 ||
-        sigaction(SIGINT, &action, NULL) != 0) {
+    if (sigaction(SIGTERM, &action, nullptr) != 0 ||
+        sigaction(SIGINT, &action, nullptr) != 0) {
         c2t_runtime_release();
         return -1;
     }
@@ -570,7 +569,7 @@ int c2t_runtime_stop(unsigned int timeout_ms, int force)
     return -1;
 }
 
-static int redirect_background_io(void)
+[[nodiscard]] static int redirect_background_io(void)
 {
     int input = open("/dev/null", O_RDONLY);
     int output = c2t_config_get()->log_file
@@ -593,11 +592,9 @@ static int redirect_background_io(void)
     return ok;
 }
 
-int c2t_runtime_start_background(int argc, char **argv,
+int c2t_runtime_start_background([[maybe_unused]] int argc, [[maybe_unused]] char **argv,
                                  unsigned int timeout_ms)
 {
-    (void)argc;
-    (void)argv;
     c2t_runtime_status_t status;
     int current = c2t_runtime_get_status(&status);
     if (current != 0)
@@ -638,5 +635,5 @@ const char *c2t_runtime_log_path(void)
 {
     return (prepare_paths() && c2t_config_get()->log_file)
         ? log_path
-        : NULL;
+        : nullptr;
 }

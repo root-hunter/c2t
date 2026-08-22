@@ -20,6 +20,6 @@
 
 #include "clipboard_output.h"
 
-int clipboard_listen(void);
+[[nodiscard]] int clipboard_listen(void);
 
 #endif

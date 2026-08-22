@@ -31,8 +31,8 @@
 #include <signal.h>
 #endif
 
-#define C2T_START_TIMEOUT_MS 10000U
-#define C2T_STOP_TIMEOUT_MS 15000U
+constexpr unsigned int C2T_START_TIMEOUT_MS = 10000U;
+constexpr unsigned int C2T_STOP_TIMEOUT_MS = 15000U;
 
 typedef enum {
     COMMAND_RUN,
@@ -71,7 +71,7 @@ static void print_usage(FILE *stream)
         "  --force                Force termination after the timeout\n");
 }
 
-static command_t parse_command(int argc, char **argv, int *option_offset)
+[[nodiscard]] static command_t parse_command(int argc, char **argv, int *option_offset)
 {
     *option_offset = 1;
     if (argc < 2)
@@ -107,14 +107,14 @@ static command_t parse_command(int argc, char **argv, int *option_offset)
     return COMMAND_RUN;
 }
 
-static const char *apply_service_options(int argc, char **argv,
-                                         int option_offset)
+[[nodiscard]] static const char *apply_service_options(int argc, char **argv,
+                                                      int option_offset)
 {
     return c2t_config_apply_arguments(
         argc - option_offset + 1, argv + option_offset - 1);
 }
 
-static int show_status(int quiet)
+[[nodiscard]] static int show_status(int quiet)
 {
     c2t_runtime_status_t status;
     int result = c2t_runtime_get_status(&status);
@@ -141,7 +141,7 @@ static int show_status(int quiet)
     return 0;
 }
 
-static int stop_service(int force, int quiet)
+[[nodiscard]] static int stop_service(int force, int quiet)
 {
     int result = c2t_runtime_stop(C2T_STOP_TIMEOUT_MS, force);
     if (result == 0) {
@@ -162,7 +162,7 @@ static int stop_service(int force, int quiet)
     return 1;
 }
 
-static int run_service(void)
+[[nodiscard]] static int run_service(void)
 {
     int acquired = c2t_runtime_acquire();
     if (acquired == 0) {
@@ -282,8 +282,8 @@ int main(int argc, char **argv)
             fprintf(stderr, "Usage: c2t pair [BOT_TOKEN]\n");
             return 1;
         }
-        char paired_chat_id[128] = {0};
-        if (telegram_pair(token, NULL, paired_chat_id, sizeof(paired_chat_id), 60)) {
+        char paired_chat_id[128] = {};
+        if (telegram_pair(token, nullptr, paired_chat_id, sizeof(paired_chat_id), 60)) {
             printf("\n[SUCCESS] Pairing complete!\n");
             printf("[CONFIG]  TELEGRAM_BOT_TOKEN=%s\n", token);
             printf("[CONFIG]  TELEGRAM_CHAT_ID=%s\n\n", paired_chat_id);
@@ -309,7 +309,7 @@ int main(int argc, char **argv)
         int background = c2t_runtime_start_background(
             argc, argv, C2T_START_TIMEOUT_MS);
         if (background == C2T_BACKGROUND_PARENT) {
-            c2t_runtime_get_status(&status);
+            (void)c2t_runtime_get_status(&status);
             printf("c2t started (PID %lu)\n", status.process_id);
             const char *path = c2t_runtime_log_path();
             if (path)

@@ -42,11 +42,11 @@ typedef struct {
 static void wide_to_utf8(const wchar_t *wide, char *output, size_t capacity)
 {
     output[0] = '\0';
-    int required = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0,
-                                       NULL, NULL);
-    char *converted = required > 0 ? malloc((size_t)required) : NULL;
+    int required = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0,
+                                       nullptr, nullptr);
+    char *converted = required > 0 ? malloc((size_t)required) : nullptr;
     if (!converted || !WideCharToMultiByte(CP_UTF8, 0, wide, -1, converted,
-                                           required, NULL, NULL)) {
+                                           required, nullptr, nullptr)) {
         free(converted);
         return;
     }
@@ -63,7 +63,7 @@ static void wide_to_utf8(const wchar_t *wide, char *output, size_t capacity)
     free(converted);
 }
 
-static int capture_source(c2t_clipboard_source_t *source)
+[[nodiscard]] static int capture_source(c2t_clipboard_source_t *source)
 {
     memset(source, 0, sizeof(*source));
     if (!c2t_config_get()->telegram_send_window_info)
@@ -71,11 +71,9 @@ static int capture_source(c2t_clipboard_source_t *source)
 
     HWND source_window = GetForegroundWindow();
     if (!source_window)
-        source_window = GetClipboardOwner();
-    if (!source_window)
         return 0;
 
-    wchar_t title[C2T_SOURCE_TITLE_CAPACITY];
+    wchar_t title[512] = {};
     int title_length = GetWindowTextW(source_window, title,
                                       (int)(sizeof(title) / sizeof(title[0])));
     if (title_length > 0)
@@ -86,9 +84,9 @@ static int capture_source(c2t_clipboard_source_t *source)
     source->process_id = (uint32_t)process_id;
     HANDLE process = process_id
         ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id)
-        : NULL;
+        : nullptr;
     if (process) {
-        wchar_t path[32768];
+        wchar_t path[32768] = {};
         DWORD path_length = (DWORD)(sizeof(path) / sizeof(path[0]));
         if (QueryFullProcessImageNameW(process, 0, path, &path_length) &&
             path_length < (DWORD)(sizeof(path) / sizeof(path[0]))) {
@@ -103,36 +101,29 @@ static int capture_source(c2t_clipboard_source_t *source)
         }
         CloseHandle(process);
     }
-    if (!source->application[0]) {
-        wchar_t class_name[C2T_SOURCE_APPLICATION_CAPACITY];
-        if (GetClassNameW(source_window, class_name,
-                          (int)(sizeof(class_name) / sizeof(class_name[0]))) > 0)
-            wide_to_utf8(class_name, source->application,
-                         sizeof(source->application));
-    }
     return source->application[0] || source->title[0] || source->process_id;
 }
 
 static void write_u16_le(unsigned char *output, uint16_t value)
 {
-    output[0] = (unsigned char)value;
-    output[1] = (unsigned char)(value >> 8);
+    output[0] = (unsigned char)(value & 0xff);
+    output[1] = (unsigned char)((value >> 8) & 0xff);
 }
 
 static void write_u32_le(unsigned char *output, uint32_t value)
 {
-    output[0] = (unsigned char)value;
-    output[1] = (unsigned char)(value >> 8);
-    output[2] = (unsigned char)(value >> 16);
-    output[3] = (unsigned char)(value >> 24);
+    output[0] = (unsigned char)(value & 0xff);
+    output[1] = (unsigned char)((value >> 8) & 0xff);
+    output[2] = (unsigned char)((value >> 16) & 0xff);
+    output[3] = (unsigned char)((value >> 24) & 0xff);
 }
 
-static int output_bitmap(UINT format,
-                         const c2t_clipboard_source_t *source)
+[[nodiscard]] static int output_bitmap(UINT format,
+                                      const c2t_clipboard_source_t *source)
 {
     c2t_log_debug("windows", "Reading bitmap clipboard format %u", format);
     HANDLE handle = GetClipboardData(format);
-    const BITMAPINFOHEADER *info = handle ? GlobalLock(handle) : NULL;
+    const BITMAPINFOHEADER *info = handle ? GlobalLock(handle) : nullptr;
     SIZE_T dib_size = handle ? GlobalSize(handle) : 0;
     if (!info || dib_size < sizeof(BITMAPINFOHEADER) ||
         info->biSize < sizeof(BITMAPINFOHEADER) || info->biSize > dib_size ||
@@ -195,7 +186,7 @@ static void output_text(const c2t_clipboard_source_t *source)
     c2t_log_debug("windows", "Reading Unicode text from clipboard");
     HANDLE handle = GetClipboardData(CF_UNICODETEXT);
 
-    const wchar_t *wide_text = handle ? GlobalLock(handle) : NULL;
+    const wchar_t *wide_text = handle ? GlobalLock(handle) : nullptr;
     SIZE_T byte_size = handle ? GlobalSize(handle) : 0;
     if (!wide_text)
         return;
@@ -214,17 +205,17 @@ static void output_text(const c2t_clipboard_source_t *source)
         return;
     }
     int utf8_size = WideCharToMultiByte(
-        CP_UTF8, 0, wide_text, (int)wide_length, NULL, 0, NULL, NULL);
+        CP_UTF8, 0, wide_text, (int)wide_length, nullptr, 0, nullptr, nullptr);
     if (utf8_size < 0 ||
         (size_t)utf8_size > c2t_config_get()->queue_max_bytes) {
         c2t_log_warning("windows", "Text exceeds the delivery queue limit");
         GlobalUnlock(handle);
         return;
     }
-    char *utf8 = utf8_size > 0 ? malloc((size_t)utf8_size) : NULL;
+    char *utf8 = utf8_size > 0 ? malloc((size_t)utf8_size) : nullptr;
     if (utf8 && WideCharToMultiByte(
             CP_UTF8, 0, wide_text, (int)wide_length, utf8, utf8_size,
-            NULL, NULL)) {
+            nullptr, nullptr)) {
         clipboard_output(utf8, (size_t)utf8_size,
                          "text/plain;charset=utf-8", source);
     }
@@ -233,19 +224,19 @@ static void output_text(const c2t_clipboard_source_t *source)
     GlobalUnlock(handle);
 }
 
-static int output_wide_file(const wchar_t *wide, int wide_length,
-                            const c2t_clipboard_source_t *source)
+[[nodiscard]] static int output_wide_file(const wchar_t *wide, int wide_length,
+                                         const c2t_clipboard_source_t *source)
 {
     int utf8_length = WideCharToMultiByte(CP_UTF8, 0, wide, wide_length,
-                                          NULL, 0, NULL, NULL);
+                                          nullptr, 0, nullptr, nullptr);
     if (utf8_length < 0 ||
         (size_t)utf8_length > c2t_config_get()->queue_max_bytes) {
         c2t_log_warning("windows", "File path exceeds the delivery queue limit");
         return 0;
     }
-    char *utf8 = utf8_length > 0 ? malloc((size_t)utf8_length) : NULL;
+    char *utf8 = utf8_length > 0 ? malloc((size_t)utf8_length) : nullptr;
     if (!utf8 || !WideCharToMultiByte(CP_UTF8, 0, wide, wide_length, utf8,
-                                      utf8_length, NULL, NULL)) {
+                                      utf8_length, nullptr, nullptr)) {
         free(utf8);
         return 0;
     }
@@ -254,10 +245,10 @@ static int output_wide_file(const wchar_t *wide, int wide_length,
     return 1;
 }
 
-static int output_files(const c2t_clipboard_source_t *source)
+[[nodiscard]] static int output_files(const c2t_clipboard_source_t *source)
 {
     HANDLE handle = GetClipboardData(CF_HDROP);
-    const c2t_dropfiles_t *drop = handle ? GlobalLock(handle) : NULL;
+    const c2t_dropfiles_t *drop = handle ? GlobalLock(handle) : nullptr;
     SIZE_T total_size = handle ? GlobalSize(handle) : 0;
     if (!drop || total_size < sizeof(*drop) ||
         drop->files_offset >= total_size) {
@@ -266,36 +257,34 @@ static int output_files(const c2t_clipboard_source_t *source)
         return 0;
     }
 
-    const unsigned char *cursor =
-        (const unsigned char *)drop + drop->files_offset;
-    size_t remaining = (size_t)(total_size - drop->files_offset);
+    const unsigned char *cursor = (const unsigned char *)drop + drop->files_offset;
+    SIZE_T remaining = total_size - drop->files_offset;
     int handled = 0;
     if (drop->wide) {
         while (remaining >= sizeof(wchar_t)) {
             const wchar_t *wide = (const wchar_t *)cursor;
-            size_t capacity = remaining / sizeof(wchar_t);
+            size_t wide_capacity = remaining / sizeof(wchar_t);
             size_t length = 0;
-            while (length < capacity && wide[length])
+            while (length < wide_capacity && wide[length])
                 ++length;
-            if (length == 0 || length == capacity)
+            if (length == 0 || length == wide_capacity || length > INT32_MAX)
                 break;
-            if (length <= INT32_MAX)
-                handled |= output_wide_file(wide, (int)length, source);
+            handled |= output_wide_file(wide, (int)length, source);
             size_t consumed = (length + 1) * sizeof(wchar_t);
             cursor += consumed;
             remaining -= consumed;
         }
     } else {
-        while (remaining > 0 && *cursor) {
+        while (remaining > 0) {
             const unsigned char *terminator = memchr(cursor, '\0', remaining);
             if (!terminator)
                 break;
             size_t length = (size_t)(terminator - cursor);
             if (length <= INT32_MAX) {
                 int wide_length = MultiByteToWideChar(
-                    CP_ACP, 0, (const char *)cursor, (int)length, NULL, 0);
+                    CP_ACP, 0, (const char *)cursor, (int)length, nullptr, 0);
                 wchar_t *wide = wide_length > 0
-                    ? malloc((size_t)wide_length * sizeof(*wide)) : NULL;
+                    ? malloc((size_t)wide_length * sizeof(*wide)) : nullptr;
                 if (wide && MultiByteToWideChar(
                         CP_ACP, 0, (const char *)cursor, (int)length, wide,
                         wide_length))
@@ -313,12 +302,12 @@ static int output_files(const c2t_clipboard_source_t *source)
 
 static void output_clipboard(void)
 {
-    c2t_clipboard_source_t source;
+    c2t_clipboard_source_t source = {};
     const c2t_clipboard_source_t *source_pointer =
-        capture_source(&source) ? &source : NULL;
+        capture_source(&source) ? &source : nullptr;
     int opened = 0;
     for (unsigned int attempt = 0; attempt < 5 && !opened; ++attempt) {
-        opened = OpenClipboard(NULL);
+        opened = OpenClipboard(nullptr);
         if (!opened && attempt < 4)
             Sleep(10U << attempt);
     }
@@ -360,7 +349,7 @@ static int clipboard_listen_once(void)
 {
     c2t_log_debug("windows", "Creating clipboard listener window");
     static const wchar_t class_name[] = L"c2c_clipboard_listener";
-    HINSTANCE instance = GetModuleHandleW(NULL);
+    HINSTANCE instance = GetModuleHandleW(nullptr);
     WNDCLASSW window_class = {
         .lpfnWndProc = window_callback,
         .hInstance = instance,
@@ -376,7 +365,7 @@ static int clipboard_listen_once(void)
 
     HWND window = CreateWindowExW(
         0, class_name, L"", 0, 0, 0, 0, 0,
-        HWND_MESSAGE, NULL, instance, NULL);
+        HWND_MESSAGE, nullptr, instance, nullptr);
     if (!window) {
         c2t_log_error("windows",
                       "Unable to create clipboard listener (error %lu)",
@@ -396,10 +385,10 @@ static int clipboard_listen_once(void)
 
     c2t_log_info("windows", "Listening for clipboard updates");
 
-    MSG message;
+    MSG message = {};
     int result = 0;
     while (!c2t_runtime_stop_requested()) {
-        while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE)) {
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
             if (message.message == WM_QUIT)
                 goto message_loop_finished;
             TranslateMessage(&message);

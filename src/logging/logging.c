@@ -37,7 +37,7 @@
 #endif
 #endif
 
-#define MEMORY_LOG_MAX_BYTES (256 * 1024)
+constexpr size_t MEMORY_LOG_MAX_BYTES = 256 * 1024;
 
 static int verbose;
 static FILE *log_file_stream;
@@ -89,7 +89,7 @@ static void write_log(const char *level, const char *component,
     }
 #endif
 
-    char message[2048];
+    char message[2048] = {};
     va_list arguments_copy;
     va_copy(arguments_copy, arguments);
     int result = vsnprintf(message, sizeof(message), format, arguments);
@@ -108,7 +108,7 @@ static void write_log(const char *level, const char *component,
     va_end(arguments_copy);
 
     /* Record in memory circular ring buffer for zero-fragmentation retrieval */
-    char line_buf[2500];
+    char line_buf[2500] = {};
     int line_len = snprintf(line_buf, sizeof(line_buf), "%s %-5s [%s] %s\n",
                             timestamp, level, component, message);
     if (line_len > 0) {
@@ -153,7 +153,7 @@ char *c2t_log_get_unread(size_t *out_length)
     if (!memory_log_buf || ring_unread == 0) {
         log_unlock();
         if (out_length) *out_length = 0;
-        return NULL;
+        return nullptr;
     }
 
     size_t unread = ring_unread;
@@ -185,10 +185,10 @@ void c2t_log_cleanup(void)
     log_lock();
     if (log_file_stream) {
         fclose(log_file_stream);
-        log_file_stream = NULL;
+        log_file_stream = nullptr;
     }
     free(memory_log_buf);
-    memory_log_buf = NULL;
+    memory_log_buf = nullptr;
     ring_head = 0;
     ring_total = 0;
     ring_unread = 0;

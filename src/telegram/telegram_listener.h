@@ -18,7 +18,7 @@
 #ifndef C2T_TELEGRAM_LISTENER_H
 #define C2T_TELEGRAM_LISTENER_H
 
-int c2t_telegram_listener_init(void);
+[[nodiscard]] int c2t_telegram_listener_init(void);
 void c2t_telegram_listener_cleanup(void);
 
 #endif

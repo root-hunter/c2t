@@ -40,7 +40,7 @@ add_executable(c2t
     src/telegram/telegram.c
     src/telegram/telegram_listener.c
 )
-target_compile_features(c2t PRIVATE c_std_11)
+target_compile_features(c2t PRIVATE c_std_23)
 target_include_directories(c2t PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set_target_properties(c2t PROPERTIES
     C_VISIBILITY_PRESET hidden
@@ -245,7 +245,7 @@ if(BUILD_TESTING AND NOT WIN32)
         tests/telegram_test.c
     )
     target_include_directories(telegram_tests PRIVATE src)
-    target_compile_features(telegram_tests PRIVATE c_std_11)
+    target_compile_features(telegram_tests PRIVATE c_std_23)
     target_compile_options(telegram_tests PRIVATE
         $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
     )

@@ -36,7 +36,7 @@
 #include <windows.h>
 #endif
 
-#define POLL_TIMEOUT_SECONDS 15
+constexpr int POLL_TIMEOUT_SECONDS = 15;
 
 static int listener_started;
 static volatile int stopping;
@@ -51,7 +51,7 @@ static pthread_t listener_thread;
 #include <strings.h>
 #endif
 
-static int match_command(const char *text, const char *cmd)
+[[nodiscard]] static int match_command(const char *text, const char *cmd)
 {
     if (!text || !cmd) return 0;
     while (isspace((unsigned char)*text)) text++;
@@ -69,9 +69,8 @@ static int match_command(const char *text, const char *cmd)
     return (next == '\0' || next == '@' || isspace((unsigned char)next));
 }
 
-static void handle_command(const char *text, const char *chat_id, const char *username)
+static void handle_command(const char *text, const char *chat_id, [[maybe_unused]] const char *username)
 {
-    (void)username;
     const c2t_config_t *config = c2t_config_get();
     if (!config->telegram_chat_id || !*config->telegram_chat_id) {
         c2t_log_warning("listener", "Telegram chat_id is not configured");
@@ -143,26 +142,23 @@ static void handle_command(const char *text, const char *chat_id, const char *us
     }
 }
 
-static void on_telegram_command_received(int64_t update_id,
+static void on_telegram_command_received([[maybe_unused]] int64_t update_id,
                                         const char *chat_id,
                                         const char *username,
                                         const char *text,
-                                        void *user_data)
+                                        [[maybe_unused]] void *user_data)
 {
-    (void)update_id;
-    (void)user_data;
     if (text && *text) {
         handle_command(text, chat_id ? chat_id : "", username ? username : "");
     }
 }
 
 #ifdef _WIN32
-static DWORD WINAPI telegram_listener_worker_func(void *context)
+static DWORD WINAPI telegram_listener_worker_func([[maybe_unused]] void *context)
 #else
-static void *telegram_listener_worker_func(void *context)
+static void *telegram_listener_worker_func([[maybe_unused]] void *context)
 #endif
 {
-    (void)context;
     int64_t offset = 0;
 
     c2t_log_info("listener", "Telegram command listener started (long-polling timeout=%ds)",
@@ -176,7 +172,7 @@ static void *telegram_listener_worker_func(void *context)
             &offset,
             0,
             on_telegram_command_received,
-            NULL
+            nullptr
         );
     }
 
@@ -196,7 +192,7 @@ static void *telegram_listener_worker_func(void *context)
             &offset,
             POLL_TIMEOUT_SECONDS,
             on_telegram_command_received,
-            NULL
+            nullptr
         );
     }
 
@@ -205,7 +201,7 @@ static void *telegram_listener_worker_func(void *context)
 #ifdef _WIN32
     return 0;
 #else
-    return NULL;
+    return nullptr;
 #endif
 }
 
@@ -223,10 +219,10 @@ int c2t_telegram_listener_init(void)
     stopping = 0;
 
 #ifdef _WIN32
-    listener_thread = CreateThread(NULL, 0, telegram_listener_worker_func, NULL, 0, NULL);
-    listener_started = listener_thread != NULL;
+    listener_thread = CreateThread(nullptr, 0, telegram_listener_worker_func, nullptr, 0, nullptr);
+    listener_started = listener_thread != nullptr;
 #else
-    listener_started = pthread_create(&listener_thread, NULL, telegram_listener_worker_func, NULL) == 0;
+    listener_started = pthread_create(&listener_thread, nullptr, telegram_listener_worker_func, nullptr) == 0;
 #endif
 
     if (!listener_started) {
@@ -247,9 +243,9 @@ void c2t_telegram_listener_cleanup(void)
 #ifdef _WIN32
     WaitForSingleObject(listener_thread, INFINITE);
     CloseHandle(listener_thread);
-    listener_thread = NULL;
+    listener_thread = nullptr;
 #else
-    (void)pthread_join(listener_thread, NULL);
+    (void)pthread_join(listener_thread, nullptr);
 #endif
 
     listener_started = 0;

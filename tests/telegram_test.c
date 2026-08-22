@@ -62,11 +62,10 @@ int telegram_http_init(void)
     return 1;
 }
 
-int telegram_http_post(const char *token, const char *method,
+int telegram_http_post([[maybe_unused]] const char *token, const char *method,
                        const char *content_type, const void *body,
                        size_t body_length)
 {
-    (void)token;
     ++http_post_calls;
     snprintf(last_method, sizeof(last_method), "%s", method);
     snprintf(last_content_type, sizeof(last_content_type), "%s", content_type);
@@ -79,10 +78,9 @@ int telegram_http_post(const char *token, const char *method,
     return http_post_result;
 }
 
-int telegram_http_get(const char *token, const char *method_and_query,
+int telegram_http_get([[maybe_unused]] const char *token, const char *method_and_query,
                       char *response_out, size_t response_capacity)
 {
-    (void)token;
     if (response_out && response_capacity > 0) {
         if (strstr(method_and_query, "getUpdates")) {
             snprintf(response_out, response_capacity,
@@ -103,13 +101,12 @@ void telegram_http_cleanup(void)
 }
 
 static int test_updates_count = 0;
-static char test_last_cmd[64] = {0};
+static char test_last_cmd[64] = {};
 
-static void test_callback(int64_t update_id, const char *chat_id,
-                          const char *username, const char *text,
-                          void *user_data)
+static void test_callback([[maybe_unused]] int64_t update_id, [[maybe_unused]] const char *chat_id,
+                          [[maybe_unused]] const char *username, const char *text,
+                          [[maybe_unused]] void *user_data)
 {
-    (void)update_id; (void)chat_id; (void)username; (void)user_data;
     test_updates_count++;
     if (text) snprintf(test_last_cmd, sizeof(test_last_cmd), "%s", text);
 }
@@ -178,44 +175,44 @@ int main(void)
         !body_contains(png, sizeof(png)) ||
         !body_contains("name=\"photo\"", 12))
         return fail("PNG multipart photo upload");
-    if (!telegram_send_data(png, sizeof(png), "image/png", NULL) ||
+    if (!telegram_send_data(png, sizeof(png), "image/png", nullptr) ||
         http_post_calls != 1)
         return fail("duplicate PNG must not be uploaded twice");
 
     static const unsigned char bmp[] = {'B', 'M', 0, 1};
-    if (!telegram_send_data(bmp, sizeof(bmp), "image/bmp", NULL) ||
+    if (!telegram_send_data(bmp, sizeof(bmp), "image/bmp", nullptr) ||
         strcmp(last_method, "sendDocument") != 0 ||
         !body_contains("Content-Type: image/bmp", 23))
         return fail("BMP document upload");
 
     if (!telegram_send_data("hello world", 11,
-                            "text/plain;charset=utf-8", NULL) ||
+                            "text/plain;charset=utf-8", nullptr) ||
         strcmp(last_method, "sendMessage") != 0 ||
         strcmp(last_content_type,
                "application/x-www-form-urlencoded") != 0 ||
         !body_contains("text=hello%20world", 18))
         return fail("text form upload");
     if (!telegram_send_data("hello world", 11,
-                            "text/plain;charset=utf-8", NULL) ||
+                            "text/plain;charset=utf-8", nullptr) ||
         http_post_calls != 3)
         return fail("duplicate text must not be sent twice");
 
     static const char phone[] = "+39 333-123-4567";
-    if (!telegram_send_data(phone, sizeof(phone) - 1, "text/plain", NULL) ||
+    if (!telegram_send_data(phone, sizeof(phone) - 1, "text/plain", nullptr) ||
         strcmp(last_method, "sendContact") != 0 ||
         !body_contains("phone_number=%2B393331234567",
                        sizeof("phone_number=%2B393331234567") - 1) ||
         !body_contains("first_name=Clipboard",
                        sizeof("first_name=Clipboard") - 1))
         return fail("phone number contact card");
-    if (!telegram_send_data(phone, sizeof(phone) - 1, "text/plain", NULL) ||
+    if (!telegram_send_data(phone, sizeof(phone) - 1, "text/plain", nullptr) ||
         http_post_calls != 4)
         return fail("duplicate contact must not be sent twice");
 
     static const char international_phone[] = "0039 333 1234567";
     if (!telegram_send_data(international_phone,
                             sizeof(international_phone) - 1, "text/plain",
-                            NULL) ||
+                            nullptr) ||
         strcmp(last_method, "sendContact") != 0 ||
         !body_contains("phone_number=%2B393331234567",
                        sizeof("phone_number=%2B393331234567") - 1))
@@ -223,13 +220,13 @@ int main(void)
 
     static const char local_phone[] = "3348668699";
     if (!telegram_send_data(local_phone, sizeof(local_phone) - 1,
-                            "text/plain", NULL) ||
+                            "text/plain", nullptr) ||
         strcmp(last_method, "sendMessage") != 0)
         return fail("phone without international prefix must remain text");
 
     static const char coordinates[] = "45.4642, 9.1900";
     if (!telegram_send_data(coordinates, sizeof(coordinates) - 1,
-                            "text/plain", NULL) ||
+                            "text/plain", nullptr) ||
         strcmp(last_method, "sendLocation") != 0 ||
         !body_contains("latitude=45.46420000",
                        sizeof("latitude=45.46420000") - 1) ||
@@ -240,7 +237,7 @@ int main(void)
     static const char vcard[] =
         "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Mario Rossi\r\n"
         "TEL;TYPE=CELL:+39 320 1234567\r\nEND:VCARD";
-    if (!telegram_send_data(vcard, sizeof(vcard) - 1, "text/vcard", NULL) ||
+    if (!telegram_send_data(vcard, sizeof(vcard) - 1, "text/vcard", nullptr) ||
         strcmp(last_method, "sendContact") != 0 ||
         !body_contains("first_name=Mario%20Rossi",
                        sizeof("first_name=Mario%20Rossi") - 1) ||
@@ -249,19 +246,19 @@ int main(void)
         return fail("vCard contact card");
 
     static const char url[] = "https://example.com/path";
-    if (!telegram_send_data(url, sizeof(url) - 1, "text/plain", NULL) ||
+    if (!telegram_send_data(url, sizeof(url) - 1, "text/plain", nullptr) ||
         strcmp(last_method, "sendMessage") != 0)
         return fail("URL message with native preview");
 
     static const unsigned char gif[] = {'G', 'I', 'F', '8', '9', 'a'};
     http_post_result = 0;
-    if (telegram_send_data(gif, sizeof(gif), "image/gif", NULL))
+    if (telegram_send_data(gif, sizeof(gif), "image/gif", nullptr))
         return fail("failed upload result");
     http_post_result = 1;
-    if (!telegram_send_data(gif, sizeof(gif), "image/gif", NULL) ||
+    if (!telegram_send_data(gif, sizeof(gif), "image/gif", nullptr) ||
         http_post_calls != 11)
         return fail("failed content must remain retryable");
-    if (!telegram_send_data(gif, sizeof(gif), "image/gif", NULL) ||
+    if (!telegram_send_data(gif, sizeof(gif), "image/gif", nullptr) ||
         http_post_calls != 11)
         return fail("retried content must be tracked after success");
 
@@ -275,12 +272,12 @@ int main(void)
         return fail("temporary file setup");
 
     if (c2t_file_try_clipboard_path(file_path, strlen(file_path),
-                                    "text/plain", NULL) != C2T_FILE_NOT_HANDLED)
+                                    "text/plain", nullptr) != C2T_FILE_NOT_HANDLED)
         return fail("file paths must be disabled by default");
     setenv("TELEGRAM_SEND_FILES", "1", 1);
     c2t_config_load_environment();
     if (c2t_file_try_clipboard_path(file_path, strlen(file_path),
-                                    "text/plain", NULL) != C2T_FILE_SENT ||
+                                    "text/plain", nullptr) != C2T_FILE_SENT ||
         strcmp(last_method, "sendDocument") != 0 ||
         !body_contains(file_contents, sizeof(file_contents) - 1) ||
         !body_contains("filename=\"c2t-file-test-",
@@ -291,7 +288,7 @@ int main(void)
     int uri_length = snprintf(file_uri, sizeof(file_uri), "file://%s", file_path);
     if (uri_length <= 0 || (size_t)uri_length >= sizeof(file_uri) ||
         c2t_file_try_clipboard_path(file_uri, (size_t)uri_length,
-                                    "text/uri-list", NULL) != C2T_FILE_SENT ||
+                                    "text/uri-list", nullptr) != C2T_FILE_SENT ||
         http_post_calls != 12)
         return fail("filesystem file URI deduplication");
 
@@ -300,7 +297,7 @@ int main(void)
     c2t_config_load_environment();
     int oversized_posts = http_post_calls;
     if (c2t_file_try_clipboard_path(file_path, strlen(file_path),
-                                    "text/plain", NULL) != C2T_FILE_SENT ||
+                                    "text/plain", nullptr) != C2T_FILE_SENT ||
         http_post_calls != oversized_posts + 1 ||
         strcmp(last_method, "sendMessage") != 0 ||
         !body_contains("File%20Delivery%20Failed", sizeof("File%20Delivery%20Failed") - 1) ||
@@ -313,7 +310,7 @@ int main(void)
     static const char missing_uri[] = "file:///tmp/c2t-missing-file-test.txt";
     int missing_posts = http_post_calls;
     if (c2t_file_try_clipboard_path(missing_uri, sizeof(missing_uri) - 1,
-                                    "text/uri-list", NULL) != C2T_FILE_SENT ||
+                                    "text/uri-list", nullptr) != C2T_FILE_SENT ||
         http_post_calls != missing_posts + 1 ||
         strcmp(last_method, "sendMessage") != 0 ||
         !body_contains("File%20Delivery%20Failed", sizeof("File%20Delivery%20Failed") - 1) ||
@@ -323,14 +320,14 @@ int main(void)
     /* Test plain non-file text must remain not handled (pass through as regular text) */
     static const char plain_string[] = "not a real file path string";
     if (c2t_file_try_clipboard_path(plain_string, sizeof(plain_string) - 1,
-                                    "text/plain", NULL) != C2T_FILE_NOT_HANDLED)
+                                    "text/plain", nullptr) != C2T_FILE_NOT_HANDLED)
         return fail("plain non-file text must return C2T_FILE_NOT_HANDLED");
 
     /* Test explicit directory URI error notification */
     static const char dir_uri[] = "file:///tmp";
     int dir_posts = http_post_calls;
     if (c2t_file_try_clipboard_path(dir_uri, sizeof(dir_uri) - 1,
-                                    "text/uri-list", NULL) != C2T_FILE_SENT ||
+                                    "text/uri-list", nullptr) != C2T_FILE_SENT ||
         http_post_calls != dir_posts + 1 ||
         strcmp(last_method, "sendMessage") != 0 ||
         !body_contains("File%20Delivery%20Failed", sizeof("File%20Delivery%20Failed") - 1) ||
@@ -342,7 +339,7 @@ int main(void)
     if (geteuid() != 0 && chmod(file_path, 0000) == 0) {
         int unreadable_posts = http_post_calls;
         if (c2t_file_try_clipboard_path(file_path, strlen(file_path),
-                                        "text/plain", NULL) != C2T_FILE_SENT ||
+                                        "text/plain", nullptr) != C2T_FILE_SENT ||
             http_post_calls != unreadable_posts + 1 ||
             strcmp(last_method, "sendMessage") != 0 ||
             !body_contains("File%20Delivery%20Failed", sizeof("File%20Delivery%20Failed") - 1) ||
@@ -362,20 +359,20 @@ int main(void)
     if (!telegram_init())
         return fail("initialization without deduplication");
     int dedup_disabled_posts = http_post_calls;
-    if (!telegram_send_data(png, sizeof(png), "image/png", NULL) ||
-        !telegram_send_data(png, sizeof(png), "image/png", NULL) ||
+    if (!telegram_send_data(png, sizeof(png), "image/png", nullptr) ||
+        !telegram_send_data(png, sizeof(png), "image/png", nullptr) ||
         http_post_calls != dedup_disabled_posts + 2)
         return fail("duplicates must be sent when deduplication is disabled");
 
     static const char short_number[] = "123456";
     if (!telegram_send_data(short_number, sizeof(short_number) - 1,
-                            "text/plain", NULL) ||
+                            "text/plain", nullptr) ||
         strcmp(last_method, "sendMessage") != 0)
         return fail("short numeric text must not become a contact");
     static const char invalid_coordinates[] = "91.0000, 9.1900";
     if (!telegram_send_data(invalid_coordinates,
                             sizeof(invalid_coordinates) - 1, "text/plain",
-                            NULL) ||
+                            nullptr) ||
         strcmp(last_method, "sendMessage") != 0)
         return fail("invalid coordinates must remain text");
 
@@ -470,12 +467,12 @@ int main(void)
                                     (unsigned long long)index);
         if (cache_length <= 0 ||
             !telegram_send_data(cache_message, (size_t)cache_length,
-                                "text/plain", NULL))
+                                "text/plain", nullptr))
             return fail("bounded deduplication cache population");
     }
     static const char evicted_message[] = "dedup-cache-0";
     if (!telegram_send_data(evicted_message, sizeof(evicted_message) - 1,
-                            "text/plain", NULL) ||
+                            "text/plain", nullptr) ||
         http_post_calls != cache_posts + 1026)
         return fail("oldest deduplication entry must be evicted");
 
@@ -506,7 +503,7 @@ int main(void)
 
     int64_t test_offset = 0;
     int polled = telegram_poll_updates_callback("123:test-token", &test_offset, 0,
-                                               test_callback, NULL);
+                                               test_callback, nullptr);
     if (polled != 2 || test_updates_count != 2 || test_offset != 102 ||
         strcmp(test_last_cmd, "/logs") != 0) {
         return fail("telegram_poll_updates_callback batch processing");

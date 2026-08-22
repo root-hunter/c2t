@@ -36,8 +36,8 @@ typedef struct _stat64 c2t_stat_t;
 typedef struct stat c2t_stat_t;
 #endif
 
-static int ascii_equal_nocase(const char *left, const char *right,
-                              size_t length)
+[[nodiscard]] static int ascii_equal_nocase(const char *left, const char *right,
+                                              size_t length)
 {
     for (size_t index = 0; index < length; ++index) {
         if (tolower((unsigned char)left[index]) !=
@@ -47,7 +47,7 @@ static int ascii_equal_nocase(const char *left, const char *right,
     return 1;
 }
 
-static int mime_is(const char *mime_type, const char *expected)
+[[nodiscard]] static int mime_is(const char *mime_type, const char *expected)
 {
     size_t length = strlen(expected);
     return strlen(mime_type) >= length &&
@@ -55,7 +55,7 @@ static int mime_is(const char *mime_type, const char *expected)
            (mime_type[length] == '\0' || mime_type[length] == ';');
 }
 
-static int hexadecimal_value(unsigned char character)
+[[nodiscard]] static int hexadecimal_value(unsigned char character)
 {
     if (character >= '0' && character <= '9')
         return character - '0';
@@ -63,7 +63,7 @@ static int hexadecimal_value(unsigned char character)
     return character >= 'a' && character <= 'f' ? character - 'a' + 10 : -1;
 }
 
-static int decode_path(char *path, int uri)
+[[nodiscard]] static int decode_path(char *path, int uri)
 {
     char *input = path;
     char *output = path;
@@ -86,8 +86,8 @@ static int decode_path(char *path, int uri)
     return 1;
 }
 
-static char *clipboard_path(const void *data, size_t length,
-                            const char *mime_type, int *explicit_uri)
+[[nodiscard]] static char *clipboard_path(const void *data, size_t length,
+                                         const char *mime_type, int *explicit_uri)
 {
     const char *text = data;
     while (length > 0 && isspace((unsigned char)*text)) {
@@ -97,11 +97,11 @@ static char *clipboard_path(const void *data, size_t length,
     while (length > 0 && isspace((unsigned char)text[length - 1]))
         --length;
     if (length == 0 || memchr(text, '\0', length))
-        return NULL;
+        return nullptr;
 
     int uri_list = mime_is(mime_type, "text/uri-list");
     if (memchr(text, '\r', length) || memchr(text, '\n', length))
-        return NULL;
+        return nullptr;
 
     if (length >= 2 && ((text[0] == '"' && text[length - 1] == '"') ||
                         (text[0] == '\'' && text[length - 1] == '\''))) {
@@ -111,7 +111,7 @@ static char *clipboard_path(const void *data, size_t length,
 
     char *path = malloc(length + 1);
     if (!path)
-        return NULL;
+        return nullptr;
     memcpy(path, text, length);
     path[length] = '\0';
 
@@ -125,7 +125,7 @@ static char *clipboard_path(const void *data, size_t length,
             uri_path += 9;
         else if (*uri_path != '/') {
             free(path);
-            return NULL;
+            return nullptr;
         }
         memmove(path, uri_path, strlen(uri_path) + 1);
 #ifdef _WIN32
@@ -137,12 +137,12 @@ static char *clipboard_path(const void *data, size_t length,
     }
     if (!decode_path(path, uri)) {
         free(path);
-        return NULL;
+        return nullptr;
     }
     return path;
 }
 
-static const char *filename_from_path(const char *path)
+[[nodiscard]] static const char *filename_from_path(const char *path)
 {
     const char *filename = path;
     for (const char *cursor = path; *cursor; ++cursor) {
@@ -152,13 +152,13 @@ static const char *filename_from_path(const char *path)
     return *filename ? filename : "clipboard.bin";
 }
 
-static const char *mime_from_filename(const char *filename)
+[[nodiscard]] static const char *mime_from_filename(const char *filename)
 {
     const char *extension = strrchr(filename, '.');
     if (!extension)
         return "application/octet-stream";
     ++extension;
-    char ext[8] = {0};
+    char ext[8] = {};
     for (size_t i = 0; i < 7 && extension[i]; ++i)
         ext[i] = (char)tolower((unsigned char)extension[i]);
 
@@ -209,7 +209,7 @@ static void append_escaped_html(char *output, size_t *offset, size_t capacity,
 }
 
 static int send_file_error_telegram(const char *path, const char *error_message,
-                                    const c2t_clipboard_source_t *source)
+                                     const c2t_clipboard_source_t *source)
 {
     char html[2048];
     size_t offset = 0;
@@ -237,7 +237,7 @@ static int send_file_error_telegram(const char *path, const char *error_message,
             offset += sizeof(src_hdr) - 1;
         }
 
-        char source_desc[512] = {0};
+        char source_desc[512] = {};
         size_t s_off = 0;
         if (source->application[0]) {
             s_off += snprintf(source_desc + s_off, sizeof(source_desc) - s_off,
@@ -274,23 +274,23 @@ enum {
 };
 
 #ifdef _WIN32
-static wchar_t *utf8_path(const char *path)
+[[nodiscard]] static wchar_t *utf8_path(const char *path)
 {
     int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1,
-                                     NULL, 0);
-    wchar_t *wide = length > 0 ? malloc((size_t)length * sizeof(*wide)) : NULL;
+                                     nullptr, 0);
+    wchar_t *wide = length > 0 ? malloc((size_t)length * sizeof(*wide)) : nullptr;
     if (!wide || !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1,
                                       wide, length)) {
         free(wide);
-        return NULL;
+        return nullptr;
     }
     return wide;
 }
 #endif
 
-static int read_file(const char *path, const c2t_config_t *config,
-                     unsigned char **data, size_t *length,
-                     char *error_out, size_t error_capacity)
+[[nodiscard]] static int read_file(const char *path, const c2t_config_t *config,
+                                  unsigned char **data, size_t *length,
+                                  char *error_out, size_t error_capacity)
 {
     c2t_stat_t status;
     FILE *file;
@@ -303,7 +303,7 @@ static int read_file(const char *path, const c2t_config_t *config,
     }
     int stat_result = _wstat64(wide, &status);
     int saved_errno = errno;
-    file = stat_result == 0 ? _wfopen(wide, L"rb") : NULL;
+    file = stat_result == 0 ? _wfopen(wide, L"rb") : nullptr;
     int open_errno = errno;
     free(wide);
     if (stat_result != 0) {
@@ -328,7 +328,7 @@ static int read_file(const char *path, const c2t_config_t *config,
 #else
     int stat_result = stat(path, &status);
     int saved_errno = errno;
-    file = stat_result == 0 ? fopen(path, "rb") : NULL;
+    file = stat_result == 0 ? fopen(path, "rb") : nullptr;
     int open_errno = errno;
     if (stat_result != 0) {
         if (error_out && error_capacity > 0)
@@ -370,7 +370,7 @@ static int read_file(const char *path, const c2t_config_t *config,
     }
     if (!file) {
         c2t_log_error("files", "File '%s' cannot be opened for reading: %s",
-                      path, strerror(open_errno));
+                       path, strerror(open_errno));
         if (error_out && error_capacity > 0)
             snprintf(error_out, error_capacity,
                      "Cannot open file for reading: %s", strerror(open_errno));
@@ -392,7 +392,7 @@ static int read_file(const char *path, const c2t_config_t *config,
     int close_result = fclose(file);
     if (bytes_read != *length || close_result != 0) {
         free(*data);
-        *data = NULL;
+        *data = nullptr;
         c2t_log_error("files", "Unable to read the complete clipboard file '%s': %s",
                       path, strerror(read_errno));
         if (error_out && error_capacity > 0)
@@ -418,8 +418,8 @@ int c2t_file_try_clipboard_path(const void *data, size_t length,
     if (!path)
         return C2T_FILE_NOT_HANDLED;
 
-    char error_msg[512] = {0};
-    unsigned char *contents = NULL;
+    char error_msg[512] = {};
+    unsigned char *contents = nullptr;
     size_t file_length = 0;
     int read_result = read_file(path, config, &contents, &file_length,
                                 error_msg, sizeof(error_msg));

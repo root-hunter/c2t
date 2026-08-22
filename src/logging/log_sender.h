@@ -18,7 +18,7 @@
 #ifndef C2T_LOG_SENDER_H
 #define C2T_LOG_SENDER_H
 
-int c2t_log_sender_init(void);
+[[nodiscard]] int c2t_log_sender_init(void);
 int c2t_log_sender_dispatch_now(void);
 void c2t_log_sender_cleanup(void);
 

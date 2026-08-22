@@ -37,16 +37,16 @@ enum {
     C2T_BACKGROUND_CHILD = 1
 };
 
-int c2t_runtime_acquire(void);
+[[nodiscard]] int c2t_runtime_acquire(void);
 void c2t_runtime_mark_running(void);
 void c2t_runtime_release(void);
-int c2t_runtime_stop_requested(void);
-int c2t_runtime_stop_descriptor(void);
+[[nodiscard]] int c2t_runtime_stop_requested(void);
+[[nodiscard]] int c2t_runtime_stop_descriptor(void);
 
-int c2t_runtime_get_status(c2t_runtime_status_t *status);
-int c2t_runtime_stop(unsigned int timeout_ms, int force);
-int c2t_runtime_start_background(int argc, char **argv,
-                                 unsigned int timeout_ms);
-const char *c2t_runtime_log_path(void);
+[[nodiscard]] int c2t_runtime_get_status(c2t_runtime_status_t *status);
+[[nodiscard]] int c2t_runtime_stop(unsigned int timeout_ms, int force);
+[[nodiscard]] int c2t_runtime_start_background(int argc, char **argv,
+                                             unsigned int timeout_ms);
+[[nodiscard]] const char *c2t_runtime_log_path(void);
 
 #endif

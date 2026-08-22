@@ -20,9 +20,9 @@
 #include <stdint.h>
 #include <string.h>
 
-#define C2T_EMBEDDED_HEADER_SIZE 32U
-#define C2T_EMBEDDED_REGION_SIZE \
-    (C2T_EMBEDDED_HEADER_SIZE + C2T_EMBEDDED_PAYLOAD_CAPACITY)
+constexpr size_t C2T_EMBEDDED_HEADER_SIZE = 32U;
+constexpr size_t C2T_EMBEDDED_REGION_SIZE =
+    (C2T_EMBEDDED_HEADER_SIZE + C2T_EMBEDDED_PAYLOAD_CAPACITY);
 
 /*
  * Keep this byte layout stable: tools/embed_config.py patches it after link.
@@ -47,7 +47,7 @@ C2T_EMBEDDED_USED const volatile unsigned char
         1, 0, 0, 0 /* format version, followed by length and CRC32 */
     };
 
-static uint32_t read_u32_le(size_t offset)
+[[nodiscard]] static uint32_t read_u32_le(size_t offset)
 {
     return (uint32_t)c2t_embedded_region[offset] |
            ((uint32_t)c2t_embedded_region[offset + 1] << 8) |
@@ -55,7 +55,7 @@ static uint32_t read_u32_le(size_t offset)
            ((uint32_t)c2t_embedded_region[offset + 3] << 24);
 }
 
-static uint32_t payload_crc32(size_t length)
+[[nodiscard]] static uint32_t payload_crc32(size_t length)
 {
     uint32_t crc = UINT32_C(0xffffffff);
     for (size_t index = 0; index < length; ++index) {
@@ -67,7 +67,7 @@ static uint32_t payload_crc32(size_t length)
     return crc ^ UINT32_C(0xffffffff);
 }
 
-static size_t valid_payload_length(void)
+[[nodiscard]] static size_t valid_payload_length(void)
 {
     if (read_u32_le(16) != 1)
         return 0;
