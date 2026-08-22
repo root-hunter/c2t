@@ -32,6 +32,9 @@
 #include <errno.h>
 #include <pthread.h>
 #include <time.h>
+#if defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>
+#endif
 #else
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -527,4 +530,7 @@ void keyboard_output_cleanup(void)
     queue_bytes = 0;
     queue_items = 0;
     worker_started = 0;
+#if defined(__GLIBC__) && !defined(_WIN32)
+    malloc_trim(0);
+#endif
 }

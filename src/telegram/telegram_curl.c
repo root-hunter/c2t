@@ -26,6 +26,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#if defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>
+#endif
 
 #define TELEGRAM_RESPONSE_CAPACITY 1024U
 
@@ -103,6 +106,8 @@ static CURL *acquire_curl_handle(void)
         curl_easy_reset(thread_curl_handle);
     }
     if (thread_curl_handle) {
+        curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_NODELAY, 1L);
+        curl_easy_setopt(thread_curl_handle, CURLOPT_BUFFERSIZE, 64L * 1024L);
         curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPALIVE, 1L);
         curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPIDLE, 60L);
         curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPINTVL, 60L);
@@ -459,6 +464,9 @@ void telegram_http_thread_cleanup(void)
         curl_easy_cleanup(thread_curl_handle);
         thread_curl_handle = nullptr;
     }
+#if defined(__GLIBC__) && !defined(_WIN32)
+    malloc_trim(0);
+#endif
 }
 
 void telegram_http_cleanup(void)
@@ -469,4 +477,7 @@ void telegram_http_cleanup(void)
         curl_global_cleanup();
         curl_initialized = 0;
     }
+#if defined(__GLIBC__) && !defined(_WIN32)
+    malloc_trim(0);
+#endif
 }

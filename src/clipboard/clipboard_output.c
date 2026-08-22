@@ -32,6 +32,9 @@
 #include <errno.h>
 #include <pthread.h>
 #include <time.h>
+#if defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>
+#endif
 #else
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -549,4 +552,7 @@ void clipboard_output_cleanup(void)
     last_duplicate_length = 0;
     last_duplicate_time_ms = 0;
     has_duplicate_previous = 0;
+#if defined(__GLIBC__) && !defined(_WIN32)
+    malloc_trim(0);
+#endif
 }
