@@ -18,10 +18,16 @@ TAG := v$(VERSION)
 
 .PHONY: all linux macos windows run size clean embedded tag push release
 
+CC := clang
+STANDALONE ?= $(shell if ! ldd --version 2>&1 | grep -qi musl; then echo OFF; else echo ON; fi)
+
 all: linux
 
 linux:
-	cmake -S . -B build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+	cmake -S . -B build/linux -G Ninja \
+		-DCMAKE_C_COMPILER=$(CC) \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DC2T_STANDALONE_LINUX=$(STANDALONE)
 	cmake --build build/linux
 
 windows:

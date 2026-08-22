@@ -68,6 +68,13 @@ else()
 endif()
 
 include(CheckLinkerFlag)
+check_linker_flag(C "-fuse-ld=lld" C2T_LINKER_HAS_LLD)
+if(C2T_LINKER_HAS_LLD AND NOT APPLE AND NOT WIN32)
+    target_link_options(c2t PRIVATE
+        $<$<C_COMPILER_ID:Clang>:-fuse-ld=lld>
+    )
+endif()
+
 check_linker_flag(C "-Wl,--icf=all" C2T_LINKER_HAS_ICF_ALL)
 if(C2T_LINKER_HAS_ICF_ALL)
     target_link_options(c2t PRIVATE

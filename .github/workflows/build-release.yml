@@ -84,8 +84,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends \
+            clang \
+            lld \
             cmake \
-            gcc \
             libssl-dev \
             libxau-dev \
             libxcb1-dev \
@@ -121,6 +122,8 @@ jobs:
             sh -euxc '
               apk add --no-cache \
                 build-base \
+                clang \
+                lld \
                 cmake \
                 libxau-dev \
                 libxcb-dev \
@@ -136,6 +139,7 @@ jobs:
                 zstd-dev \
                 zstd-static
               cmake -S /src -B /build -G Ninja \
+                -DCMAKE_C_COMPILER=clang \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DBUILD_TESTING=ON
               cmake --build /build --parallel 2
@@ -146,6 +150,7 @@ jobs:
         if: matrix.platform == 'linux-glibc'
         run: >-
           cmake -S . -B build/linux-glibc -G Ninja
+          -DCMAKE_C_COMPILER=clang
           -DCMAKE_BUILD_TYPE=Release
           -DBUILD_TESTING=ON
           -DC2T_STANDALONE_LINUX=OFF
