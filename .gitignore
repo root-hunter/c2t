@@ -7,3 +7,4 @@ __pycache__/
 .vscode/
 /compile_commands.json
 /.cache
+/build_win
