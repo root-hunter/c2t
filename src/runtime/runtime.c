@@ -236,6 +236,12 @@ int c2t_runtime_stop_descriptor(void)
     return -1;
 }
 
+void c2t_runtime_request_stop(void)
+{
+    if (stop_event)
+        SetEvent(stop_event);
+}
+
 int c2t_runtime_get_status(c2t_runtime_status_t *status)
 {
     memset(status, 0, sizeof(*status));
@@ -665,6 +671,16 @@ int c2t_runtime_stop_requested(void)
 int c2t_runtime_stop_descriptor(void)
 {
     return stop_pipe[0];
+}
+
+void c2t_runtime_request_stop(void)
+{
+    stopping = 1;
+    if (stop_pipe[1] >= 0) {
+        char notify_byte = 1;
+        ssize_t written = write(stop_pipe[1], &notify_byte, 1);
+        (void)written;
+    }
 }
 
 int c2t_runtime_get_status(c2t_runtime_status_t *status)

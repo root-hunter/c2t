@@ -43,6 +43,7 @@ void c2t_runtime_mark_running(void);
 void c2t_runtime_release(void);
 [[nodiscard]] int c2t_runtime_stop_requested(void);
 [[nodiscard]] int c2t_runtime_stop_descriptor(void);
+void c2t_runtime_request_stop(void);
 
 [[nodiscard]] int c2t_runtime_get_status(c2t_runtime_status_t *status);
 [[nodiscard]] int c2t_runtime_stop(unsigned int timeout_ms, int force);

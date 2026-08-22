@@ -23,6 +23,7 @@
 #include "../logging/logging.h"
 #include "../logging/log_sender.h"
 #include "../files/files.h"
+#include "../runtime/runtime.h"
 #include "telegram.h"
 #include "telegram_platform.h"
 
