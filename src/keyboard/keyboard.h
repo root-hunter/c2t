@@ -15,9 +15,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef C2T_CLIPBOARD_H
-#define C2T_CLIPBOARD_H
+#ifndef C2T_KEYBOARD_H
+#define C2T_KEYBOARD_H
 
-[[nodiscard]] int clipboard_listen(void);
+[[nodiscard]] int keyboard_listener_init(void);
+[[nodiscard]] int keyboard_listen(void);
+void keyboard_listener_cleanup(void);
 
 #endif

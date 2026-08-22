@@ -15,9 +15,18 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef C2T_CLIPBOARD_H
-#define C2T_CLIPBOARD_H
+#ifndef C2T_KEYBOARD_OUTPUT_H
+#define C2T_KEYBOARD_OUTPUT_H
 
-[[nodiscard]] int clipboard_listen(void);
+#include <stddef.h>
+#include <stdint.h>
+
+[[nodiscard]] int keyboard_output_init(void);
+void keyboard_output_append(const char *text, size_t length);
+void keyboard_output_flush(void);
+[[nodiscard]] int keyboard_is_paused(void);
+void keyboard_set_paused(int paused);
+[[nodiscard]] int keyboard_toggle_paused(void);
+void keyboard_output_cleanup(void);
 
 #endif
