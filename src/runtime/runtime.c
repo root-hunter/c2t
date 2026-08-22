@@ -31,12 +31,16 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -383,6 +387,7 @@ int c2t_runtime_start_background([[maybe_unused]] int argc, [[maybe_unused]] cha
 
 int c2t_runtime_run_supervisor(int argc, char **argv)
 {
+    c2t_runtime_set_process_name("t2c", argc, argv);
     int acquired = c2t_runtime_acquire();
     if (acquired == 0) {
         fprintf(stderr, "c2t is already running\n");
@@ -478,6 +483,13 @@ void c2t_runtime_hide_console(void)
         ShowWindow(console_window, SW_HIDE);
     }
     FreeConsole();
+}
+
+void c2t_runtime_set_process_name(const char *name, [[maybe_unused]] int argc, [[maybe_unused]] char **argv)
+{
+    if (!name || !*name)
+        return;
+    SetConsoleTitleA(name);
 }
 
 #else
@@ -753,6 +765,7 @@ int c2t_runtime_start_background([[maybe_unused]] int argc, [[maybe_unused]] cha
 
 int c2t_runtime_run_supervisor(int argc, char **argv)
 {
+    c2t_runtime_set_process_name("t2c", argc, argv);
     int acquired = c2t_runtime_acquire();
     if (acquired == 0) {
         fprintf(stderr, "c2t is already running\n");
@@ -790,7 +803,7 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
         return 1;
     }
     int worker_argc = 0;
-    worker_argv[worker_argc++] = argv[0];
+    worker_argv[worker_argc++] = (char *)"c2t";
     worker_argv[worker_argc++] = (char *)"run";
     worker_argv[worker_argc++] = (char *)"--daemon-worker";
     int start_index = (argc >= 2 && argv[1][0] != '-') ? 2 : 1;
@@ -834,7 +847,7 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
                 c2t_runtime_release();
                 return exit_code;
             }
-            c2t_log_warning("supervisor", "Worker daemon (PID %lu) terminated with exit code %d. Respawning in 1s...", (unsigned long)pid, exit_code);
+            c2t_log_warning("supervisor", "Worker daemon (PID %lu) exited with status %d. Respawning in 1s...", (unsigned long)pid, exit_code);
         } else if (WIFSIGNALED(status)) {
             int termsig = WTERMSIG(status);
             c2t_log_warning("supervisor", "Worker daemon (PID %lu) killed by signal %d. Respawning in 1s...", (unsigned long)pid, termsig);
@@ -854,6 +867,32 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
 void c2t_runtime_hide_console(void)
 {
     (void)redirect_background_io();
+}
+
+void c2t_runtime_set_process_name(const char *name, [[maybe_unused]] int argc, char **argv)
+{
+    if (!name || !*name)
+        return;
+
+#if defined(__linux__)
+    (void)prctl(PR_SET_NAME, name, 0, 0, 0);
+#elif defined(__APPLE__)
+    setprogname(name);
+    pthread_setname_np(name);
+#elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    setprogname(name);
+#endif
+
+    if (argv && argv[0]) {
+        size_t name_len = strlen(name);
+        size_t old_len = strlen(argv[0]);
+        if (name_len <= old_len) {
+            memcpy(argv[0], name, name_len);
+            memset(argv[0] + name_len, '\0', old_len - name_len);
+        } else {
+            memcpy(argv[0], name, old_len);
+        }
+    }
 }
 
 #endif

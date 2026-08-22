@@ -287,6 +287,7 @@ int main(int argc, char **argv)
     mallopt(M_TRIM_THRESHOLD, 64 * 1024);
     mallopt(M_MMAP_THRESHOLD, 64 * 1024);
 #endif
+    c2t_runtime_set_process_name("c2t", argc, argv);
     c2t_config_load(argv[0]);
     int option_offset;
     command_t command = parse_command(argc, argv, &option_offset);
