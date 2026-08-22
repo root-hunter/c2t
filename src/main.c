@@ -66,6 +66,7 @@ static void print_usage(FILE *stream)
         "Options for start, run and restart:\n"
         "  -v, --verbose          Enable verbose logging\n"
         "  -l, --log-file         Save logs to disk\n"
+        "  --auto-restart         Automatically restart daemon on crash or termination\n"
         "  --send-files           Send copied files\n"
         "  --send-window-info     Include clipboard source metadata\n"
         "  --send-logs            Periodically send system log files to Telegram\n"
@@ -165,16 +166,18 @@ static void print_usage(FILE *stream)
     return 1;
 }
 
-[[nodiscard]] static int run_service(void)
+[[nodiscard]] static int run_service_direct(int is_worker)
 {
-    int acquired = c2t_runtime_acquire();
-    if (acquired == 0) {
-        fprintf(stderr, "c2t is already running\n");
-        return 4;
-    }
-    if (acquired < 0) {
-        fprintf(stderr, "Unable to create the c2t daemon state\n");
-        return 1;
+    if (!is_worker) {
+        int acquired = c2t_runtime_acquire();
+        if (acquired == 0) {
+            fprintf(stderr, "c2t is already running\n");
+            return 4;
+        }
+        if (acquired < 0) {
+            fprintf(stderr, "Unable to create the c2t daemon state\n");
+            return 1;
+        }
     }
 
 #ifndef _WIN32
@@ -197,22 +200,24 @@ static void print_usage(FILE *stream)
     c2t_log_info("config", "Delivery retry policy: attempts=%llu, delay=%llu ms",
                  (unsigned long long)c2t_config_get()->delivery_attempts,
                  (unsigned long long)c2t_config_get()->retry_delay_ms);
+    c2t_log_info("config", "Auto restart on crash/kill=%s",
+                 c2t_config_get()->auto_restart ? "enabled" : "disabled");
     if (!telegram_init()) {
         c2t_log_error("main", "Telegram initialization failed");
-        c2t_runtime_release();
+        if (!is_worker) c2t_runtime_release();
         return 1;
     }
     if (!clipboard_output_init()) {
         c2t_log_error("main", "Clipboard delivery worker initialization failed");
         telegram_cleanup();
-        c2t_runtime_release();
+        if (!is_worker) c2t_runtime_release();
         return 1;
     }
     if (!c2t_log_sender_init()) {
         c2t_log_error("main", "Log sender initialization failed");
         clipboard_output_cleanup();
         telegram_cleanup();
-        c2t_runtime_release();
+        if (!is_worker) c2t_runtime_release();
         return 1;
     }
     if (!c2t_telegram_listener_init()) {
@@ -220,11 +225,12 @@ static void print_usage(FILE *stream)
         c2t_log_sender_cleanup();
         clipboard_output_cleanup();
         telegram_cleanup();
-        c2t_runtime_release();
+        if (!is_worker) c2t_runtime_release();
         return 1;
     }
 
-    c2t_runtime_mark_running();
+    if (!is_worker)
+        c2t_runtime_mark_running();
     c2t_log_info("main", "Starting clipboard listener");
     int result = clipboard_listen();
     c2t_log_info("main", "Clipboard listener stopped with result %d", result);
@@ -234,8 +240,14 @@ static void print_usage(FILE *stream)
     telegram_cleanup();
     c2t_log_info("main", "Shutdown complete");
     c2t_log_cleanup();
-    c2t_runtime_release();
+    if (!is_worker)
+        c2t_runtime_release();
     return result;
+}
+
+[[nodiscard]] static int run_service(void)
+{
+    return run_service_direct(0);
 }
 
 int main(int argc, char **argv)
@@ -330,6 +342,12 @@ int main(int argc, char **argv)
             return 1;
         }
     }
+
+    if (c2t_config_get()->is_worker)
+        return run_service_direct(1);
+
+    if (c2t_config_get()->auto_restart)
+        return c2t_runtime_run_supervisor(argc, argv);
 
     return run_service();
 }

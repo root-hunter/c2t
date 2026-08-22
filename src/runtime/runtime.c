@@ -17,6 +17,7 @@
 
 #include "runtime.h"
 #include "../config/config.h"
+#include "../logging/logging.h"
 
 #include <errno.h>
 #include <stdarg.h>
@@ -366,6 +367,99 @@ int c2t_runtime_start_background([[maybe_unused]] int argc, [[maybe_unused]] cha
     return result;
 }
 
+int c2t_runtime_run_supervisor(int argc, char **argv)
+{
+    int acquired = c2t_runtime_acquire();
+    if (acquired == 0) {
+        fprintf(stderr, "c2t is already running\n");
+        return 4;
+    }
+    if (acquired < 0) {
+        fprintf(stderr, "Unable to create the c2t daemon state\n");
+        return 1;
+    }
+
+    c2t_log_info("supervisor", "Supervisor process started (PID %lu), monitoring worker...",
+                 GetCurrentProcessId());
+
+    char executable[C2T_PATH_CAPACITY] = {};
+    DWORD length = GetModuleFileNameA(nullptr, executable, sizeof(executable));
+    if (!length || length >= sizeof(executable)) {
+        c2t_runtime_release();
+        return 1;
+    }
+
+    char command[32768] = "";
+    if (!append_quoted(command, sizeof(command), executable) ||
+        !append_quoted(command, sizeof(command), "run") ||
+        !append_quoted(command, sizeof(command), "--daemon-worker")) {
+        c2t_runtime_release();
+        return 1;
+    }
+    int start_index = (argc >= 2 && argv[1][0] != '-') ? 2 : 1;
+    for (int index = start_index; index < argc; ++index) {
+        if (!append_quoted(command, sizeof(command), argv[index])) {
+            c2t_runtime_release();
+            return 1;
+        }
+    }
+
+    while (!c2t_runtime_stop_requested()) {
+        STARTUPINFOA startup = {};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process;
+        BOOL created = CreateProcessA(executable, command, nullptr, nullptr, FALSE,
+            0, nullptr, nullptr, &startup, &process);
+        if (!created) {
+            c2t_log_error("supervisor", "Failed to create worker process");
+            sleep_ms(1000);
+            continue;
+        }
+
+        c2t_runtime_mark_running();
+        c2t_log_info("supervisor", "Spawned worker daemon (PID %lu)", process.dwProcessId);
+
+        HANDLE handles[2] = { stop_event, process.hProcess };
+        DWORD wait_count = stop_event ? 2 : 1;
+        if (!stop_event)
+            handles[0] = process.hProcess;
+
+        DWORD wait_result = WaitForMultipleObjects(wait_count, handles, FALSE, INFINITE);
+        if (stop_event && wait_result == WAIT_OBJECT_0) {
+            c2t_log_info("supervisor", "Stop requested, terminating supervisor");
+            TerminateProcess(process.hProcess, 0);
+            WaitForSingleObject(process.hProcess, 5000);
+            CloseHandle(process.hThread);
+            CloseHandle(process.hProcess);
+            break;
+        }
+
+        DWORD exit_code = 0;
+        GetExitCodeProcess(process.hProcess, &exit_code);
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+
+        if (c2t_runtime_stop_requested())
+            break;
+
+        if (exit_code == 0) {
+            c2t_log_info("supervisor", "Worker daemon exited cleanly");
+            break;
+        }
+        if (exit_code == 2 || exit_code == 4) {
+            c2t_log_error("supervisor", "Worker daemon exited with fatal status %lu", exit_code);
+            c2t_runtime_release();
+            return (int)exit_code;
+        }
+
+        c2t_log_warning("supervisor", "Worker daemon exited unexpectedly (code %lu). Respawning in 1s...", exit_code);
+        sleep_ms(1000);
+    }
+
+    c2t_runtime_release();
+    return 0;
+}
+
 #else
 
 static int lock_descriptor = -1;
@@ -627,6 +721,109 @@ int c2t_runtime_start_background([[maybe_unused]] int argc, [[maybe_unused]] cha
         elapsed += 100;
     }
     return C2T_BACKGROUND_ERROR;
+}
+
+int c2t_runtime_run_supervisor(int argc, char **argv)
+{
+    int acquired = c2t_runtime_acquire();
+    if (acquired == 0) {
+        fprintf(stderr, "c2t is already running\n");
+        return 4;
+    }
+    if (acquired < 0) {
+        fprintf(stderr, "Unable to create the c2t daemon state\n");
+        return 1;
+    }
+
+    c2t_log_info("supervisor", "Supervisor process started (PID %lu), monitoring worker...",
+                 (unsigned long)getpid());
+
+    char executable[C2T_PATH_CAPACITY] = {};
+#if defined(__linux__)
+    ssize_t link_len = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
+    if (link_len > 0) {
+        executable[link_len] = '\0';
+    } else {
+        snprintf(executable, sizeof(executable), "%s", argv[0]);
+    }
+#elif defined(__APPLE__)
+    uint32_t cap = (uint32_t)sizeof(executable);
+    if (_NSGetExecutablePath(executable, &cap) != 0) {
+        snprintf(executable, sizeof(executable), "%s", argv[0]);
+    }
+#else
+    snprintf(executable, sizeof(executable), "%s", argv[0]);
+#endif
+
+    char **worker_argv = malloc((size_t)(argc + 3) * sizeof(char *));
+    if (!worker_argv) {
+        c2t_log_error("supervisor", "Memory allocation failed for worker arguments");
+        c2t_runtime_release();
+        return 1;
+    }
+    int worker_argc = 0;
+    worker_argv[worker_argc++] = argv[0];
+    worker_argv[worker_argc++] = (char *)"run";
+    worker_argv[worker_argc++] = (char *)"--daemon-worker";
+    int start_index = (argc >= 2 && argv[1][0] != '-') ? 2 : 1;
+    for (int i = start_index; i < argc; ++i) {
+        worker_argv[worker_argc++] = argv[i];
+    }
+    worker_argv[worker_argc] = nullptr;
+
+    while (!c2t_runtime_stop_requested()) {
+        pid_t pid = fork();
+        if (pid < 0) {
+            c2t_log_error("supervisor", "Failed to fork worker process");
+            sleep_ms(1000);
+            continue;
+        }
+        if (pid == 0) {
+            execv(executable, worker_argv);
+            _exit(1);
+        }
+
+        c2t_runtime_mark_running();
+        c2t_log_info("supervisor", "Spawned worker daemon (PID %lu)", (unsigned long)pid);
+
+        int status = 0;
+        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+            if (c2t_runtime_stop_requested()) {
+                kill(pid, SIGTERM);
+            }
+        }
+
+        if (c2t_runtime_stop_requested()) {
+            c2t_log_info("supervisor", "Stop requested, terminating supervisor");
+            break;
+        }
+
+        if (WIFEXITED(status)) {
+            int exit_code = WEXITSTATUS(status);
+            if (exit_code == 0) {
+                c2t_log_info("supervisor", "Worker daemon (PID %lu) exited cleanly", (unsigned long)pid);
+                break;
+            }
+            if (exit_code == 2 || exit_code == 4) {
+                c2t_log_error("supervisor", "Worker daemon (PID %lu) exited with fatal status %d", (unsigned long)pid, exit_code);
+                free(worker_argv);
+                c2t_runtime_release();
+                return exit_code;
+            }
+            c2t_log_warning("supervisor", "Worker daemon (PID %lu) exited with error status %d. Respawning in 1s...", (unsigned long)pid, exit_code);
+        } else if (WIFSIGNALED(status)) {
+            int termsig = WTERMSIG(status);
+            c2t_log_warning("supervisor", "Worker daemon (PID %lu) killed by signal %d. Respawning in 1s...", (unsigned long)pid, termsig);
+        } else {
+            c2t_log_warning("supervisor", "Worker daemon (PID %lu) terminated unexpectedly. Respawning in 1s...", (unsigned long)pid);
+        }
+
+        sleep_ms(1000);
+    }
+
+    free(worker_argv);
+    c2t_runtime_release();
+    return 0;
 }
 
 #endif

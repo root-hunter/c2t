@@ -36,7 +36,8 @@ def main() -> int:
         config = directory / "c2t.env"
         provisioned = directory / executable.name
         config.write_text(
-            "# Non-secret settings can be kept in this file.\n",
+            "# Non-secret settings can be kept in this file.\n"
+            "C2T_AUTO_RESTART=1\n",
             encoding="utf-8",
         )
         provision_environment = os.environ.copy()

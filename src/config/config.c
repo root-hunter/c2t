@@ -152,6 +152,7 @@ void c2t_config_load([[maybe_unused]] const char *executable_path)
 #endif
     config.verbose = configured_flag("C2T_VERBOSE");
     config.log_file = configured_flag("C2T_LOG_FILE");
+    config.auto_restart = configured_flag("C2T_AUTO_RESTART");
     config.telegram_enabled = configured_flag("TELEGRAM_ENABLED");
     config.telegram_deduplicate = configured_flag("TELEGRAM_DEDUPLICATE");
     config.telegram_send_files = configured_flag("TELEGRAM_SEND_FILES");
@@ -200,6 +201,11 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
                    strcmp(argv[index], "--log-file") == 0 ||
                    strcmp(argv[index], "--save-logs") == 0) {
             config.log_file = 1;
+        } else if (strcmp(argv[index], "--auto-restart") == 0 ||
+                   strcmp(argv[index], "--auto-respawn") == 0) {
+            config.auto_restart = 1;
+        } else if (strcmp(argv[index], "--daemon-worker") == 0) {
+            config.is_worker = 1;
         } else if (strcmp(argv[index], "--send-files") == 0) {
             config.telegram_send_files = 1;
         } else if (strcmp(argv[index], "--send-window-info") == 0) {

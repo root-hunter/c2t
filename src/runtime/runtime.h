@@ -47,6 +47,7 @@ void c2t_runtime_release(void);
 [[nodiscard]] int c2t_runtime_stop(unsigned int timeout_ms, int force);
 [[nodiscard]] int c2t_runtime_start_background(int argc, char **argv,
                                              unsigned int timeout_ms);
+[[nodiscard]] int c2t_runtime_run_supervisor(int argc, char **argv);
 [[nodiscard]] const char *c2t_runtime_log_path(void);
 
 #endif

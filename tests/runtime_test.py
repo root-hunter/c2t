@@ -99,6 +99,38 @@ def main():
                 executable, "stop", environment=environment)
             assert foreground_stop.returncode == 0, foreground_stop
             assert foreground.wait(timeout=20) == 0
+
+            # Test auto-restart feature when daemon worker is killed
+            auto_restart_start = invoke(
+                executable, "start", "--verbose", "--log-file", "--auto-restart",
+                environment=environment)
+            assert auto_restart_start.returncode == 0, auto_restart_start
+            assert "started (PID " in auto_restart_start.stdout
+
+            auto_status = invoke(executable, "status", environment=environment)
+            assert auto_status.returncode == 0 and "running" in auto_status.stdout
+
+            # Extract supervisor PID from status output: "c2t is running (PID <pid>)"
+            supervisor_pid = int(auto_status.stdout.split("PID ")[1].split(")")[0])
+
+            # Find worker child process of supervisor
+            try:
+                children_raw = subprocess.check_output(
+                    ["pgrep", "-P", str(supervisor_pid)], text=True).strip()
+                worker_pids = [int(p) for p in children_raw.splitlines() if p.isdigit()]
+            except subprocess.CalledProcessError:
+                worker_pids = []
+
+            if worker_pids:
+                import signal
+                os.kill(worker_pids[0], signal.SIGKILL)
+                time.sleep(1.5)  # Wait for supervisor 1s sleep and respawn
+
+                post_kill_status = invoke(executable, "status", environment=environment)
+                assert post_kill_status.returncode == 0 and "running" in post_kill_status.stdout
+
+            auto_stop = invoke(executable, "stop", environment=environment)
+            assert auto_stop.returncode == 0, auto_stop
         finally:
             invoke(executable, "stop", "--force", environment=environment)
 
