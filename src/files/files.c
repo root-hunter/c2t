@@ -28,13 +28,22 @@
 #include <string.h>
 #include <time.h>
 
-#ifndef _WIN32
-#include <pthread.h>
-static pthread_mutex_t files_metrics_mutex = PTHREAD_MUTEX_INITIALIZER;
-#else
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <sys/stat.h>
+typedef struct _stat64 c2t_stat_t;
 static CRITICAL_SECTION files_metrics_mutex;
 static int files_mutex_init;
+#else
+#include <dirent.h>
+#include <pthread.h>
+#include <sys/stat.h>
+#include <unistd.h>
+typedef struct stat c2t_stat_t;
+static pthread_mutex_t files_metrics_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
+
 static uint64_t total_files_sent_bytes;
 static uint64_t total_files_sent_count;
 
@@ -59,18 +68,6 @@ static void files_unlock(void)
     LeaveCriticalSection(&files_metrics_mutex);
 #endif
 }
-
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <sys/stat.h>
-typedef struct _stat64 c2t_stat_t;
-#else
-#include <dirent.h>
-#include <sys/stat.h>
-#include <unistd.h>
-typedef struct stat c2t_stat_t;
-#endif
 
 [[nodiscard]] static int ascii_equal_nocase(const char *left, const char *right,
                                               size_t length)
@@ -881,7 +878,8 @@ static int list_dir_windows(const char *clean_path, char *output, size_t capacit
         }
     } else if (truncated) {
         char more_buf[128];
-        snprintf(more_buf, sizeof(more_buf), "<i>... and %zu more items</i>\n", (dir_count + file_count) - displayed_count);
+        snprintf(more_buf, sizeof(more_buf), "<i>... and %llu more items</i>\n",
+                 (unsigned long long)((dir_count + file_count) - displayed_count));
         size_t m_len = strlen(more_buf);
         if (offset + m_len < capacity - 128) {
             memcpy(output + offset, more_buf, m_len);
@@ -892,8 +890,8 @@ static int list_dir_windows(const char *clean_path, char *output, size_t capacit
     char total_sz_str[32];
     format_size_human(total_bytes, total_sz_str, sizeof(total_sz_str));
     char footer[128];
-    snprintf(footer, sizeof(footer), "\n📊 <b>Total:</b> %zu dirs, %zu files (%s)",
-             dir_count, file_count, total_sz_str);
+    snprintf(footer, sizeof(footer), "\n📊 <b>Total:</b> %llu dirs, %llu files (%s)",
+             (unsigned long long)dir_count, (unsigned long long)file_count, total_sz_str);
     size_t f_len = strlen(footer);
     if (offset + f_len < capacity) {
         memcpy(output + offset, footer, f_len);

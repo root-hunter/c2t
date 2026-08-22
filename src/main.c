@@ -37,6 +37,9 @@
 #if defined(__linux__) && defined(__GLIBC__)
 #include <malloc.h>
 #endif
+#else
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 
 #define C2T_START_TIMEOUT_MS 10000U
