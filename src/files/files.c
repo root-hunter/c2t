@@ -21,6 +21,7 @@
 #include "../telegram/telegram.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -182,8 +183,6 @@ typedef struct stat c2t_stat_t;
 
     return "application/octet-stream";
 }
-
-#include <errno.h>
 
 static void append_escaped_html(char *output, size_t *offset, size_t capacity,
                                 const char *input)

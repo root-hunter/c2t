@@ -48,7 +48,7 @@ set_target_properties(c2t PROPERTIES
     VISIBILITY_INLINES_HIDDEN ON
 )
 target_compile_options(c2t PRIVATE
-    $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-ffunction-sections;-fdata-sections>
+    $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Wshadow;-ffunction-sections;-fdata-sections>
     $<$<AND:$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>,$<C_COMPILER_ID:GNU,Clang,AppleClang>>:-fno-unwind-tables;-fno-asynchronous-unwind-tables>
     $<$<AND:$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>,$<C_COMPILER_ID:GNU,Clang>>:-fno-ident>
     $<$<AND:$<CONFIG:MinSizeRel>,$<C_COMPILER_ID:Clang,AppleClang>>:-Oz>
@@ -259,7 +259,7 @@ if(BUILD_TESTING AND NOT WIN32)
     target_include_directories(telegram_tests PRIVATE src)
     target_compile_features(telegram_tests PRIVATE c_std_23)
     target_compile_options(telegram_tests PRIVATE
-        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Wshadow>
     )
     target_link_libraries(telegram_tests PRIVATE Threads::Threads)
     add_test(NAME telegram_tests COMMAND telegram_tests)

@@ -172,17 +172,11 @@ static void chacha20_block(uint32_t output[16], const uint32_t input[16])
         output[i] += input[i];
 }
 
-static void chacha20_crypt(const unsigned char key[32],
-                           const unsigned char nonce[12],
-                           uint32_t counter,
-                           const unsigned char *input,
-                           unsigned char *output,
-                           size_t len)
+static void chacha20_init_state(uint32_t state[16],
+                                const unsigned char key[32],
+                                const unsigned char nonce[12],
+                                uint32_t counter)
 {
-    uint32_t state[16];
-    uint32_t block[16];
-    unsigned char keystream[64];
-
     state[0] = 0x61707865;
     state[1] = 0x3330322d;
     state[2] = 0x79622d32;
@@ -195,6 +189,20 @@ static void chacha20_crypt(const unsigned char key[32],
     state[13] = load32_le(nonce);
     state[14] = load32_le(nonce + 4);
     state[15] = load32_le(nonce + 8);
+}
+
+static void chacha20_crypt(const unsigned char key[32],
+                           const unsigned char nonce[12],
+                           uint32_t counter,
+                           const unsigned char *input,
+                           unsigned char *output,
+                           size_t len)
+{
+    uint32_t state[16];
+    uint32_t block[16];
+    unsigned char keystream[64];
+
+    chacha20_init_state(state, key, nonce, counter);
 
     size_t offset = 0;
     while (offset < len) {
@@ -296,18 +304,7 @@ int c2t_crypto_decrypt_offset(const void *ciphertext, size_t offset, size_t len,
         uint32_t state[16], block[16];
         unsigned char keystream[64];
 
-        state[0] = 0x61707865;
-        state[1] = 0x3330322d;
-        state[2] = 0x79622d32;
-        state[3] = 0x6b206574;
-
-        for (size_t i = 0; i < 8; ++i)
-            state[4 + i] = load32_le(session_key + i * 4);
-
-        state[12] = initial_counter;
-        state[13] = load32_le(nonce);
-        state[14] = load32_le(nonce + 4);
-        state[15] = load32_le(nonce + 8);
+        chacha20_init_state(state, session_key, nonce, initial_counter);
 
         chacha20_block(block, state);
         for (size_t i = 0; i < 16; ++i)

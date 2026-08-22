@@ -285,13 +285,11 @@ static int finish_send(sent_content_t *pending, int result)
     return 1;
 }
 
-static void clear_sent_contents(void)
+static void clear_sent_contents_locked(void)
 {
-    telegram_lock();
     memset(sent_contents_table, 0, sizeof(sent_contents_table));
     sent_order_head = 0;
     sent_order_count = 0;
-    telegram_unlock();
 }
 
 static int token_is_valid(const char *token)
@@ -1128,41 +1126,6 @@ int telegram_send_html(const char *html_text)
     return send_fields("sendMessage", fields, 2);
 }
 
-int telegram_send_text_message(const char *text)
-{
-    if (!initialized || !text || !*text || !chat_id || !bot_token)
-        return 0;
-
-    form_field_t field = {"text", text, strlen(text)};
-    return send_fields("sendMessage", &field, 1);
-}
-
-static int parse_json_string_field(const char *json, const char *key, char *output, size_t capacity)
-{
-    if (!json || !key || !output || capacity == 0) return 0;
-    output[0] = '\0';
-
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *pos = strstr(json, pattern);
-    if (!pos) return 0;
-
-    pos += strlen(pattern);
-    while (*pos == ' ' || *pos == ':') pos++;
-    if (*pos != '"') return 0;
-    pos++;
-
-    size_t len = 0;
-    while (*pos && *pos != '"' && len + 1 < capacity) {
-        if (*pos == '\\' && pos[1]) {
-            pos++;
-        }
-        output[len++] = *pos++;
-    }
-    output[len] = '\0';
-    return len > 0;
-}
-
 static int parse_json_field_in_range(const char *start, const char *end, const char *key, char *output, size_t capacity)
 {
     if (!start || !end || start >= end || !key || !output || capacity == 0) return 0;
@@ -1259,7 +1222,7 @@ int telegram_get_bot_username(const char *token, char *username_out, size_t capa
     }
 
     if (!res) return 0;
-    return parse_json_string_field(response, "username", username_out, capacity);
+    return parse_json_field_in_range(response, response + strlen(response), "username", username_out, capacity);
 }
 
 int telegram_poll_updates_callback(const char *token, int64_t *offset, int timeout_seconds,
@@ -1339,15 +1302,15 @@ typedef struct {
     int found;
 } single_poll_ctx_t;
 
-static void single_poll_callback([[maybe_unused]] int64_t update_id, const char *chat_id,
+static void single_poll_callback([[maybe_unused]] int64_t update_id, const char *cb_chat_id,
                                  const char *username, const char *text,
                                  void *user_data)
 {
     single_poll_ctx_t *ctx = (single_poll_ctx_t *)user_data;
     if (ctx->found) return;
 
-    if (ctx->chat_id_out && chat_id && *chat_id) {
-        snprintf(ctx->chat_id_out, ctx->chat_id_capacity, "%s", chat_id);
+    if (ctx->chat_id_out && cb_chat_id && *cb_chat_id) {
+        snprintf(ctx->chat_id_out, ctx->chat_id_capacity, "%s", cb_chat_id);
     }
     if (ctx->username_out && username && *username) {
         snprintf(ctx->username_out, ctx->username_capacity, "%s", username);
@@ -1482,6 +1445,6 @@ void telegram_cleanup(void)
     deduplicate = 0;
     bot_token = nullptr;
     chat_id = nullptr;
+    clear_sent_contents_locked();
     telegram_unlock();
-    clear_sent_contents();
 }

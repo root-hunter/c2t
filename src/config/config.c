@@ -26,7 +26,6 @@
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
-#include <stdio.h>
 #endif
 
 #define TELEGRAM_DEFAULT_MAX_FILE_BYTES (50U * 1024U * 1024U)

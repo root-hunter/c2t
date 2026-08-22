@@ -40,7 +40,6 @@
                                                const char *filename,
                                                const c2t_clipboard_source_t *source);
 int telegram_send_html(const char *html_text);
-int telegram_send_text_message(const char *text);
 [[nodiscard]] int telegram_get_bot_username(const char *token, char *username_out, size_t capacity);
 typedef void (*telegram_update_callback_t)(int64_t update_id,
                                           const char *chat_id,

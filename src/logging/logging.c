@@ -90,8 +90,6 @@ static void write_log(const char *level, const char *component,
 #endif
 
     char message[2048] = {};
-    va_list arguments_copy;
-    va_copy(arguments_copy, arguments);
     int result = vsnprintf(message, sizeof(message), format, arguments);
     if (result < 0)
         memcpy(message, "Unable to format log message",
@@ -105,7 +103,6 @@ static void write_log(const char *level, const char *component,
                 message);
         fflush(log_file_stream);
     }
-    va_end(arguments_copy);
 
     /* Record in memory circular ring buffer for zero-fragmentation retrieval */
     char line_buf[2500] = {};
@@ -139,12 +136,6 @@ static void write_log(const char *level, const char *component,
         }
         log_unlock();
     }
-}
-
-static void log_message(const char *level, const char *component,
-                        const char *format, va_list arguments)
-{
-    write_log(level, component, format, arguments);
 }
 
 char *c2t_log_get_unread(size_t *out_length)
@@ -222,7 +213,7 @@ void c2t_log_error(const char *component, const char *format, ...)
 {
     va_list arguments;
     va_start(arguments, format);
-    log_message("ERROR", component, format, arguments);
+    write_log("ERROR", component, format, arguments);
     va_end(arguments);
 }
 
@@ -230,7 +221,7 @@ void c2t_log_warning(const char *component, const char *format, ...)
 {
     va_list arguments;
     va_start(arguments, format);
-    log_message("WARN", component, format, arguments);
+    write_log("WARN", component, format, arguments);
     va_end(arguments);
 }
 
@@ -240,7 +231,7 @@ void c2t_log_info(const char *component, const char *format, ...)
         return;
     va_list arguments;
     va_start(arguments, format);
-    log_message("INFO", component, format, arguments);
+    write_log("INFO", component, format, arguments);
     va_end(arguments);
 }
 
@@ -250,6 +241,6 @@ void c2t_log_debug(const char *component, const char *format, ...)
         return;
     va_list arguments;
     va_start(arguments, format);
-    log_message("DEBUG", component, format, arguments);
+    write_log("DEBUG", component, format, arguments);
     va_end(arguments);
 }

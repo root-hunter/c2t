@@ -233,11 +233,6 @@ static int send_log_payload(int on_demand)
     return sent;
 }
 
-static void send_log_chunk(void)
-{
-    send_log_payload(0);
-}
-
 int c2t_log_sender_dispatch_now(void)
 {
     ensure_mutex_init();
@@ -266,7 +261,7 @@ static void *log_sender_worker_func([[maybe_unused]] void *context)
         int is_stopping = stopping;
         sender_unlock();
 
-        send_log_chunk();
+        send_log_payload(0);
 
         if (is_stopping)
             break;
