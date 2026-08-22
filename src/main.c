@@ -78,9 +78,11 @@ static void print_usage(FILE *stream)
         "  --send-keyboard        Enable keyboard monitoring\n"
         "  --no-keyboard          Disable keyboard monitoring\n"
         "  --keyboard-flush <ms>  Inactivity delay before sending keystrokes (500-60000 ms)\n"
+#ifdef C2T_ENABLE_PROCESS_MASQUERADE
         "  --daemon-name <name>   Set custom daemon process name (default: c2t)\n"
-        "  --supervisor-name <name>  Set custom supervisor process name (default: t2c)\n\n"
-        "Stop options:\n"
+        "  --supervisor-name <name>  Set custom supervisor process name (default: t2c)\n"
+#endif
+        "\nStop options:\n"
         "  --force                Force termination after the timeout\n");
 }
 

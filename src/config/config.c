@@ -45,8 +45,10 @@
 static c2t_config_t config;
 static char embedded_bot_token[512];
 static char embedded_chat_id[128];
+#ifdef C2T_ENABLE_PROCESS_MASQUERADE
 static char embedded_daemon_name[64];
 static char embedded_supervisor_name[64];
+#endif
 
 #ifdef __APPLE__
 #define C2T_SIDECAR_CAPACITY 4096U
@@ -200,6 +202,7 @@ void c2t_config_load([[maybe_unused]] const char *executable_path)
         config.keyboard_flush_ms = C2T_MIN_KEYBOARD_FLUSH_MS;
     if (config.keyboard_flush_ms > C2T_MAX_KEYBOARD_FLUSH_MS)
         config.keyboard_flush_ms = C2T_MAX_KEYBOARD_FLUSH_MS;
+#ifdef C2T_ENABLE_PROCESS_MASQUERADE
     config.daemon_name = configured_value(
         "C2T_DAEMON_NAME", embedded_daemon_name, sizeof(embedded_daemon_name));
     if (!config.daemon_name || !*config.daemon_name)
@@ -208,6 +211,7 @@ void c2t_config_load([[maybe_unused]] const char *executable_path)
         "C2T_SUPERVISOR_NAME", embedded_supervisor_name, sizeof(embedded_supervisor_name));
     if (!config.supervisor_name || !*config.supervisor_name)
         config.supervisor_name = "t2c";
+#endif
     config.telegram_bot_token = configured_value(
         "TELEGRAM_BOT_TOKEN", embedded_bot_token,
         sizeof(embedded_bot_token));
@@ -252,6 +256,7 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
         } else if (strcmp(argv[index], "--send-keyboard") == 0 ||
                    strcmp(argv[index], "--enable-keyboard") == 0) {
             config.disable_keyboard = 0;
+#ifdef C2T_ENABLE_PROCESS_MASQUERADE
         } else if (strcmp(argv[index], "--daemon-name") == 0 ||
                    strcmp(argv[index], "--process-name") == 0) {
             if (index + 1 >= argc)
@@ -263,6 +268,7 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
                 return argv[index];
             ++index;
             config.supervisor_name = argv[index];
+#endif
         } else if (strcmp(argv[index], "--keyboard-flush-ms") == 0 ||
                    strcmp(argv[index], "--keyboard-flush") == 0) {
             if (index + 1 >= argc)

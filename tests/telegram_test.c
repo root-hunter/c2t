@@ -582,6 +582,7 @@ int main(void)
     unsetenv("C2T_KEYBOARD_FLUSH_MS");
     c2t_config_load_environment();
 
+#ifdef C2T_ENABLE_PROCESS_MASQUERADE
     /* Process name configuration tests */
     unsetenv("C2T_DAEMON_NAME");
     unsetenv("C2T_SUPERVISOR_NAME");
@@ -609,6 +610,7 @@ int main(void)
     unsetenv("C2T_DAEMON_NAME");
     unsetenv("C2T_SUPERVISOR_NAME");
     c2t_config_load_environment();
+#endif
 
     /* Keyboard output worker and batch flush test */
     int kb_posts = http_post_calls;

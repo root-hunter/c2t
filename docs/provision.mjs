@@ -28,15 +28,9 @@ export const SENSITIVE_KEYS = new Set([
   "TELEGRAM_CHAT_ID",
 ]);
 
-export const STRING_KEYS = new Set([
-  "C2T_DAEMON_NAME",
-  "C2T_SUPERVISOR_NAME",
-]);
-
 export const ALLOWED_KEYS = new Set([
   ...FLAG_KEYS,
   ...SENSITIVE_KEYS,
-  ...STRING_KEYS,
   "TELEGRAM_LOG_INTERVAL_SEC",
   "TELEGRAM_MAX_FILE_BYTES",
   "C2T_QUEUE_MAX_BYTES",
@@ -48,7 +42,7 @@ export const ALLOWED_KEYS = new Set([
 
 const SIZE_KEYS = new Set(
   [...ALLOWED_KEYS].filter(
-    (key) => !FLAG_KEYS.has(key) && !SENSITIVE_KEYS.has(key) && !STRING_KEYS.has(key),
+    (key) => !FLAG_KEYS.has(key) && !SENSITIVE_KEYS.has(key),
   ),
 );
 
@@ -82,9 +76,6 @@ export function validateConfig(config) {
     }
     if (SIZE_KEYS.has(key) && !/^[1-9][0-9]*$/.test(value)) {
       throw new Error(`${key} must be a positive decimal integer`);
-    }
-    if (STRING_KEYS.has(key) && !/^[a-zA-Z0-9_.-]{1,15}$/.test(value)) {
-      throw new Error(`${key} must be 1-15 alphanumeric characters (_.- allowed)`);
     }
     const byteLength = new TextEncoder().encode(value).length;
     if (key === "TELEGRAM_BOT_TOKEN" && byteLength >= 512) {

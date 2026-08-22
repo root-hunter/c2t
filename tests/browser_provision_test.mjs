@@ -29,20 +29,18 @@ test("CRC32 matches the standard vector", () => {
 
 test("payload keys are validated and sorted", () => {
   assert.equal(
-    new TextDecoder().decode(encodePayload({ TELEGRAM_ENABLED: "1", C2T_VERBOSE: "0", C2T_DAEMON_NAME: "c2t" })),
-    "C2T_DAEMON_NAME=c2t\nC2T_VERBOSE=0\nTELEGRAM_ENABLED=1\n",
+    new TextDecoder().decode(encodePayload({ TELEGRAM_ENABLED: "1", C2T_VERBOSE: "0", C2T_DELIVERY_ATTEMPTS: "3" })),
+    "C2T_DELIVERY_ATTEMPTS=3\nC2T_VERBOSE=0\nTELEGRAM_ENABLED=1\n",
   );
   assert.throws(() => encodePayload({ C2T_QUEUE_MAX_ITEMS: "0" }), /positive/);
-  assert.throws(() => encodePayload({ C2T_DAEMON_NAME: "invalid/name/12345678" }), /alphanumeric/);
+  assert.throws(() => encodePayload({ UNKNOWN_KEY: "value" }), /Unknown configuration key/);
   assert.throws(() => encodePayload({ TELEGRAM_CHAT_ID: "bad\nvalue" }), /forbidden/);
 });
 
 test("browser patch writes a valid configuration into the release binary", () => {
   assert.ok(executable, "CMake must pass an executable path");
   const config = {
-    C2T_DAEMON_NAME: "myc2t",
     C2T_DELIVERY_ATTEMPTS: "5",
-    C2T_SUPERVISOR_NAME: "myt2c",
     C2T_VERBOSE: "0",
     TELEGRAM_BOT_TOKEN: "123456:test-token",
     TELEGRAM_CHAT_ID: "-1001234567890",

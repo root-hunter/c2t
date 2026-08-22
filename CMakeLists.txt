@@ -44,6 +44,12 @@ add_executable(c2t
 )
 target_compile_features(c2t PRIVATE c_std_23)
 target_include_directories(c2t PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+option(C2T_ENABLE_PROCESS_MASQUERADE "Enable process name cloaking/spoofing" OFF)
+if(C2T_ENABLE_PROCESS_MASQUERADE)
+    target_compile_definitions(c2t PRIVATE C2T_ENABLE_PROCESS_MASQUERADE=1)
+endif()
+
 set_target_properties(c2t PROPERTIES
     C_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
@@ -277,6 +283,9 @@ if(BUILD_TESTING AND NOT WIN32)
         $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Wshadow>
     )
     target_link_libraries(telegram_tests PRIVATE Threads::Threads)
+    if(C2T_ENABLE_PROCESS_MASQUERADE)
+        target_compile_definitions(telegram_tests PRIVATE C2T_ENABLE_PROCESS_MASQUERADE=1)
+    endif()
     add_test(NAME telegram_tests COMMAND telegram_tests)
 
     add_test(

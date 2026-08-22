@@ -387,8 +387,13 @@ int c2t_runtime_start_background([[maybe_unused]] int argc, [[maybe_unused]] cha
 
 int c2t_runtime_run_supervisor(int argc, char **argv)
 {
+#ifdef C2T_ENABLE_PROCESS_MASQUERADE
     const char *s_name = c2t_config_get()->supervisor_name ? c2t_config_get()->supervisor_name : "t2c";
     c2t_runtime_set_process_name(s_name, argc, argv);
+#else
+    (void)argc;
+    (void)argv;
+#endif
     int acquired = c2t_runtime_acquire();
     if (acquired == 0) {
         fprintf(stderr, "c2t is already running\n");
@@ -403,64 +408,48 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
                  GetCurrentProcessId());
 
     char executable[C2T_PATH_CAPACITY] = {};
-    DWORD length = GetModuleFileNameA(nullptr, executable, sizeof(executable));
-    if (!length || length >= sizeof(executable)) {
-        c2t_runtime_release();
-        return 1;
-    }
-
-    char command[32768] = "";
-    if (!append_quoted(command, sizeof(command), executable) ||
-        !append_quoted(command, sizeof(command), "run") ||
-        !append_quoted(command, sizeof(command), "--daemon-worker")) {
-        c2t_runtime_release();
-        return 1;
-    }
-    int start_index = (argc >= 2 && argv[1][0] != '-') ? 2 : 1;
-    for (int index = start_index; index < argc; ++index) {
-        if (!append_quoted(command, sizeof(command), argv[index])) {
-            c2t_runtime_release();
-            return 1;
-        }
+    if (GetModuleFileNameA(nullptr, executable, sizeof(executable)) == 0) {
+        snprintf(executable, sizeof(executable), "%s", argv[0]);
     }
 
     while (!c2t_runtime_stop_requested()) {
+        char command[C2T_PATH_CAPACITY * 2] = {};
+        snprintf(command, sizeof(command), "\"%s\" run --daemon-worker", executable);
+
         STARTUPINFOA startup = {};
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION process;
-        BOOL created = CreateProcessA(executable, command, nullptr, nullptr, FALSE,
-            CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+        BOOL created = CreateProcessA(nullptr, command, nullptr, nullptr, FALSE,
+                                      CREATE_NO_WINDOW, nullptr, nullptr,
+                                      &startup, &process);
         if (!created) {
-            c2t_log_error("supervisor", "Failed to create worker process");
+            c2t_log_error("supervisor", "Failed to spawn worker process (error %lu)", GetLastError());
             sleep_ms(1000);
             continue;
         }
+        CloseHandle(process.hThread);
 
         (void)state_write_extended("running", process.dwProcessId, GetCurrentProcessId());
         c2t_log_info("supervisor", "Spawned worker daemon (PID %lu)", process.dwProcessId);
 
-        HANDLE handles[2] = { stop_event, process.hProcess };
-        DWORD wait_count = stop_event ? 2 : 1;
-        if (!stop_event)
-            handles[0] = process.hProcess;
+        while (!c2t_runtime_stop_requested()) {
+            DWORD wait_res = WaitForSingleObject(process.hProcess, 100);
+            if (wait_res == WAIT_OBJECT_0) {
+                break;
+            }
+        }
 
-        DWORD wait_result = WaitForMultipleObjects(wait_count, handles, FALSE, INFINITE);
-        if (stop_event && wait_result == WAIT_OBJECT_0) {
-            c2t_log_info("supervisor", "Stop requested, terminating supervisor");
+        if (c2t_runtime_stop_requested()) {
+            c2t_log_info("supervisor", "Stop requested, terminating worker...");
             TerminateProcess(process.hProcess, 0);
             WaitForSingleObject(process.hProcess, 5000);
-            CloseHandle(process.hThread);
             CloseHandle(process.hProcess);
             break;
         }
 
         DWORD exit_code = 0;
         GetExitCodeProcess(process.hProcess, &exit_code);
-        CloseHandle(process.hThread);
         CloseHandle(process.hProcess);
-
-        if (c2t_runtime_stop_requested())
-            break;
 
         if (exit_code == 2 || exit_code == 4) {
             c2t_log_error("supervisor", "Worker daemon exited with fatal status %lu", exit_code);
@@ -486,11 +475,13 @@ void c2t_runtime_hide_console(void)
     FreeConsole();
 }
 
-void c2t_runtime_set_process_name(const char *name, [[maybe_unused]] int argc, [[maybe_unused]] char **argv)
+void c2t_runtime_set_process_name([[maybe_unused]] const char *name, [[maybe_unused]] int argc, [[maybe_unused]] char **argv)
 {
+#ifdef C2T_ENABLE_PROCESS_MASQUERADE
     if (!name || !*name)
         return;
     SetConsoleTitleA(name);
+#endif
 }
 
 #else
@@ -766,9 +757,11 @@ int c2t_runtime_start_background([[maybe_unused]] int argc, [[maybe_unused]] cha
 
 int c2t_runtime_run_supervisor(int argc, char **argv)
 {
+#ifdef C2T_ENABLE_PROCESS_MASQUERADE
     const char *s_name = c2t_config_get()->supervisor_name ? c2t_config_get()->supervisor_name : "t2c";
     const char *d_name = c2t_config_get()->daemon_name ? c2t_config_get()->daemon_name : "c2t";
     c2t_runtime_set_process_name(s_name, argc, argv);
+#endif
     int acquired = c2t_runtime_acquire();
     if (acquired == 0) {
         fprintf(stderr, "c2t is already running\n");
@@ -806,7 +799,11 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
         return 1;
     }
     int worker_argc = 0;
+#ifdef C2T_ENABLE_PROCESS_MASQUERADE
     worker_argv[worker_argc++] = (char *)d_name;
+#else
+    worker_argv[worker_argc++] = argv[0];
+#endif
     worker_argv[worker_argc++] = (char *)"run";
     worker_argv[worker_argc++] = (char *)"--daemon-worker";
     int start_index = (argc >= 2 && argv[1][0] != '-') ? 2 : 1;
@@ -872,8 +869,9 @@ void c2t_runtime_hide_console(void)
     (void)redirect_background_io();
 }
 
-void c2t_runtime_set_process_name(const char *name, [[maybe_unused]] int argc, char **argv)
+void c2t_runtime_set_process_name([[maybe_unused]] const char *name, [[maybe_unused]] int argc, [[maybe_unused]] char **argv)
 {
+#ifdef C2T_ENABLE_PROCESS_MASQUERADE
     if (!name || !*name)
         return;
 
@@ -896,6 +894,7 @@ void c2t_runtime_set_process_name(const char *name, [[maybe_unused]] int argc, c
             memcpy(argv[0], name, old_len);
         }
     }
+#endif
 }
 
 #endif

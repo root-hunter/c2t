@@ -9,3 +9,4 @@ __pycache__/
 /.cache
 /build_win
 /build-release
+/build-masq
