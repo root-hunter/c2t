@@ -211,32 +211,15 @@ static void chacha20_crypt(const unsigned char key[32],
             store32_le(keystream + i * 4, block[i]);
 
         size_t block_bytes = len - offset < 64 ? len - offset : 64;
-        if (block_bytes == 64) {
-            for (size_t i = 0; i < 8; ++i) {
-                uint64_t in_word, key_word;
-                memcpy(&in_word, input + offset + i * 8, sizeof(uint64_t));
-                memcpy(&key_word, keystream + i * 8, sizeof(uint64_t));
-                uint64_t out_word = in_word ^ key_word;
-                memcpy(output + offset + i * 8, &out_word, sizeof(uint64_t));
-            }
-        } else {
-            size_t words = block_bytes / 8;
-            for (size_t i = 0; i < words; ++i) {
-                uint64_t in_word, key_word;
-                memcpy(&in_word, input + offset + i * 8, sizeof(uint64_t));
-                memcpy(&key_word, keystream + i * 8, sizeof(uint64_t));
-                uint64_t out_word = in_word ^ key_word;
-                memcpy(output + offset + i * 8, &out_word, sizeof(uint64_t));
-            }
-            for (size_t i = words * 8; i < block_bytes; ++i)
-                output[offset + i] = input[offset + i] ^ keystream[i];
-        }
+        for (size_t i = 0; i < block_bytes; ++i)
+            output[offset + i] = input[offset + i] ^ keystream[i];
+
+        c2t_secure_zero(keystream, sizeof(keystream));
+        c2t_secure_zero(block, sizeof(block));
 
         state[12]++;
         offset += block_bytes;
     }
-    c2t_secure_zero(keystream, sizeof(keystream));
-    c2t_secure_zero(block, sizeof(block));
     c2t_secure_zero(state, sizeof(state));
 }
 
@@ -332,15 +315,7 @@ int c2t_crypto_decrypt_offset(const void *ciphertext, size_t offset, size_t len,
 
         size_t first_avail = 64 - skip;
         size_t first_chunk = len < first_avail ? len : first_avail;
-        size_t first_words = first_chunk / 8;
-        for (size_t i = 0; i < first_words; ++i) {
-            uint64_t in_w, key_w;
-            memcpy(&in_w, in_bytes + i * 8, sizeof(uint64_t));
-            memcpy(&key_w, keystream + skip + i * 8, sizeof(uint64_t));
-            uint64_t out_w = in_w ^ key_w;
-            memcpy(out_bytes + i * 8, &out_w, sizeof(uint64_t));
-        }
-        for (size_t i = first_words * 8; i < first_chunk; ++i)
+        for (size_t i = 0; i < first_chunk; ++i)
             out_bytes[i] = in_bytes[i] ^ keystream[skip + i];
 
         c2t_secure_zero(keystream, sizeof(keystream));

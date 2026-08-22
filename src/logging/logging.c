@@ -123,14 +123,10 @@ static void write_log(const char *level, const char *component,
                 src += (to_write - MEMORY_LOG_MAX_BYTES);
                 to_write = MEMORY_LOG_MAX_BYTES;
             }
-            size_t first_chunk = (MEMORY_LOG_MAX_BYTES - ring_head < to_write)
-                ? (MEMORY_LOG_MAX_BYTES - ring_head) : to_write;
-            memcpy(memory_log_buf + ring_head, src, first_chunk);
-            if (to_write > first_chunk) {
-                memcpy(memory_log_buf, src + first_chunk, to_write - first_chunk);
+            for (size_t i = 0; i < to_write; ++i) {
+                memory_log_buf[ring_head] = src[i];
+                ring_head = (ring_head + 1) % MEMORY_LOG_MAX_BYTES;
             }
-            ring_head = (ring_head + to_write) % MEMORY_LOG_MAX_BYTES;
-
             ring_total += to_write;
             if (ring_total > MEMORY_LOG_MAX_BYTES)
                 ring_total = MEMORY_LOG_MAX_BYTES;
@@ -155,11 +151,8 @@ char *c2t_log_get_unread(size_t *out_length)
     char *copy = malloc(unread + 1);
     if (copy) {
         size_t start = (ring_head + MEMORY_LOG_MAX_BYTES - unread) % MEMORY_LOG_MAX_BYTES;
-        size_t first_chunk = (MEMORY_LOG_MAX_BYTES - start < unread)
-            ? (MEMORY_LOG_MAX_BYTES - start) : unread;
-        memcpy(copy, memory_log_buf + start, first_chunk);
-        if (unread > first_chunk) {
-            memcpy(copy + first_chunk, memory_log_buf, unread - first_chunk);
+        for (size_t i = 0; i < unread; ++i) {
+            copy[i] = memory_log_buf[(start + i) % MEMORY_LOG_MAX_BYTES];
         }
         copy[unread] = '\0';
     }
