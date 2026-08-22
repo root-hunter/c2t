@@ -345,37 +345,45 @@ export function patchBinary(input, config, options = {}) {
   const binary = input instanceof Uint8Array ? input : new Uint8Array(input);
   rejectSignedMachO(binary);
   const offset = locateRegion(binary);
+  const sourceView = new DataView(binary.buffer, binary.byteOffset, binary.byteLength);
+  const inputVersion = sourceView.getUint32(offset + 16, true);
+  const targetVersion = inputVersion === 1 ? 1 : VERSION;
+
   const effectiveConfig = { ...config };
   if (options.randomize !== false && !effectiveConfig.C2T_NONCE && !effectiveConfig.C2T_BUILD_ID) {
     effectiveConfig.C2T_NONCE = generateRandomNonce(32);
   }
   const plaintext = encodePayload(effectiveConfig);
-  let encryptedPayload;
+  let finalPayload;
   if (plaintext.length > 0) {
-    const nonce = new Uint8Array(12);
-    if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
-      crypto.getRandomValues(nonce);
-    } else {
-      for (let i = 0; i < 12; i += 1) {
-        nonce[i] = Math.floor(Math.random() * 256);
+    if (targetVersion === 2) {
+      const nonce = new Uint8Array(12);
+      if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+        crypto.getRandomValues(nonce);
+      } else {
+        for (let i = 0; i < 12; i += 1) {
+          nonce[i] = Math.floor(Math.random() * 256);
+        }
       }
+      const ciphertext = chacha20Crypt(EMBEDDED_KEY, nonce, 0, plaintext);
+      finalPayload = new Uint8Array(12 + ciphertext.length);
+      finalPayload.set(nonce, 0);
+      finalPayload.set(ciphertext, 12);
+    } else {
+      finalPayload = plaintext;
     }
-    const ciphertext = chacha20Crypt(EMBEDDED_KEY, nonce, 0, plaintext);
-    encryptedPayload = new Uint8Array(12 + ciphertext.length);
-    encryptedPayload.set(nonce, 0);
-    encryptedPayload.set(ciphertext, 12);
   } else {
-    encryptedPayload = new Uint8Array(0);
+    finalPayload = new Uint8Array(0);
   }
 
   const result = new Uint8Array(binary);
   result.fill(0, offset, offset + REGION_SIZE);
   result.set(MAGIC, offset);
   const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
-  writeUint32(view, offset + 16, VERSION);
-  writeUint32(view, offset + 20, encryptedPayload.length);
-  writeUint32(view, offset + 24, crc32(encryptedPayload));
-  result.set(encryptedPayload, offset + HEADER_SIZE);
+  writeUint32(view, offset + 16, targetVersion);
+  writeUint32(view, offset + 20, finalPayload.length);
+  writeUint32(view, offset + 24, crc32(finalPayload));
+  result.set(finalPayload, offset + HEADER_SIZE);
 
   const checksumOffset = peChecksumOffset(result);
   if (checksumOffset !== null) {

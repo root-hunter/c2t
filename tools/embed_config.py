@@ -269,16 +269,21 @@ def decode_payload(binary: bytes, offset: int) -> dict[str, str]:
 
 def patched_binary(binary: bytes, offset: int, payload: bytes) -> bytes:
     reject_signed_macho(binary)
+    input_version = struct.unpack_from("<I", binary, offset + 16)[0]
+    target_version = 1 if input_version == 1 else VERSION
     region = bytearray(REGION_SIZE)
     region[: len(MAGIC)] = MAGIC
     if payload:
-        nonce = secrets.token_bytes(12)
-        ciphertext = chacha20_crypt(EMBEDDED_KEY, nonce, 0, payload)
-        encrypted_payload = nonce + ciphertext
+        if target_version == 2:
+            nonce = secrets.token_bytes(12)
+            ciphertext = chacha20_crypt(EMBEDDED_KEY, nonce, 0, payload)
+            final_payload = nonce + ciphertext
+        else:
+            final_payload = payload
     else:
-        encrypted_payload = b""
-    struct.pack_into("<III", region, 16, VERSION, len(encrypted_payload), binascii.crc32(encrypted_payload))
-    region[HEADER_SIZE : HEADER_SIZE + len(encrypted_payload)] = encrypted_payload
+        final_payload = b""
+    struct.pack_into("<III", region, 16, target_version, len(final_payload), binascii.crc32(final_payload))
+    region[HEADER_SIZE : HEADER_SIZE + len(final_payload)] = final_payload
     result = bytearray(binary[:offset] + region + binary[offset + REGION_SIZE :])
     checksum_offset = pe_checksum_offset(result)
     if checksum_offset is not None:
