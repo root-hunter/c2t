@@ -92,7 +92,7 @@ endif()
 
 if(WIN32)
     target_sources(c2t PRIVATE src/clipboard/clipboard_windows.c src/telegram/telegram_windows.c)
-    target_link_libraries(c2t PRIVATE user32 winhttp)
+    target_link_libraries(c2t PRIVATE user32 winhttp bcrypt)
 
     if(MINGW)
         target_link_options(c2t PRIVATE -static -static-libgcc)
