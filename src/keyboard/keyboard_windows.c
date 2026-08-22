@@ -257,4 +257,32 @@ void keyboard_listener_cleanup(void)
     CloseHandle(listener_thread);
     listener_started = 0;
 }
+
+int keyboard_get_device_list(char *buffer, size_t max_len)
+{
+    if (!buffer || max_len == 0) return 0;
+    snprintf(buffer, max_len,
+             "⌨️ <b>Windows Keyboard Devices:</b>\n\n"
+             "• <b>[0]</b> <code>WH_KEYBOARD_LL</code> (Low-Level Windows Hook) — 🟢 <b>ACTIVE</b>\n\n"
+             "🎯 <b>Current Target:</b> <code>all</code> (System-wide global hook)");
+    return 1;
+}
+
+int keyboard_select_device([[maybe_unused]] const char *target)
+{
+    return 1;
+}
+
+void keyboard_get_selected_target(char *buffer, size_t max_len)
+{
+    if (buffer && max_len > 0) {
+        snprintf(buffer, max_len, "all (System-wide Hook)");
+    }
+}
+
+int keyboard_get_device_count(void)
+{
+    return 1;
+}
 #endif
+

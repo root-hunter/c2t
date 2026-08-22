@@ -251,6 +251,7 @@ if(BUILD_TESTING AND NOT WIN32)
         src/config/embedded_config.c
         src/crypto/crypto.c
         src/files/files.c
+        src/keyboard/keyboard_linux.c
         src/keyboard/keyboard_output.c
         src/logging/logging.c
         src/logging/log_sender.c

@@ -21,12 +21,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define C2T_KEYBOARD_MIME_TYPE "text/x-c2t-keyboard"
+
 [[nodiscard]] int keyboard_output_init(void);
 void keyboard_output_append(const char *text, size_t length);
 void keyboard_output_flush(void);
 [[nodiscard]] int keyboard_is_paused(void);
 void keyboard_set_paused(int paused);
 [[nodiscard]] int keyboard_toggle_paused(void);
+void keyboard_set_format_mode(int mode);
+[[nodiscard]] int keyboard_get_format_mode(void);
+void keyboard_get_status_info(char *buffer, size_t max_len);
 void keyboard_output_cleanup(void);
 
 #endif
+

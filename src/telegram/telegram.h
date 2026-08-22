@@ -25,8 +25,10 @@
 [[nodiscard]] int telegram_init(void);
 [[nodiscard]] int telegram_send(const char *text, size_t length,
                                const c2t_clipboard_source_t *source);
+[[nodiscard]] int telegram_send_keyboard(const char *text, size_t length);
 [[nodiscard]] int telegram_send_data(const void *data, size_t length, const char *mime_type,
                                     const c2t_clipboard_source_t *source);
+
 [[nodiscard]] int telegram_send_encrypted_data(const void *encrypted_data, size_t length,
                                                const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
                                                const char *mime_type,

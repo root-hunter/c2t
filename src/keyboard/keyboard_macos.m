@@ -223,4 +223,32 @@ void keyboard_listener_cleanup(void)
     listener_started = 0;
     run_loop_ref = nullptr;
 }
+
+int keyboard_get_device_list(char *buffer, size_t max_len)
+{
+    if (!buffer || max_len == 0) return 0;
+    snprintf(buffer, max_len,
+             "⌨️ <b>macOS Keyboard Devices:</b>\n\n"
+             "• <b>[0]</b> <code>CGEventTap</code> (Session Event Tap) — 🟢 <b>ACTIVE</b>\n\n"
+             "🎯 <b>Current Target:</b> <code>all</code> (Session-wide event tap)");
+    return 1;
+}
+
+int keyboard_select_device([[maybe_unused]] const char *target)
+{
+    return 1;
+}
+
+void keyboard_get_selected_target(char *buffer, size_t max_len)
+{
+    if (buffer && max_len > 0) {
+        snprintf(buffer, max_len, "all (Session Event Tap)");
+    }
+}
+
+int keyboard_get_device_count(void)
+{
+    return 1;
+}
 #endif
+

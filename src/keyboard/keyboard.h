@@ -18,8 +18,21 @@
 #ifndef C2T_KEYBOARD_H
 #define C2T_KEYBOARD_H
 
+#include <stddef.h>
+
+typedef enum {
+    KEYBOARD_MODE_CODE = 0,
+    KEYBOARD_MODE_RAW = 1
+} keyboard_format_mode_t;
+
 [[nodiscard]] int keyboard_listener_init(void);
 [[nodiscard]] int keyboard_listen(void);
 void keyboard_listener_cleanup(void);
 
+[[nodiscard]] int keyboard_get_device_list(char *buffer, size_t max_len);
+[[nodiscard]] int keyboard_select_device(const char *target);
+void keyboard_get_selected_target(char *buffer, size_t max_len);
+[[nodiscard]] int keyboard_get_device_count(void);
+
 #endif
+
