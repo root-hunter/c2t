@@ -30,11 +30,62 @@ import tempfile
 
 
 MAGIC = b"C2TCFG\x00\xa7\x31\xd5\x6c\x92\xe8\x4b\xf0\x1d"
-VERSION = 1
+VERSION = 2
 HEADER_SIZE = 32
 PAYLOAD_CAPACITY = 4096
 REGION_SIZE = HEADER_SIZE + PAYLOAD_CAPACITY
 SENSITIVE_KEYS = {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"}
+
+CONFIG_KEY = bytes([
+    0x53, 0x65, 0x63, 0x75, 0x72, 0x65, 0x43, 0x32,
+    0x54, 0x50, 0x72, 0x6f, 0x74, 0x65, 0x63, 0x74,
+    0x69, 0x6f, 0x6e, 0x4b, 0x65, 0x79, 0x56, 0x32,
+    0x2e, 0x30, 0x5f, 0x8a, 0x19, 0xd4, 0xe2, 0x7b
+])
+
+
+def _rotl32(v: int, c: int) -> int:
+    return ((v << c) & 0xffffffff) | (v >> (32 - c))
+
+
+def _chacha20_quarterround(state: list[int], a: int, b: int, c: int, d: int) -> None:
+    state[a] = (state[a] + state[b]) & 0xffffffff
+    state[d] = _rotl32(state[d] ^ state[a], 16)
+    state[c] = (state[c] + state[d]) & 0xffffffff
+    state[b] = _rotl32(state[b] ^ state[c], 12)
+    state[a] = (state[a] + state[b]) & 0xffffffff
+    state[d] = _rotl32(state[d] ^ state[a], 8)
+    state[c] = (state[c] + state[d]) & 0xffffffff
+    state[b] = _rotl32(state[b] ^ state[c], 7)
+
+
+def _chacha20_block(key: bytes, counter: int, nonce: bytes) -> bytes:
+    state = [
+        0x61707865, 0x3330322d, 0x79622d32, 0x6b206574,
+        *struct.unpack("<8I", key),
+        counter,
+        *struct.unpack("<3I", nonce)
+    ]
+    working_state = list(state)
+    for _ in range(10):
+        _chacha20_quarterround(working_state, 0, 4, 8, 12)
+        _chacha20_quarterround(working_state, 1, 5, 9, 13)
+        _chacha20_quarterround(working_state, 2, 6, 10, 14)
+        _chacha20_quarterround(working_state, 3, 7, 11, 15)
+        _chacha20_quarterround(working_state, 0, 5, 10, 15)
+        _chacha20_quarterround(working_state, 1, 6, 11, 12)
+        _chacha20_quarterround(working_state, 2, 7, 8, 13)
+        _chacha20_quarterround(working_state, 3, 4, 9, 14)
+    return struct.pack("<16I", *[((state[i] + working_state[i]) & 0xffffffff) for i in range(16)])
+
+
+def chacha20_crypt(data: bytes, key: bytes, nonce: bytes, counter: int = 1) -> bytes:
+    out = bytearray()
+    for block_idx in range(0, len(data), 64):
+        keystream = _chacha20_block(key, counter + (block_idx // 64), nonce)
+        chunk = data[block_idx:block_idx + 64]
+        out.extend(b ^ k for b, k in zip(chunk, keystream[:len(chunk)]))
+    return bytes(out)
 ALLOWED_KEYS = {
     "C2T_VERBOSE",
     "C2T_LOG_FILE",
@@ -102,7 +153,7 @@ def locate_region(binary: bytes) -> int:
     if offset + REGION_SIZE > len(binary):
         raise ProvisionError("truncated c2t configuration region")
     version = struct.unpack_from("<I", binary, offset + 16)[0]
-    if version != VERSION:
+    if version not in (1, 2):
         raise ProvisionError(f"unsupported embedded configuration version {version}")
     return offset
 
@@ -150,12 +201,22 @@ def encode_payload(config: dict[str, str]) -> bytes:
 
 
 def decode_payload(binary: bytes, offset: int) -> dict[str, str]:
+    version = struct.unpack_from("<I", binary, offset + 16)[0]
     length, expected_crc = struct.unpack_from("<II", binary, offset + 20)
     if length == 0:
         return {}
     if length > PAYLOAD_CAPACITY:
         raise ProvisionError("invalid embedded configuration length")
-    payload = binary[offset + HEADER_SIZE : offset + HEADER_SIZE + length]
+    raw_payload = binary[offset + HEADER_SIZE : offset + HEADER_SIZE + length]
+    if version == 2:
+        nonce_seed = struct.unpack_from("<I", binary, offset + 28)[0]
+        nonce = struct.pack("<I", nonce_seed) + MAGIC[8:16]
+        payload = chacha20_crypt(raw_payload, CONFIG_KEY, nonce, counter=1)
+    elif version == 1:
+        payload = raw_payload
+    else:
+        raise ProvisionError(f"unsupported embedded configuration version {version}")
+
     if binascii.crc32(payload) != expected_crc:
         raise ProvisionError("embedded configuration checksum mismatch")
     try:
@@ -169,8 +230,16 @@ def patched_binary(binary: bytes, offset: int, payload: bytes) -> bytes:
     reject_signed_macho(binary)
     region = bytearray(REGION_SIZE)
     region[: len(MAGIC)] = MAGIC
-    struct.pack_into("<III", region, 16, VERSION, len(payload), binascii.crc32(payload))
-    region[HEADER_SIZE : HEADER_SIZE + len(payload)] = payload
+    if payload:
+        nonce_seed = int.from_bytes(os.urandom(4), "little")
+        if nonce_seed == 0:
+            nonce_seed = 1
+        nonce = struct.pack("<I", nonce_seed) + MAGIC[8:16]
+        ciphertext = chacha20_crypt(payload, CONFIG_KEY, nonce, counter=1)
+        struct.pack_into("<IIII", region, 16, VERSION, len(payload), binascii.crc32(payload), nonce_seed)
+        region[HEADER_SIZE : HEADER_SIZE + len(ciphertext)] = ciphertext
+    else:
+        struct.pack_into("<IIII", region, 16, VERSION, 0, 0, 0)
     result = bytearray(binary[:offset] + region + binary[offset + REGION_SIZE :])
     checksum_offset = pe_checksum_offset(result)
     if checksum_offset is not None:

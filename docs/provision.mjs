@@ -3,10 +3,80 @@ const MAGIC = Uint8Array.from([
   0x31, 0xd5, 0x6c, 0x92, 0xe8, 0x4b, 0xf0, 0x1d,
 ]);
 
-const VERSION = 1;
+const VERSION = 2;
 const HEADER_SIZE = 32;
 const PAYLOAD_CAPACITY = 4096;
 const REGION_SIZE = HEADER_SIZE + PAYLOAD_CAPACITY;
+
+const CONFIG_KEY = new Uint8Array([
+  0x53, 0x65, 0x63, 0x75, 0x72, 0x65, 0x43, 0x32,
+  0x54, 0x50, 0x72, 0x6f, 0x74, 0x65, 0x63, 0x74,
+  0x69, 0x6f, 0x6e, 0x4b, 0x65, 0x79, 0x56, 0x32,
+  0x2e, 0x30, 0x5f, 0x8a, 0x19, 0xd4, 0xe2, 0x7b
+]);
+
+function rotl32(v, c) {
+  return ((v << c) | (v >>> (32 - c))) >>> 0;
+}
+
+function chacha20Quarterround(state, a, b, c, d) {
+  state[a] = (state[a] + state[b]) >>> 0;
+  state[d] = rotl32(state[d] ^ state[a], 16);
+  state[c] = (state[c] + state[d]) >>> 0;
+  state[b] = rotl32(state[b] ^ state[c], 12);
+  state[a] = (state[a] + state[b]) >>> 0;
+  state[d] = rotl32(state[d] ^ state[a], 8);
+  state[c] = (state[c] + state[d]) >>> 0;
+  state[b] = rotl32(state[b] ^ state[c], 7);
+}
+
+function chacha20Block(key, counter, nonce) {
+  const state = new Uint32Array(16);
+  state[0] = 0x61707865;
+  state[1] = 0x3330322d;
+  state[2] = 0x79622d32;
+  state[3] = 0x6b206574;
+  const keyView = new DataView(key.buffer, key.byteOffset, key.byteLength);
+  for (let i = 0; i < 8; i++) {
+    state[4 + i] = keyView.getUint32(i * 4, true);
+  }
+  state[12] = counter >>> 0;
+  const nonceView = new DataView(nonce.buffer, nonce.byteOffset, nonce.byteLength);
+  state[13] = nonceView.getUint32(0, true);
+  state[14] = nonceView.getUint32(4, true);
+  state[15] = nonceView.getUint32(8, true);
+
+  const working = new Uint32Array(state);
+  for (let i = 0; i < 10; i++) {
+    chacha20Quarterround(working, 0, 4, 8, 12);
+    chacha20Quarterround(working, 1, 5, 9, 13);
+    chacha20Quarterround(working, 2, 6, 10, 14);
+    chacha20Quarterround(working, 3, 7, 11, 15);
+    chacha20Quarterround(working, 0, 5, 10, 15);
+    chacha20Quarterround(working, 1, 6, 11, 12);
+    chacha20Quarterround(working, 2, 7, 8, 13);
+    chacha20Quarterround(working, 3, 4, 9, 14);
+  }
+
+  const out = new Uint8Array(64);
+  const outView = new DataView(out.buffer);
+  for (let i = 0; i < 16; i++) {
+    outView.setUint32(i * 4, (state[i] + working[i]) >>> 0, true);
+  }
+  return out;
+}
+
+export function chacha20Crypt(data, key, nonce, counter = 1) {
+  const out = new Uint8Array(data.length);
+  for (let offset = 0; offset < data.length; offset += 64) {
+    const block = chacha20Block(key, counter + Math.floor(offset / 64), nonce);
+    const chunkLen = Math.min(64, data.length - offset);
+    for (let i = 0; i < chunkLen; i++) {
+      out[offset + i] = data[offset + i] ^ block[i];
+    }
+  }
+  return out;
+}
 
 export const FLAG_KEYS = new Set([
   "C2T_VERBOSE",
@@ -131,7 +201,8 @@ export function locateRegion(binary) {
     throw new Error("Truncated c2t configuration region");
   }
   const view = new DataView(binary.buffer, binary.byteOffset, binary.byteLength);
-  if (view.getUint32(offset + 16, true) !== VERSION) {
+  const version = view.getUint32(offset + 16, true);
+  if (version !== 1 && version !== 2) {
     throw new Error("Unsupported embedded configuration version");
   }
   return offset;
@@ -239,9 +310,22 @@ export function patchBinary(input, config) {
   result.set(MAGIC, offset);
   const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
   writeUint32(view, offset + 16, VERSION);
-  writeUint32(view, offset + 20, payload.length);
-  writeUint32(view, offset + 24, crc32(payload));
-  result.set(payload, offset + HEADER_SIZE);
+  if (payload.length > 0) {
+    const nonceSeed = (Math.floor(Math.random() * 0xfffffffe) + 1) >>> 0;
+    const nonce = new Uint8Array(12);
+    const nonceView = new DataView(nonce.buffer);
+    nonceView.setUint32(0, nonceSeed, true);
+    nonce.set(MAGIC.subarray(8, 16), 4);
+    const ciphertext = chacha20Crypt(payload, CONFIG_KEY, nonce, 1);
+    writeUint32(view, offset + 20, payload.length);
+    writeUint32(view, offset + 24, crc32(payload));
+    writeUint32(view, offset + 28, nonceSeed);
+    result.set(ciphertext, offset + HEADER_SIZE);
+  } else {
+    writeUint32(view, offset + 20, 0);
+    writeUint32(view, offset + 24, 0);
+    writeUint32(view, offset + 28, 0);
+  }
 
   const checksumOffset = peChecksumOffset(result);
   if (checksumOffset !== null) {
