@@ -388,7 +388,7 @@ int c2t_runtime_start_background([[maybe_unused]] int argc, [[maybe_unused]] cha
     int result = C2T_BACKGROUND_ERROR;
     while (elapsed < timeout_ms) {
         int state = c2t_runtime_get_status(&status);
-        if (state > 0 && (status.state == C2T_RUNTIME_RUNNING || status.state == C2T_RUNTIME_STARTING)) {
+        if (state > 0 && status.state == C2T_RUNTIME_RUNNING) {
             result = C2T_BACKGROUND_PARENT;
             break;
         }
@@ -794,7 +794,7 @@ int c2t_runtime_start_background([[maybe_unused]] int argc, [[maybe_unused]] cha
     unsigned int elapsed = 0;
     while (elapsed < timeout_ms) {
         int state = c2t_runtime_get_status(&status);
-        if (state > 0 && (status.state == C2T_RUNTIME_RUNNING || status.state == C2T_RUNTIME_STARTING))
+        if (state > 0 && status.state == C2T_RUNTIME_RUNNING)
             return C2T_BACKGROUND_PARENT;
         sleep_ms(100);
         elapsed += 100;
