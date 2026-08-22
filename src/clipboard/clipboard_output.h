@@ -27,6 +27,8 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
 [[nodiscard]] int clipboard_is_paused(void);
 void clipboard_set_paused(int paused);
 [[nodiscard]] int clipboard_toggle_paused(void);
+void clipboard_output_flush(void);
+void clipboard_get_status_info(char *buffer, size_t max_len);
 void clipboard_output_cleanup(void);
 
 #endif

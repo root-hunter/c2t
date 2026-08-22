@@ -197,6 +197,15 @@ void c2t_config_load([[maybe_unused]] const char *executable_path)
         config.disable_keyboard = configured_flag("C2T_DISABLE_KEYBOARD") ||
                                   configured_flag("DISABLE_KEYBOARD");
     }
+    char embedded_send_clip[16] = {};
+    const char *send_clip_val = configured_value(
+        "TELEGRAM_SEND_CLIPBOARD", embedded_send_clip, sizeof(embedded_send_clip));
+    if (send_clip_val) {
+        config.disable_clipboard = strcmp(send_clip_val, "0") == 0;
+    } else {
+        config.disable_clipboard = configured_flag("C2T_DISABLE_CLIPBOARD") ||
+                                   configured_flag("DISABLE_CLIPBOARD");
+    }
     config.keyboard_flush_ms = configured_size(
         "C2T_KEYBOARD_FLUSH_MS", C2T_DEFAULT_KEYBOARD_FLUSH_MS);
     if (config.keyboard_flush_ms < C2T_MIN_KEYBOARD_FLUSH_MS)
@@ -265,6 +274,12 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
         } else if (strcmp(argv[index], "--send-keyboard") == 0 ||
                    strcmp(argv[index], "--enable-keyboard") == 0) {
             config.disable_keyboard = 0;
+        } else if (strcmp(argv[index], "--no-clipboard") == 0 ||
+                   strcmp(argv[index], "--disable-clipboard") == 0) {
+            config.disable_clipboard = 1;
+        } else if (strcmp(argv[index], "--send-clipboard") == 0 ||
+                   strcmp(argv[index], "--enable-clipboard") == 0) {
+            config.disable_clipboard = 0;
         } else if (strcmp(argv[index], "--proxy") == 0 ||
                    strcmp(argv[index], "--proxy-url") == 0) {
             if (index + 1 >= argc)

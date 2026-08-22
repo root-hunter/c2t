@@ -858,6 +858,20 @@ int main(void)
         return fail("encrypted stream content mismatch");
     }
 
+    /* Clipboard status & flush unit tests */
+    char clip_stat_buf[1024] = {};
+    clipboard_get_status_info(clip_stat_buf, sizeof(clip_stat_buf));
+    if (strstr(clip_stat_buf, "Clipboard Monitor Status") == nullptr ||
+        strstr(clip_stat_buf, "Delivery Queue:") == nullptr)
+        return fail("clipboard_get_status_info format");
+
+    clipboard_output_flush();
+    int initial_pause = clipboard_is_paused();
+    int toggled = clipboard_toggle_paused();
+    if (toggled == initial_pause || clipboard_is_paused() != toggled)
+        return fail("clipboard_toggle_paused");
+    clipboard_set_paused(initial_pause);
+
     c2t_crypto_cleanup();
     return 0;
 }

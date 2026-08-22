@@ -38,6 +38,7 @@ typedef struct {
     size_t delivery_attempts;
     size_t retry_delay_ms;
     int disable_keyboard;
+    int disable_clipboard;
     size_t keyboard_flush_ms;
 #ifdef C2T_ENABLE_PROCESS_MASQUERADE
     const char *daemon_name;
