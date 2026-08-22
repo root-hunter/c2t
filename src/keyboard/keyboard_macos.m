@@ -149,26 +149,18 @@ static void *listener_worker([[maybe_unused]] void *context)
         run_loop_ref = CFRunLoopGetCurrent();
 
         CGEventMask mask = CGEventMaskBit(kCGEventKeyDown);
-        CFMachPortRef event_tap = nullptr;
-
-        while (!stopping && !c2t_runtime_stop_requested()) {
-            event_tap = CGEventTapCreate(
-                kCGSessionEventTap,
-                kCGHeadInsertEventTap,
-                kCGEventTapOptionListenOnly,
-                mask,
-                event_callback,
-                nullptr
-            );
-            if (event_tap)
-                break;
-            c2t_log_warning("keyboard", "Unable to create macOS CGEventTap (check Accessibility permissions); retrying...");
-            for (int i = 0; i < 10 && !stopping && !c2t_runtime_stop_requested(); i++) {
-                usleep(500000);
-            }
-        }
+        CFMachPortRef event_tap = CGEventTapCreate(
+            kCGSessionEventTap,
+            kCGHeadInsertEventTap,
+            kCGEventTapOptionListenOnly,
+            mask,
+            event_callback,
+            nullptr
+        );
 
         if (!event_tap) {
+            c2t_log_warning("keyboard", "Unable to create macOS CGEventTap (check Accessibility permissions)");
+            run_loop_ref = nullptr;
             return nullptr;
         }
 
@@ -181,7 +173,7 @@ static void *listener_worker([[maybe_unused]] void *context)
         c2t_log_info("keyboard", "macOS keyboard event tap active");
 
         while (!stopping && !c2t_runtime_stop_requested()) {
-            SInt32 result = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, true);
+            SInt32 result = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.2, true);
             if (result == kCFRunLoopRunStopped || result == kCFRunLoopRunFinished)
                 break;
         }
@@ -191,6 +183,7 @@ static void *listener_worker([[maybe_unused]] void *context)
         CFRelease(run_loop_source);
         CFRelease(event_tap);
         global_event_tap = nullptr;
+        run_loop_ref = nullptr;
 
         keyboard_output_flush();
     }
@@ -228,5 +221,6 @@ void keyboard_listener_cleanup(void)
     }
     (void)pthread_join(listener_thread, nullptr);
     listener_started = 0;
+    run_loop_ref = nullptr;
 }
 #endif
