@@ -48,11 +48,11 @@ static void telegram_lock(void)
 static void telegram_unlock(void) { LeaveCriticalSection(&telegram_mutex); }
 #endif
 
-constexpr size_t TELEGRAM_MAX_CHARACTERS = 4096;
-constexpr size_t TELEGRAM_MAX_CAPTION_BYTES = 1023;
-constexpr size_t TELEGRAM_DEDUP_TABLE_SIZE = 2048;
-constexpr size_t TELEGRAM_DEDUP_TABLE_MASK = (TELEGRAM_DEDUP_TABLE_SIZE - 1);
-constexpr size_t TELEGRAM_DEDUPLICATION_CAPACITY = 1024;
+#define TELEGRAM_MAX_CHARACTERS 4096U
+#define TELEGRAM_MAX_CAPTION_BYTES 1023U
+#define TELEGRAM_DEDUP_TABLE_SIZE 2048U
+#define TELEGRAM_DEDUP_TABLE_MASK (TELEGRAM_DEDUP_TABLE_SIZE - 1U)
+#define TELEGRAM_DEDUPLICATION_CAPACITY 1024U
 
 static const char *bot_token;
 static const char *chat_id;

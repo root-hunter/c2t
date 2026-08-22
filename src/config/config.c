@@ -29,23 +29,23 @@
 #include <stdio.h>
 #endif
 
-constexpr size_t TELEGRAM_DEFAULT_MAX_FILE_BYTES = 50U * 1024U * 1024U;
-constexpr size_t TELEGRAM_DEFAULT_LOG_INTERVAL_SEC = 3600U;
-constexpr size_t TELEGRAM_MIN_LOG_INTERVAL_SEC = 5U;
-constexpr size_t TELEGRAM_MAX_LOG_INTERVAL_SEC = 86400U;
-constexpr size_t C2T_DEFAULT_QUEUE_MAX_BYTES = 64U * 1024U * 1024U;
-constexpr size_t C2T_DEFAULT_QUEUE_MAX_ITEMS = 128U;
-constexpr size_t C2T_DEFAULT_DELIVERY_ATTEMPTS = 3U;
-constexpr size_t C2T_DEFAULT_RETRY_DELAY_MS = 500U;
-constexpr size_t C2T_MAX_DELIVERY_ATTEMPTS = 10U;
-constexpr size_t C2T_MAX_RETRY_DELAY_MS = 60000U;
+#define TELEGRAM_DEFAULT_MAX_FILE_BYTES (50U * 1024U * 1024U)
+#define TELEGRAM_DEFAULT_LOG_INTERVAL_SEC 3600U
+#define TELEGRAM_MIN_LOG_INTERVAL_SEC 5U
+#define TELEGRAM_MAX_LOG_INTERVAL_SEC 86400U
+#define C2T_DEFAULT_QUEUE_MAX_BYTES (64U * 1024U * 1024U)
+#define C2T_DEFAULT_QUEUE_MAX_ITEMS 128U
+#define C2T_DEFAULT_DELIVERY_ATTEMPTS 3U
+#define C2T_DEFAULT_RETRY_DELAY_MS 500U
+#define C2T_MAX_DELIVERY_ATTEMPTS 10U
+#define C2T_MAX_RETRY_DELAY_MS 60000U
 
 static c2t_config_t config;
 static char embedded_bot_token[512];
 static char embedded_chat_id[128];
 
 #ifdef __APPLE__
-constexpr size_t C2T_SIDECAR_CAPACITY = 4096U;
+#define C2T_SIDECAR_CAPACITY 4096U
 static char sidecar[C2T_SIDECAR_CAPACITY + 1];
 static size_t sidecar_length;
 

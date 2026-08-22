@@ -38,7 +38,7 @@
 #include <unistd.h>
 #endif
 
-constexpr size_t C2T_PATH_CAPACITY = 4096;
+#define C2T_PATH_CAPACITY 4096U
 
 static char state_path[C2T_PATH_CAPACITY];
 static char lock_path[C2T_PATH_CAPACITY];

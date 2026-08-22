@@ -36,7 +36,7 @@
 #include <windows.h>
 #endif
 
-constexpr size_t MAX_LOG_READ_BYTES = 5U * 1024U * 1024U;
+#define MAX_LOG_READ_BYTES (5U * 1024U * 1024U)
 
 static int worker_started;
 static int stopping;
@@ -82,8 +82,8 @@ static void sender_wait(size_t seconds)
 static void sender_signal(void) { (void)pthread_cond_signal(&sender_condition); }
 #endif
 
-constexpr size_t LOG_TEXT_MAX_THRESHOLD = 8 * 1024;
-constexpr size_t LOG_CHUNK_TARGET_CHARS = 3200;
+#define LOG_TEXT_MAX_THRESHOLD (8U * 1024U)
+#define LOG_CHUNK_TARGET_CHARS 3200U
 
 [[nodiscard]] static int send_log_text_chunks(const char *buffer, size_t length)
 {

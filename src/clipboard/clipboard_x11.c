@@ -33,10 +33,10 @@
 #include <poll.h>
 #include <sys/uio.h>
 
-constexpr uint8_t XFIXES_QUERY_VERSION = 0;
-constexpr uint8_t XFIXES_SELECT_SELECTION_INPUT = 2;
-constexpr uint8_t XFIXES_SELECTION_NOTIFY = 0;
-constexpr uint32_t XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER = 1;
+#define XFIXES_QUERY_VERSION 0
+#define XFIXES_SELECT_SELECTION_INPUT 2
+#define XFIXES_SELECTION_NOTIFY 0
+#define XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER 1
 
 typedef struct {
     uint8_t major_opcode;

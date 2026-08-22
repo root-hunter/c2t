@@ -37,7 +37,7 @@
 #endif
 #endif
 
-constexpr size_t MEMORY_LOG_MAX_BYTES = 256 * 1024;
+#define MEMORY_LOG_MAX_BYTES (256U * 1024U)
 
 static int verbose;
 static FILE *log_file_stream;

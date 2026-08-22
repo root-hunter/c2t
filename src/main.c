@@ -31,8 +31,8 @@
 #include <signal.h>
 #endif
 
-constexpr unsigned int C2T_START_TIMEOUT_MS = 10000U;
-constexpr unsigned int C2T_STOP_TIMEOUT_MS = 15000U;
+#define C2T_START_TIMEOUT_MS 10000U
+#define C2T_STOP_TIMEOUT_MS 15000U
 
 typedef enum {
     COMMAND_RUN,

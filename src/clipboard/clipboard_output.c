@@ -35,8 +35,8 @@
 #include <windows.h>
 #endif
 
-constexpr size_t DUPLICATE_WINDOW_MS = 500;
-constexpr size_t C2T_MIME_CAPACITY = 128;
+#define DUPLICATE_WINDOW_MS 500U
+#define C2T_MIME_CAPACITY 128U
 
 typedef struct clipboard_event {
     struct clipboard_event *next;
@@ -319,7 +319,7 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
         length == last_duplicate_length && now_ms >= last_duplicate_time_ms) {
         if (now_ms - last_duplicate_time_ms < DUPLICATE_WINDOW_MS) {
             c2t_log_debug("clipboard",
-                          "Ignoring repeated platform event within %zu ms",
+                          "Ignoring repeated platform event within %u ms",
                           DUPLICATE_WINDOW_MS);
             return;
         }

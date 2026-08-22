@@ -20,9 +20,9 @@
 #include <stdint.h>
 #include <string.h>
 
-constexpr size_t C2T_EMBEDDED_HEADER_SIZE = 32U;
-constexpr size_t C2T_EMBEDDED_REGION_SIZE =
-    (C2T_EMBEDDED_HEADER_SIZE + C2T_EMBEDDED_PAYLOAD_CAPACITY);
+#define C2T_EMBEDDED_HEADER_SIZE 32U
+#define C2T_EMBEDDED_REGION_SIZE \
+    (C2T_EMBEDDED_HEADER_SIZE + C2T_EMBEDDED_PAYLOAD_CAPACITY)
 
 /*
  * Keep this byte layout stable: tools/embed_config.py patches it after link.

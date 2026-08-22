@@ -36,7 +36,7 @@
 #include <windows.h>
 #endif
 
-constexpr int POLL_TIMEOUT_SECONDS = 15;
+#define POLL_TIMEOUT_SECONDS 15
 
 static int listener_started;
 static volatile int stopping;

@@ -25,7 +25,7 @@
 #include <stdio.h>
 #include <string.h>
 
-constexpr size_t TELEGRAM_RESPONSE_CAPACITY = 1024;
+#define TELEGRAM_RESPONSE_CAPACITY 1024U
 
 static int curl_initialized;
 
