@@ -694,6 +694,21 @@ int main(void)
         return fail("telegram_poll_updates_callback batch processing");
     }
 
+    if (telegram_poll_updates_callback(nullptr, &test_offset, 0, test_callback, nullptr) != -1) {
+        return fail("telegram_poll_updates_callback null token must return -1");
+    }
+
+    /* Test in-memory circular log ring buffer unread extraction */
+    c2t_log_error("test_comp", "Error test message %d", 42);
+    size_t unread_len = 0;
+    char *unread_logs = c2t_log_get_unread(&unread_len);
+    if (!unread_logs || unread_len == 0 || strstr(unread_logs, "Error test message 42") == nullptr) {
+        free(unread_logs);
+        return fail("c2t_log_get_unread circular ring buffer verification");
+    }
+    c2t_log_advance_read_offset(unread_len);
+    free(unread_logs);
+
     telegram_cleanup();
     free(last_body);
 

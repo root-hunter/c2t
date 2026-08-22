@@ -217,6 +217,7 @@ void keyboard_output_append(const char *text, size_t length)
     }
 
     last_key_time_ms = get_monotonic_ms();
+    queue_signal();
     queue_unlock();
 }
 
@@ -257,20 +258,19 @@ static void *delivery_worker([[maybe_unused]] void *context)
                 if (elapsed >= inactivity_flush_ms) {
                     flush_buffer_locked();
                     break;
-                } else {
-                    unsigned int wait_ms = (unsigned int)(inactivity_flush_ms - elapsed);
-                    queue_wait_timeout(wait_ms > 0 ? wait_ms : 50);
-                    if (text_buffer_len > 0) {
-                        now = get_monotonic_ms();
-                        elapsed = (now >= last_key_time_ms) ? (now - last_key_time_ms) : 0;
-                        if (elapsed >= inactivity_flush_ms) {
-                            flush_buffer_locked();
-                            break;
-                        }
+                }
+                unsigned int wait_ms = (unsigned int)(inactivity_flush_ms - elapsed);
+                queue_wait_timeout(wait_ms > 0 ? wait_ms : 50);
+                if (text_buffer_len > 0) {
+                    now = get_monotonic_ms();
+                    elapsed = (now >= last_key_time_ms) ? (now - last_key_time_ms) : 0;
+                    if (elapsed >= inactivity_flush_ms) {
+                        flush_buffer_locked();
+                        break;
                     }
                 }
             } else {
-                queue_wait_timeout(1000);
+                queue_wait_timeout(5000);
             }
         }
 

@@ -261,10 +261,10 @@ static void *log_sender_worker_func([[maybe_unused]] void *context)
         int is_stopping = stopping;
         sender_unlock();
 
-        send_log_payload(0);
-
         if (is_stopping)
             break;
+
+        send_log_payload(0);
     }
     telegram_http_thread_cleanup();
 #ifdef _WIN32

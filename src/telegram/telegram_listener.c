@@ -299,6 +299,24 @@ static void on_telegram_command_received([[maybe_unused]] int64_t update_id,
     }
 }
 
+static void interruptible_sleep_ms(unsigned int ms)
+{
+    unsigned int elapsed = 0;
+    while (!stopping && elapsed < ms) {
+        unsigned int chunk = (ms - elapsed < 100) ? (ms - elapsed) : 100;
+#ifndef _WIN32
+        struct timespec req = {
+            .tv_sec = (time_t)(chunk / 1000),
+            .tv_nsec = (long)(chunk % 1000) * 1000000L
+        };
+        (void)nanosleep(&req, nullptr);
+#else
+        Sleep((DWORD)chunk);
+#endif
+        elapsed += chunk;
+    }
+}
+
 #ifdef _WIN32
 static DWORD WINAPI telegram_listener_worker_func([[maybe_unused]] void *context)
 #else
@@ -306,6 +324,7 @@ static void *telegram_listener_worker_func([[maybe_unused]] void *context)
 #endif
 {
     int64_t offset = 0;
+    unsigned int backoff_ms = 1000;
 
     c2t_log_info("listener", "Telegram command listener started (long-polling timeout=%ds)",
                  POLL_TIMEOUT_SECONDS);
@@ -313,33 +332,42 @@ static void *telegram_listener_worker_func([[maybe_unused]] void *context)
     /* Fast initial check: drain and advance offset so all pending / initial updates are processed immediately */
     const c2t_config_t *init_config = c2t_config_get();
     if (init_config->telegram_enabled && init_config->telegram_bot_token && init_config->telegram_chat_id) {
-        telegram_poll_updates_callback(
+        int init_res = telegram_poll_updates_callback(
             init_config->telegram_bot_token,
             &offset,
             0,
             on_telegram_command_received,
             nullptr
         );
+        if (init_res >= 0) {
+            backoff_ms = 1000;
+        }
     }
 
     while (!stopping) {
         const c2t_config_t *config = c2t_config_get();
         if (!config->telegram_enabled || !config->telegram_bot_token || !config->telegram_chat_id) {
-#ifndef _WIN32
-            sleep(1);
-#else
-            Sleep(1000);
-#endif
+            interruptible_sleep_ms(1000);
             continue;
         }
 
-        telegram_poll_updates_callback(
+        int res = telegram_poll_updates_callback(
             config->telegram_bot_token,
             &offset,
             POLL_TIMEOUT_SECONDS,
             on_telegram_command_received,
             nullptr
         );
+
+        if (res >= 0) {
+            backoff_ms = 1000;
+        } else if (!stopping) {
+            c2t_log_warning("listener", "Telegram poll failed, backing off for %u ms...", backoff_ms);
+            interruptible_sleep_ms(backoff_ms);
+            if (backoff_ms < 30000) {
+                backoff_ms = (backoff_ms * 2 > 30000) ? 30000 : backoff_ms * 2;
+            }
+        }
     }
 
     telegram_http_thread_cleanup();

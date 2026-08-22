@@ -118,8 +118,11 @@ static int is_keyboard(const char *devpath)
     return result;
 }
 
-static void translate_and_emit_key(uint32_t key, int pressed)
+static void translate_and_emit_key(uint32_t key, int ev_value)
 {
+    int pressed = (ev_value != 0);
+    int is_initial_press = (ev_value == 1);
+
     if (key == KEY_LEFTSHIFT || key == KEY_RIGHTSHIFT) {
         shift_active = pressed;
         return;
@@ -136,8 +139,10 @@ static void translate_and_emit_key(uint32_t key, int pressed)
         meta_active = pressed;
         return;
     }
-    if (key == KEY_CAPSLOCK && pressed) {
-        caps_lock_active = !caps_lock_active;
+    if (key == KEY_CAPSLOCK) {
+        if (is_initial_press) {
+            caps_lock_active = !caps_lock_active;
+        }
         return;
     }
 
@@ -597,7 +602,7 @@ int keyboard_listen(void)
                     size_t count = (size_t)bytes / sizeof(struct input_event);
                     for (size_t j = 0; j < count; j++) {
                         if (events[j].type == EV_KEY) {
-                            translate_and_emit_key(events[j].code, events[j].value != 0);
+                            translate_and_emit_key(events[j].code, events[j].value);
                         }
                     }
                 }

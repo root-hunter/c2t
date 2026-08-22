@@ -44,6 +44,12 @@ typedef struct {
     size_t length;
 } response_buffer_t;
 
+typedef struct {
+    char *data;
+    size_t capacity;
+    size_t length;
+} direct_response_buffer_t;
+
 static size_t capture_response(char *data, size_t size, size_t count,
                                void *context)
 {
@@ -56,6 +62,25 @@ static size_t capture_response(char *data, size_t size, size_t count,
     memcpy(response->data + response->length, data, copied);
     response->length += copied;
     response->data[response->length] = '\0';
+    return length;
+}
+
+static size_t capture_direct_response(char *data, size_t size, size_t count,
+                                      void *context)
+{
+    if (count && size > SIZE_MAX / count)
+        return 0;
+    size_t length = size * count;
+    direct_response_buffer_t *response = context;
+    if (!response || !response->data || response->capacity <= 1)
+        return length;
+    size_t available = response->capacity - 1 - response->length;
+    size_t copied = length < available ? length : available;
+    if (copied > 0) {
+        memcpy(response->data + response->length, data, copied);
+        response->length += copied;
+        response->data[response->length] = '\0';
+    }
     return length;
 }
 
@@ -287,10 +312,14 @@ int telegram_http_get(const char *token, const char *method_and_query,
         return 0;
     }
 
-    response_buffer_t response = {};
+    direct_response_buffer_t response = {
+        .data = response_out,
+        .capacity = response_capacity,
+        .length = 0
+    };
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, capture_response);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, capture_direct_response);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 35L);
@@ -303,7 +332,6 @@ int telegram_http_get(const char *token, const char *method_and_query,
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
 
     if (result != CURLE_OK || status < 200 || status >= 300) {
-        sanitize_response(&response);
         c2t_log_error("https", "Telegram GET request failed: query=%s, HTTP=%ld, curl_error=%d",
                       method_and_query, status, (int)result);
         if (result != CURLE_OK) {
@@ -313,9 +341,6 @@ int telegram_http_get(const char *token, const char *method_and_query,
         return 0;
     }
 
-    size_t copy_len = response.length < response_capacity - 1 ? response.length : response_capacity - 1;
-    memcpy(response_out, response.data, copy_len);
-    response_out[copy_len] = '\0';
     return 1;
 }
 

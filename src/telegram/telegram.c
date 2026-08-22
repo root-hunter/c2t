@@ -1281,6 +1281,25 @@ static int parse_json_field_in_range(const char *start, const char *end, const c
                 while (pos < end && *pos != '"' && len + 1 < capacity) {
                     if (*pos == '\\' && pos + 1 < end) {
                         pos++;
+                        if (*pos == 'n') {
+                            output[len++] = '\n';
+                            pos++;
+                            continue;
+                        }
+                        if (*pos == 'r') {
+                            output[len++] = '\r';
+                            pos++;
+                            continue;
+                        }
+                        if (*pos == 't') {
+                            output[len++] = '\t';
+                            pos++;
+                            continue;
+                        }
+                        if (*pos == '\"' || *pos == '\\' || *pos == '/') {
+                            output[len++] = *pos++;
+                            continue;
+                        }
                     }
                     output[len++] = *pos++;
                 }
@@ -1363,11 +1382,11 @@ int telegram_get_bot_username(const char *token, char *username_out, size_t capa
 int telegram_poll_updates_callback(const char *token, int64_t *offset, int timeout_seconds,
                                    telegram_update_callback_t callback, void *user_data)
 {
-    if (!token) return 0;
+    if (!token) return -1;
 
     int temp_http = 0;
     if (!initialized) {
-        if (!telegram_http_init()) return 0;
+        if (!telegram_http_init()) return -1;
         temp_http = 1;
     }
 
@@ -1385,7 +1404,7 @@ int telegram_poll_updates_callback(const char *token, int64_t *offset, int timeo
     }
 
     if (!res || !strstr(response, "\"ok\":true")) {
-        return 0;
+        return -1;
     }
 
     const char *result_pos = strstr(response, "\"result\"");
