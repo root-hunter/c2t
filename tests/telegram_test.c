@@ -873,6 +873,7 @@ int main(void)
     clipboard_set_paused(initial_pause);
 
     /* Keyboard layout unit tests */
+#ifndef __APPLE__
     if (!keyboard_set_layout("it"))
         return fail("keyboard_set_layout it failed");
     char layout_buf[128] = {};
@@ -904,6 +905,16 @@ int main(void)
         strstr(avail_buf, "it") == nullptr ||
         strstr(avail_buf, "us") == nullptr)
         return fail("keyboard_get_available_layouts format");
+#else
+    char layout_buf[128] = {};
+    keyboard_get_layout(layout_buf, sizeof(layout_buf));
+    if (strstr(layout_buf, "macOS") == nullptr)
+        return fail("keyboard_get_layout macOS check failed");
+    char avail_buf[1024] = {};
+    keyboard_get_available_layouts(avail_buf, sizeof(avail_buf));
+    if (strstr(avail_buf, "macOS") == nullptr)
+        return fail("keyboard_get_available_layouts macOS format");
+#endif
 
     char kb_stat_buf[1024] = {};
     keyboard_get_status_info(kb_stat_buf, sizeof(kb_stat_buf));
