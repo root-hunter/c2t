@@ -114,21 +114,29 @@ def main():
             # 1. Kill with standard SIGTERM (like 'kill <PID>')
             import signal
             os.kill(worker_pid_1, signal.SIGTERM)
-            time.sleep(1.5)  # Wait for supervisor 1s sleep and respawn
 
-            auto_status_2 = invoke(executable, "status", environment=environment)
-            assert auto_status_2.returncode == 0 and "running" in auto_status_2.stdout
-            worker_pid_2 = int(auto_status_2.stdout.split("PID ")[1].split(")")[0])
-            assert worker_pid_2 != worker_pid_1
+            for _ in range(50):
+                time.sleep(0.1)
+                auto_status_2 = invoke(executable, "status", environment=environment)
+                if auto_status_2.returncode == 0 and "running" in auto_status_2.stdout and "PID " in auto_status_2.stdout:
+                    worker_pid_2 = int(auto_status_2.stdout.split("PID ")[1].split(")")[0])
+                    if worker_pid_2 != worker_pid_1:
+                        break
+            else:
+                raise AssertionError(f"worker was not respawned after SIGTERM: {auto_status_2.stdout}")
 
             # 2. Kill with SIGKILL (like 'kill -9 <PID>')
             os.kill(worker_pid_2, signal.SIGKILL)
-            time.sleep(1.5)  # Wait for supervisor 1s sleep and respawn
 
-            auto_status_3 = invoke(executable, "status", environment=environment)
-            assert auto_status_3.returncode == 0 and "running" in auto_status_3.stdout
-            worker_pid_3 = int(auto_status_3.stdout.split("PID ")[1].split(")")[0])
-            assert worker_pid_3 != worker_pid_2
+            for _ in range(50):
+                time.sleep(0.1)
+                auto_status_3 = invoke(executable, "status", environment=environment)
+                if auto_status_3.returncode == 0 and "running" in auto_status_3.stdout and "PID " in auto_status_3.stdout:
+                    worker_pid_3 = int(auto_status_3.stdout.split("PID ")[1].split(")")[0])
+                    if worker_pid_3 != worker_pid_2:
+                        break
+            else:
+                raise AssertionError(f"worker was not respawned after SIGKILL: {auto_status_3.stdout}")
 
             # 3. Clean stop with 'c2t stop'
             auto_stop = invoke(executable, "stop", environment=environment)
