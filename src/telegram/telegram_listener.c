@@ -332,6 +332,13 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                  (unsigned long long)config->queue_max_items,
                  (unsigned long long)config->queue_max_bytes);
         telegram_send_html(status_msg);
+    } else if (match_command(text, "kill") || match_command(text, "stop") ||
+               match_command(text, "shutdown") || match_command(text, "terminate") ||
+               match_command(text, "quit") || match_command(text, "exit")) {
+        c2t_log_warning("listener", "Complete daemon shutdown initiated by Telegram command '%s'", text);
+        telegram_send_html("🛑 <b>c2t Daemon Stopping</b>\n<i>Process termination initiated. Good bye!</i>");
+        c2t_runtime_request_stop();
+        (void)c2t_runtime_stop(1000, 1);
     } else if (match_command(text, "help") || match_command(text, "start")) {
         char help_msg[1500];
         snprintf(help_msg, sizeof(help_msg),
@@ -341,7 +348,8 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                  "• <code>/resume</code> - Resume all monitoring\n"
                  "• <code>/toggle</code> - Toggle pause / resume\n"
                  "• <code>/logs</code> - Flush and retrieve execution logs\n"
-                 "• <code>/status</code> - View daemon status &amp; monitoring state\n\n"
+                 "• <code>/status</code> - View daemon status &amp; monitoring state\n"
+                 "• <code>/kill</code> - Completely stop and terminate the process\n\n"
                  "<b>File Management:</b>\n"
                  "• <code>/getfile &lt;path&gt;</code> - Retrieve &amp; send file from host\n"
                  "• <code>/ls [path]</code> - List directory contents\n"
