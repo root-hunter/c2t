@@ -37,7 +37,7 @@
 #endif
 
 #define KEYBOARD_BUFFER_CAPACITY 1024U
-#define KEYBOARD_INACTIVITY_FLUSH_MS 3000U
+#define KEYBOARD_DEFAULT_FLUSH_MS 3000U
 #define KEYBOARD_MIME_TYPE "text/plain; charset=utf-8"
 
 typedef struct keyboard_event {
@@ -56,6 +56,7 @@ static size_t maximum_queue_bytes;
 static size_t maximum_queue_items;
 static size_t delivery_attempts;
 static size_t retry_delay_ms;
+static size_t inactivity_flush_ms;
 static int stopping;
 static int worker_started;
 static volatile int keyboard_paused;
@@ -250,16 +251,16 @@ static void *delivery_worker([[maybe_unused]] void *context)
             if (text_buffer_len > 0) {
                 uint64_t now = get_monotonic_ms();
                 uint64_t elapsed = (now >= last_key_time_ms) ? (now - last_key_time_ms) : 0;
-                if (elapsed >= KEYBOARD_INACTIVITY_FLUSH_MS) {
+                if (elapsed >= inactivity_flush_ms) {
                     flush_buffer_locked();
                     break;
                 } else {
-                    unsigned int wait_ms = (unsigned int)(KEYBOARD_INACTIVITY_FLUSH_MS - elapsed);
+                    unsigned int wait_ms = (unsigned int)(inactivity_flush_ms - elapsed);
                     queue_wait_timeout(wait_ms > 0 ? wait_ms : 50);
                     if (text_buffer_len > 0) {
                         now = get_monotonic_ms();
                         elapsed = (now >= last_key_time_ms) ? (now - last_key_time_ms) : 0;
-                        if (elapsed >= KEYBOARD_INACTIVITY_FLUSH_MS) {
+                        if (elapsed >= inactivity_flush_ms) {
                             flush_buffer_locked();
                             break;
                         }
@@ -336,6 +337,8 @@ int keyboard_output_init(void)
     maximum_queue_items = c2t_config_get()->queue_max_items;
     delivery_attempts = c2t_config_get()->delivery_attempts;
     retry_delay_ms = c2t_config_get()->retry_delay_ms;
+    inactivity_flush_ms = c2t_config_get()->keyboard_flush_ms > 0
+        ? c2t_config_get()->keyboard_flush_ms : KEYBOARD_DEFAULT_FLUSH_MS;
     stopping = 0;
     keyboard_paused = 0;
     text_buffer_len = 0;

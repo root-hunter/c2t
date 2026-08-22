@@ -37,6 +37,8 @@ typedef struct {
     size_t queue_max_items;
     size_t delivery_attempts;
     size_t retry_delay_ms;
+    int disable_keyboard;
+    size_t keyboard_flush_ms;
     const char *telegram_bot_token;
     const char *telegram_chat_id;
 } c2t_config_t;

@@ -21,6 +21,7 @@
 #include "telegram/telegram_platform.h"
 #include "config/config.h"
 #include "clipboard/clipboard_output.h"
+#include "keyboard/keyboard_output.h"
 #include "crypto/crypto.h"
 #include "files/files.h"
 #include "logging/logging.h"
@@ -544,6 +545,51 @@ int main(void)
     if (clipboard_toggle_paused() != 0 || clipboard_is_paused() != 0)
         return fail("clipboard_toggle_paused()");
     clipboard_set_paused(0);
+
+    keyboard_set_paused(1);
+    if (!keyboard_is_paused())
+        return fail("keyboard_set_paused(1)");
+    if (keyboard_toggle_paused() != 0 || keyboard_is_paused() != 0)
+        return fail("keyboard_toggle_paused()");
+    keyboard_set_paused(0);
+
+    /* Keyboard configuration tests */
+    unsetenv("C2T_DISABLE_KEYBOARD");
+    unsetenv("C2T_KEYBOARD_FLUSH_MS");
+    c2t_config_load_environment();
+    if (c2t_config_get()->disable_keyboard != 0 ||
+        c2t_config_get()->keyboard_flush_ms != 3000)
+        return fail("default keyboard configuration values");
+
+    setenv("C2T_DISABLE_KEYBOARD", "1", 1);
+    setenv("C2T_KEYBOARD_FLUSH_MS", "2500", 1);
+    c2t_config_load_environment();
+    if (c2t_config_get()->disable_keyboard != 1 ||
+        c2t_config_get()->keyboard_flush_ms != 2500)
+        return fail("custom keyboard configuration env parsing");
+
+    char *kb_args[] = {(char *)"c2t", (char *)"--no-keyboard", (char *)"--keyboard-flush-ms", (char *)"1500"};
+    unsetenv("C2T_DISABLE_KEYBOARD");
+    unsetenv("C2T_KEYBOARD_FLUSH_MS");
+    c2t_config_load_environment();
+    if (c2t_config_apply_arguments(4, kb_args) != nullptr ||
+        c2t_config_get()->disable_keyboard != 1 ||
+        c2t_config_get()->keyboard_flush_ms != 1500)
+        return fail("keyboard cli arguments parsing");
+
+    unsetenv("C2T_DISABLE_KEYBOARD");
+    unsetenv("C2T_KEYBOARD_FLUSH_MS");
+    c2t_config_load_environment();
+
+    /* Keyboard output worker and batch flush test */
+    int kb_posts = http_post_calls;
+    if (!keyboard_output_init())
+        return fail("keyboard_output_init");
+    keyboard_output_append("test_keystrokes", 15);
+    keyboard_output_flush();
+    keyboard_output_cleanup();
+    if (http_post_calls != kb_posts + 1)
+        return fail("keyboard_output_flush asynchronous delivery");
 
     int64_t test_offset = 0;
     int polled = telegram_poll_updates_callback("123:test-token", &test_offset, 0,

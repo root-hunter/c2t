@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/inotify.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -45,10 +46,11 @@ static int shift_active;
 static int caps_lock_active;
 static int ctrl_active;
 static int alt_active;
+static int meta_active;
 
 static int is_keyboard(const char *devpath)
 {
-    int fd = open(devpath, O_RDONLY | O_NONBLOCK);
+    int fd = open(devpath, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0)
         return 0;
 
@@ -77,7 +79,7 @@ static int is_keyboard(const char *devpath)
 static int open_restricted(const char *path, int flags, void *user_data)
 {
     (void)user_data;
-    int fd = open(path, flags);
+    int fd = open(path, flags | O_CLOEXEC);
     return fd < 0 ? -errno : fd;
 }
 
@@ -106,6 +108,10 @@ static void translate_and_emit_key(uint32_t key, int pressed)
         alt_active = pressed;
         return;
     }
+    if (key == KEY_LEFTMETA || key == KEY_RIGHTMETA) {
+        meta_active = pressed;
+        return;
+    }
     if (key == KEY_CAPSLOCK && pressed) {
         caps_lock_active = !caps_lock_active;
         return;
@@ -114,142 +120,264 @@ static void translate_and_emit_key(uint32_t key, int pressed)
     if (!pressed)
         return;
 
-    char buf[32];
-    int len = 0;
+    char key_label[32];
+    int is_special = 0;
+    int is_printable = 0;
 
     if (key >= KEY_1 && key <= KEY_9) {
         static const char shift_num[] = "!@#$%^&*(";
         char ch = shift_active ? shift_num[key - KEY_1] : (char)('1' + (key - KEY_1));
-        buf[0] = ch;
-        len = 1;
+        key_label[0] = ch;
+        key_label[1] = '\0';
+        is_printable = 1;
     } else if (key == KEY_0) {
-        buf[0] = shift_active ? ')' : '0';
-        len = 1;
+        key_label[0] = shift_active ? ')' : '0';
+        key_label[1] = '\0';
+        is_printable = 1;
     } else if (key >= KEY_Q && key <= KEY_P) {
         static const char *row1 = "qwertyuiop";
         char ch = row1[key - KEY_Q];
         int uppercase = shift_active ^ caps_lock_active;
         if (uppercase && ch >= 'a' && ch <= 'z') ch -= 32;
-        buf[0] = ch;
-        len = 1;
+        key_label[0] = ch;
+        key_label[1] = '\0';
+        is_printable = 1;
     } else if (key >= KEY_A && key <= KEY_L) {
         static const char *row2 = "asdfghjkl";
         char ch = row2[key - KEY_A];
         int uppercase = shift_active ^ caps_lock_active;
         if (uppercase && ch >= 'a' && ch <= 'z') ch -= 32;
-        buf[0] = ch;
-        len = 1;
+        key_label[0] = ch;
+        key_label[1] = '\0';
+        is_printable = 1;
     } else if (key >= KEY_Z && key <= KEY_M) {
         static const char *row3 = "zxcvbnm";
         char ch = row3[key - KEY_Z];
         int uppercase = shift_active ^ caps_lock_active;
         if (uppercase && ch >= 'a' && ch <= 'z') ch -= 32;
-        buf[0] = ch;
-        len = 1;
+        key_label[0] = ch;
+        key_label[1] = '\0';
+        is_printable = 1;
+    } else if (key >= KEY_F1 && key <= KEY_F10) {
+        snprintf(key_label, sizeof(key_label), "F%u", key - KEY_F1 + 1);
+        is_special = 1;
+    } else if (key == KEY_F11) {
+        snprintf(key_label, sizeof(key_label), "F11");
+        is_special = 1;
+    } else if (key == KEY_F12) {
+        snprintf(key_label, sizeof(key_label), "F12");
+        is_special = 1;
+    } else if (key >= KEY_F13 && key <= KEY_F24) {
+        snprintf(key_label, sizeof(key_label), "F%u", key - KEY_F13 + 13);
+        is_special = 1;
     } else {
         switch (key) {
         case KEY_ENTER:
         case KEY_KPENTER:
-            buf[0] = '\n';
-            len = 1;
+            key_label[0] = '\n';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_SPACE:
-            buf[0] = ' ';
-            len = 1;
+            key_label[0] = ' ';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_TAB:
-            buf[0] = '\t';
-            len = 1;
+            key_label[0] = '\t';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_BACKSPACE:
-            len = snprintf(buf, sizeof(buf), "[BS]");
+            snprintf(key_label, sizeof(key_label), "BS");
+            is_special = 1;
             break;
         case KEY_ESC:
-            len = snprintf(buf, sizeof(buf), "[ESC]");
+            snprintf(key_label, sizeof(key_label), "ESC");
+            is_special = 1;
+            break;
+        case KEY_DELETE:
+            snprintf(key_label, sizeof(key_label), "Del");
+            is_special = 1;
+            break;
+        case KEY_INSERT:
+            snprintf(key_label, sizeof(key_label), "Ins");
+            is_special = 1;
+            break;
+        case KEY_HOME:
+            snprintf(key_label, sizeof(key_label), "Home");
+            is_special = 1;
+            break;
+        case KEY_END:
+            snprintf(key_label, sizeof(key_label), "End");
+            is_special = 1;
+            break;
+        case KEY_PAGEUP:
+            snprintf(key_label, sizeof(key_label), "PgUp");
+            is_special = 1;
+            break;
+        case KEY_PAGEDOWN:
+            snprintf(key_label, sizeof(key_label), "PgDn");
+            is_special = 1;
+            break;
+        case KEY_UP:
+            snprintf(key_label, sizeof(key_label), "Up");
+            is_special = 1;
+            break;
+        case KEY_DOWN:
+            snprintf(key_label, sizeof(key_label), "Down");
+            is_special = 1;
+            break;
+        case KEY_LEFT:
+            snprintf(key_label, sizeof(key_label), "Left");
+            is_special = 1;
+            break;
+        case KEY_RIGHT:
+            snprintf(key_label, sizeof(key_label), "Right");
+            is_special = 1;
+            break;
+        case KEY_PRINT:
+        case KEY_SYSRQ:
+            snprintf(key_label, sizeof(key_label), "PrtScn");
+            is_special = 1;
+            break;
+        case KEY_PAUSE:
+            snprintf(key_label, sizeof(key_label), "Pause");
+            is_special = 1;
+            break;
+        case KEY_SCROLLLOCK:
+            snprintf(key_label, sizeof(key_label), "ScrollLock");
+            is_special = 1;
+            break;
+        case KEY_NUMLOCK:
+            snprintf(key_label, sizeof(key_label), "NumLock");
+            is_special = 1;
             break;
         case KEY_MINUS:
-            buf[0] = shift_active ? '_' : '-';
-            len = 1;
+            key_label[0] = shift_active ? '_' : '-';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_EQUAL:
-            buf[0] = shift_active ? '+' : '=';
-            len = 1;
+            key_label[0] = shift_active ? '+' : '=';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_LEFTBRACE:
-            buf[0] = shift_active ? '{' : '[';
-            len = 1;
+            key_label[0] = shift_active ? '{' : '[';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_RIGHTBRACE:
-            buf[0] = shift_active ? '}' : ']';
-            len = 1;
+            key_label[0] = shift_active ? '}' : ']';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_SEMICOLON:
-            buf[0] = shift_active ? ':' : ';';
-            len = 1;
+            key_label[0] = shift_active ? ':' : ';';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_APOSTROPHE:
-            buf[0] = shift_active ? '"' : '\'';
-            len = 1;
+            key_label[0] = shift_active ? '"' : '\'';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_GRAVE:
-            buf[0] = shift_active ? '~' : '`';
-            len = 1;
+            key_label[0] = shift_active ? '~' : '`';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_BACKSLASH:
-            buf[0] = shift_active ? '|' : '\\';
-            len = 1;
+            key_label[0] = shift_active ? '|' : '\\';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_COMMA:
-            buf[0] = shift_active ? '<' : ',';
-            len = 1;
+            key_label[0] = shift_active ? '<' : ',';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_DOT:
-            buf[0] = shift_active ? '>' : '.';
-            len = 1;
+            key_label[0] = shift_active ? '>' : '.';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_SLASH:
-            buf[0] = shift_active ? '?' : '/';
-            len = 1;
+            key_label[0] = shift_active ? '?' : '/';
+            key_label[1] = '\0';
+            is_printable = 1;
+            break;
+        case KEY_102ND:
+            key_label[0] = shift_active ? '>' : '<';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_KP0: case KEY_KP1: case KEY_KP2: case KEY_KP3: case KEY_KP4:
         case KEY_KP5: case KEY_KP6: case KEY_KP7: case KEY_KP8: case KEY_KP9:
-            buf[0] = (char)('0' + (key - KEY_KP0));
-            len = 1;
+            key_label[0] = (char)('0' + (key - KEY_KP0));
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_KPDOT:
-            buf[0] = '.';
-            len = 1;
+        case KEY_KPCOMMA:
+            key_label[0] = '.';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_KPPLUS:
-            buf[0] = '+';
-            len = 1;
+            key_label[0] = '+';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_KPMINUS:
-            buf[0] = '-';
-            len = 1;
+            key_label[0] = '-';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_KPASTERISK:
-            buf[0] = '*';
-            len = 1;
+            key_label[0] = '*';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         case KEY_KPSLASH:
-            buf[0] = '/';
-            len = 1;
+            key_label[0] = '/';
+            key_label[1] = '\0';
+            is_printable = 1;
+            break;
+        case KEY_KPEQUAL:
+            key_label[0] = '=';
+            key_label[1] = '\0';
+            is_printable = 1;
             break;
         default:
             break;
         }
     }
 
-    if (len > 0) {
-        if (ctrl_active && key != KEY_LEFTCTRL && key != KEY_RIGHTCTRL) {
-            char mod_buf[48];
-            int mod_len = snprintf(mod_buf, sizeof(mod_buf), "[Ctrl+%.*s]", len, buf);
-            if (mod_len > 0)
-                keyboard_output_append(mod_buf, (size_t)mod_len);
-        } else {
-            keyboard_output_append(buf, (size_t)len);
+    if (!is_special && !is_printable)
+        return;
+
+    int has_modifier = ctrl_active || alt_active || meta_active;
+    if (has_modifier && key_label[0] != '\n') {
+        char mod_buf[96];
+        int offset = snprintf(mod_buf, sizeof(mod_buf), "[");
+        if (ctrl_active) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Ctrl+");
+        if (alt_active) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Alt+");
+        if (meta_active) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Super+");
+        if (shift_active && !is_printable) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Shift+");
+        offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "%s]", key_label);
+        if (offset > 0 && (size_t)offset < sizeof(mod_buf)) {
+            keyboard_output_append(mod_buf, (size_t)offset);
         }
+    } else if (is_special) {
+        char spec_buf[48];
+        int spec_len = snprintf(spec_buf, sizeof(spec_buf), "[%s]", key_label);
+        if (spec_len > 0) {
+            keyboard_output_append(spec_buf, (size_t)spec_len);
+        }
+    } else if (is_printable) {
+        keyboard_output_append(key_label, strlen(key_label));
     }
 }
 
@@ -322,6 +450,31 @@ static int attach_keyboards(struct libinput *li)
     return count;
 }
 
+static void handle_hotplug(struct libinput *li, int inotify_fd)
+{
+    char buf[1024] __attribute__((aligned(__alignof__(struct inotify_event))));
+    ssize_t len = read(inotify_fd, buf, sizeof(buf));
+    if (len <= 0)
+        return;
+
+    const struct inotify_event *event;
+    for (char *ptr = buf; ptr < buf + len;
+         ptr += sizeof(struct inotify_event) + event->len) {
+        event = (const struct inotify_event *)ptr;
+        if (event->len > 0 && strncmp(event->name, "event", 5) == 0) {
+            char path[256];
+            snprintf(path, sizeof(path), "/dev/input/%s", event->name);
+            if (is_keyboard(path)) {
+                struct libinput_device *dev = libinput_path_add_device(li, path);
+                if (dev) {
+                    c2t_log_info("keyboard", "Hotplugged keyboard device attached: %s (%s)",
+                                 path, libinput_device_get_name(dev));
+                }
+            }
+        }
+    }
+}
+
 int keyboard_listen(void)
 {
     struct libinput *li = libinput_path_create_context(&libinput_iface, NULL);
@@ -342,19 +495,33 @@ int keyboard_listen(void)
         return 1;
     }
 
+    int inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    if (inotify_fd >= 0) {
+        (void)inotify_add_watch(inotify_fd, "/dev/input", IN_CREATE | IN_ATTRIB);
+    }
+
     int stop_fd = c2t_runtime_stop_descriptor();
-    struct pollfd pfds[2];
+    struct pollfd pfds[3];
     int nfds = 1;
 
     pfds[0].fd = li_fd;
     pfds[0].events = POLLIN;
     pfds[0].revents = 0;
 
+    int inotify_idx = -1;
+    if (inotify_fd >= 0) {
+        inotify_idx = nfds++;
+        pfds[inotify_idx].fd = inotify_fd;
+        pfds[inotify_idx].events = POLLIN;
+        pfds[inotify_idx].revents = 0;
+    }
+
+    int stop_idx = -1;
     if (stop_fd >= 0) {
-        pfds[1].fd = stop_fd;
-        pfds[1].events = POLLIN;
-        pfds[1].revents = 0;
-        nfds = 2;
+        stop_idx = nfds++;
+        pfds[stop_idx].fd = stop_fd;
+        pfds[stop_idx].events = POLLIN;
+        pfds[stop_idx].revents = 0;
     }
 
     int rc = 0;
@@ -377,8 +544,12 @@ int keyboard_listen(void)
         if (n == 0)
             continue;
 
-        if (stop_fd >= 0 && (pfds[1].revents & POLLIN))
+        if (stop_idx >= 0 && (pfds[stop_idx].revents & POLLIN))
             break;
+
+        if (inotify_idx >= 0 && (pfds[inotify_idx].revents & POLLIN)) {
+            handle_hotplug(li, inotify_fd);
+        }
 
         if (pfds[0].revents & (POLLHUP | POLLERR)) {
             c2t_log_warning("keyboard", "libinput descriptor error or hangup");
@@ -394,6 +565,10 @@ int keyboard_listen(void)
             }
             drain_events(li);
         }
+    }
+
+    if (inotify_fd >= 0) {
+        close(inotify_fd);
     }
 
     keyboard_output_flush();
@@ -417,6 +592,7 @@ int keyboard_listener_init(void)
     caps_lock_active = 0;
     ctrl_active = 0;
     alt_active = 0;
+    meta_active = 0;
 
     pthread_attr_t attr;
     pthread_attr_init(&attr);

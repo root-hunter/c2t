@@ -38,6 +38,9 @@
 #define C2T_DEFAULT_RETRY_DELAY_MS 500U
 #define C2T_MAX_DELIVERY_ATTEMPTS 10U
 #define C2T_MAX_RETRY_DELAY_MS 60000U
+#define C2T_DEFAULT_KEYBOARD_FLUSH_MS 3000U
+#define C2T_MIN_KEYBOARD_FLUSH_MS 500U
+#define C2T_MAX_KEYBOARD_FLUSH_MS 60000U
 
 static c2t_config_t config;
 static char embedded_bot_token[512];
@@ -180,6 +183,14 @@ void c2t_config_load([[maybe_unused]] const char *executable_path)
         "C2T_RETRY_DELAY_MS", C2T_DEFAULT_RETRY_DELAY_MS);
     if (config.retry_delay_ms > C2T_MAX_RETRY_DELAY_MS)
         config.retry_delay_ms = C2T_MAX_RETRY_DELAY_MS;
+    config.disable_keyboard = configured_flag("C2T_DISABLE_KEYBOARD") ||
+                              configured_flag("DISABLE_KEYBOARD");
+    config.keyboard_flush_ms = configured_size(
+        "C2T_KEYBOARD_FLUSH_MS", C2T_DEFAULT_KEYBOARD_FLUSH_MS);
+    if (config.keyboard_flush_ms < C2T_MIN_KEYBOARD_FLUSH_MS)
+        config.keyboard_flush_ms = C2T_MIN_KEYBOARD_FLUSH_MS;
+    if (config.keyboard_flush_ms > C2T_MAX_KEYBOARD_FLUSH_MS)
+        config.keyboard_flush_ms = C2T_MAX_KEYBOARD_FLUSH_MS;
     config.telegram_bot_token = configured_value(
         "TELEGRAM_BOT_TOKEN", embedded_bot_token,
         sizeof(embedded_bot_token));
@@ -218,6 +229,21 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
         } else if (strcmp(argv[index], "--send-logs") == 0 ||
                    strcmp(argv[index], "--telegram-send-logs") == 0) {
             config.telegram_send_logs = 1;
+        } else if (strcmp(argv[index], "--no-keyboard") == 0 ||
+                   strcmp(argv[index], "--disable-keyboard") == 0) {
+            config.disable_keyboard = 1;
+        } else if (strcmp(argv[index], "--keyboard-flush-ms") == 0 ||
+                   strcmp(argv[index], "--keyboard-flush") == 0) {
+            if (index + 1 >= argc)
+                return argv[index];
+            ++index;
+            char *end;
+            errno = 0;
+            unsigned long val = strtoul(argv[index], &end, 10);
+            if (errno || *end || val < C2T_MIN_KEYBOARD_FLUSH_MS ||
+                val > C2T_MAX_KEYBOARD_FLUSH_MS)
+                return argv[index - 1];
+            config.keyboard_flush_ms = (size_t)val;
         } else if (strcmp(argv[index], "--log-interval") == 0 ||
                    strcmp(argv[index], "--telegram-log-interval") == 0) {
             if (index + 1 >= argc)
