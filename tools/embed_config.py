@@ -24,6 +24,7 @@ import binascii
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import struct
 import sys
@@ -31,11 +32,92 @@ import tempfile
 
 
 MAGIC = b"C2TCFG\x00\xa7\x31\xd5\x6c\x92\xe8\x4b\xf0\x1d"
-VERSION = 1
+VERSION = 2
 HEADER_SIZE = 32
 PAYLOAD_CAPACITY = 4096
 REGION_SIZE = HEADER_SIZE + PAYLOAD_CAPACITY
 SENSITIVE_KEYS = {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "C2T_PROXY", "TELEGRAM_PROXY"}
+
+EMBEDDED_KEY = bytes([
+    0x8f, 0x1d, 0x4e, 0x93, 0x6a, 0x2b, 0x5c, 0x71,
+    0x3e, 0x09, 0xba, 0xd4, 0x2f, 0x88, 0x19, 0xc3,
+    0x77, 0x51, 0x9a, 0x42, 0xe6, 0x3d, 0x1b, 0x68,
+    0x54, 0x0e, 0x82, 0xbf, 0x33, 0x7a, 0x9c, 0xd0
+])
+
+
+def rotl32(v: int, n: int) -> int:
+    return ((v << n) & 0xFFFFFFFF) | (v >> (32 - n))
+
+
+def chacha20_block(state: list[int]) -> list[int]:
+    out = list(state)
+    for _ in range(10):
+        # Column round
+        out[0] = (out[0] + out[4]) & 0xFFFFFFFF; out[12] = rotl32(out[12] ^ out[0], 16)
+        out[8] = (out[8] + out[12]) & 0xFFFFFFFF; out[4] = rotl32(out[4] ^ out[8], 12)
+        out[0] = (out[0] + out[4]) & 0xFFFFFFFF; out[12] = rotl32(out[12] ^ out[0], 8)
+        out[8] = (out[8] + out[12]) & 0xFFFFFFFF; out[4] = rotl32(out[4] ^ out[8], 7)
+
+        out[1] = (out[1] + out[5]) & 0xFFFFFFFF; out[13] = rotl32(out[13] ^ out[1], 16)
+        out[9] = (out[9] + out[13]) & 0xFFFFFFFF; out[5] = rotl32(out[5] ^ out[9], 12)
+        out[1] = (out[1] + out[5]) & 0xFFFFFFFF; out[13] = rotl32(out[13] ^ out[1], 8)
+        out[9] = (out[9] + out[13]) & 0xFFFFFFFF; out[5] = rotl32(out[5] ^ out[9], 7)
+
+        out[2] = (out[2] + out[6]) & 0xFFFFFFFF; out[14] = rotl32(out[14] ^ out[2], 16)
+        out[10] = (out[10] + out[14]) & 0xFFFFFFFF; out[6] = rotl32(out[6] ^ out[10], 12)
+        out[2] = (out[2] + out[6]) & 0xFFFFFFFF; out[14] = rotl32(out[14] ^ out[2], 8)
+        out[10] = (out[10] + out[14]) & 0xFFFFFFFF; out[6] = rotl32(out[6] ^ out[10], 7)
+
+        out[3] = (out[3] + out[7]) & 0xFFFFFFFF; out[15] = rotl32(out[15] ^ out[3], 16)
+        out[11] = (out[11] + out[15]) & 0xFFFFFFFF; out[7] = rotl32(out[7] ^ out[11], 12)
+        out[3] = (out[3] + out[7]) & 0xFFFFFFFF; out[15] = rotl32(out[15] ^ out[3], 8)
+        out[11] = (out[11] + out[15]) & 0xFFFFFFFF; out[7] = rotl32(out[7] ^ out[11], 7)
+
+        # Diagonal round
+        out[0] = (out[0] + out[5]) & 0xFFFFFFFF; out[15] = rotl32(out[15] ^ out[0], 16)
+        out[10] = (out[10] + out[15]) & 0xFFFFFFFF; out[5] = rotl32(out[5] ^ out[10], 12)
+        out[0] = (out[0] + out[5]) & 0xFFFFFFFF; out[15] = rotl32(out[15] ^ out[0], 8)
+        out[10] = (out[10] + out[15]) & 0xFFFFFFFF; out[5] = rotl32(out[5] ^ out[10], 7)
+
+        out[1] = (out[1] + out[6]) & 0xFFFFFFFF; out[12] = rotl32(out[12] ^ out[1], 16)
+        out[11] = (out[11] + out[12]) & 0xFFFFFFFF; out[6] = rotl32(out[6] ^ out[11], 12)
+        out[1] = (out[1] + out[6]) & 0xFFFFFFFF; out[12] = rotl32(out[12] ^ out[1], 8)
+        out[11] = (out[11] + out[12]) & 0xFFFFFFFF; out[6] = rotl32(out[6] ^ out[11], 7)
+
+        out[2] = (out[2] + out[7]) & 0xFFFFFFFF; out[13] = rotl32(out[13] ^ out[2], 16)
+        out[8] = (out[8] + out[13]) & 0xFFFFFFFF; out[7] = rotl32(out[7] ^ out[8], 12)
+        out[2] = (out[2] + out[7]) & 0xFFFFFFFF; out[13] = rotl32(out[13] ^ out[2], 8)
+        out[8] = (out[8] + out[13]) & 0xFFFFFFFF; out[7] = rotl32(out[7] ^ out[8], 7)
+
+        out[3] = (out[3] + out[4]) & 0xFFFFFFFF; out[14] = rotl32(out[14] ^ out[3], 16)
+        out[9] = (out[9] + out[14]) & 0xFFFFFFFF; out[4] = rotl32(out[4] ^ out[9], 12)
+        out[3] = (out[3] + out[4]) & 0xFFFFFFFF; out[14] = rotl32(out[14] ^ out[3], 8)
+        out[9] = (out[9] + out[14]) & 0xFFFFFFFF; out[4] = rotl32(out[4] ^ out[9], 7)
+
+    return [(out[i] + state[i]) & 0xFFFFFFFF for i in range(16)]
+
+
+def chacha20_crypt(key: bytes, nonce: bytes, counter: int, data: bytes) -> bytes:
+    state = [
+        0x61707865, 0x3330322D, 0x79622D32, 0x6B206574,
+        *struct.unpack("<8I", key),
+        counter,
+        *struct.unpack("<3I", nonce),
+    ]
+    out = bytearray(len(data))
+    offset = 0
+    while offset < len(data):
+        block = chacha20_block(state)
+        keystream = struct.pack("<16I", *block)
+        take = min(64, len(data) - offset)
+        for i in range(take):
+            out[offset + i] = data[offset + i] ^ keystream[i]
+        state[12] = (state[12] + 1) & 0xFFFFFFFF
+        offset += take
+    return bytes(out)
+
+
 ALLOWED_KEYS = {
     "C2T_VERBOSE",
     "C2T_LOG_FILE",
@@ -109,7 +191,7 @@ def locate_region(binary: bytes) -> int:
     if offset + REGION_SIZE > len(binary):
         raise ProvisionError("truncated c2t configuration region")
     version = struct.unpack_from("<I", binary, offset + 16)[0]
-    if version != VERSION:
+    if version not in (1, 2):
         raise ProvisionError(f"unsupported embedded configuration version {version}")
     return offset
 
@@ -159,16 +241,27 @@ def encode_payload(config: dict[str, str]) -> bytes:
 
 
 def decode_payload(binary: bytes, offset: int) -> dict[str, str]:
+    version = struct.unpack_from("<I", binary, offset + 16)[0]
     length, expected_crc = struct.unpack_from("<II", binary, offset + 20)
     if length == 0:
         return {}
     if length > PAYLOAD_CAPACITY:
         raise ProvisionError("invalid embedded configuration length")
-    payload = binary[offset + HEADER_SIZE : offset + HEADER_SIZE + length]
-    if binascii.crc32(payload) != expected_crc:
+    raw_payload = binary[offset + HEADER_SIZE : offset + HEADER_SIZE + length]
+    if binascii.crc32(raw_payload) != expected_crc:
         raise ProvisionError("embedded configuration checksum mismatch")
+    if version == 2:
+        if length < 12:
+            raise ProvisionError("invalid encrypted embedded configuration payload")
+        nonce = raw_payload[:12]
+        ciphertext = raw_payload[12:]
+        plaintext = chacha20_crypt(EMBEDDED_KEY, nonce, 0, ciphertext)
+    elif version == 1:
+        plaintext = raw_payload
+    else:
+        raise ProvisionError(f"unsupported embedded configuration version {version}")
     try:
-        text = payload.decode("utf-8")
+        text = plaintext.decode("utf-8")
     except UnicodeDecodeError as error:
         raise ProvisionError("embedded configuration is not UTF-8") from error
     return parse_config(text.splitlines(keepends=True))
@@ -178,8 +271,14 @@ def patched_binary(binary: bytes, offset: int, payload: bytes) -> bytes:
     reject_signed_macho(binary)
     region = bytearray(REGION_SIZE)
     region[: len(MAGIC)] = MAGIC
-    struct.pack_into("<III", region, 16, VERSION, len(payload), binascii.crc32(payload))
-    region[HEADER_SIZE : HEADER_SIZE + len(payload)] = payload
+    if payload:
+        nonce = secrets.token_bytes(12)
+        ciphertext = chacha20_crypt(EMBEDDED_KEY, nonce, 0, payload)
+        encrypted_payload = nonce + ciphertext
+    else:
+        encrypted_payload = b""
+    struct.pack_into("<III", region, 16, VERSION, len(encrypted_payload), binascii.crc32(encrypted_payload))
+    region[HEADER_SIZE : HEADER_SIZE + len(encrypted_payload)] = encrypted_payload
     result = bytearray(binary[:offset] + region + binary[offset + REGION_SIZE :])
     checksum_offset = pe_checksum_offset(result)
     if checksum_offset is not None:
@@ -368,7 +467,6 @@ def main() -> int:
         config.update(parse_config([f"{key}={value}\n"]))
 
     if arguments.randomize and "C2T_NONCE" not in config and "C2T_BUILD_ID" not in config:
-        import secrets
         config["C2T_NONCE"] = secrets.token_hex(16)
 
     payload = encode_payload(config)

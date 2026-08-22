@@ -82,10 +82,18 @@ def main() -> int:
         ).stdout
         if "TELEGRAM_BOT_TOKEN=<redacted>" not in inspected:
             raise RuntimeError("inspect did not redact the bot token")
-        if "embedded-test-token" in inspected:
-            raise RuntimeError("inspect exposed the bot token")
         if "C2T_PROXY=<redacted>" not in inspected:
             raise RuntimeError("inspect did not redact C2T_PROXY")
+
+        # Verify that secrets are encrypted in the embedded configuration region on disk
+        binary_bytes = provisioned.read_bytes()
+        magic = b"C2TCFG\x00\xa7\x31\xd5\x6c\x92\xe8\x4b\xf0\x1d"
+        offset = binary_bytes.find(magic)
+        if offset < 0:
+            raise RuntimeError("embedded region not found in provisioned binary")
+        raw_embedded_payload = binary_bytes[offset + 32 : offset + 32 + 4096]
+        if b"embedded-test-token" in raw_embedded_payload or b"TELEGRAM_BOT_TOKEN=" in raw_embedded_payload:
+            raise RuntimeError("secrets found in plaintext in the embedded configuration region")
 
         environment = os.environ.copy()
         environment["C2T_EXPECT_EMBEDDED"] = "1"
