@@ -21,6 +21,7 @@
 #include "telegram/telegram_platform.h"
 #include "config/config.h"
 #include "clipboard/clipboard_output.h"
+#include "crypto/crypto.h"
 #include "files/files.h"
 #include "logging/logging.h"
 #include "logging/log_sender.h"
@@ -515,5 +516,38 @@ int main(void)
 
     telegram_cleanup();
     free(last_body);
+
+    /* Crypto & Secure Memory unit tests */
+    if (!c2t_crypto_init())
+        return fail("c2t_crypto_init");
+
+    unsigned char test_nonce[C2T_CRYPTO_NONCE_SIZE];
+    if (!c2t_crypto_get_random_bytes(test_nonce, sizeof(test_nonce)))
+        return fail("c2t_crypto_get_random_bytes");
+
+    const char *secret_text = "Secret Clipboard Payload 2026";
+    size_t secret_len = strlen(secret_text);
+    unsigned char ciphertext[64] = {0};
+    unsigned char decrypted[64] = {0};
+
+    if (!c2t_crypto_encrypt(secret_text, secret_len, test_nonce, ciphertext))
+        return fail("c2t_crypto_encrypt");
+
+    if (memcmp(secret_text, ciphertext, secret_len) == 0)
+        return fail("ciphertext matches plaintext");
+
+    if (!c2t_crypto_decrypt(ciphertext, secret_len, test_nonce, decrypted))
+        return fail("c2t_crypto_decrypt");
+
+    if (memcmp(secret_text, decrypted, secret_len) != 0)
+        return fail("decrypted plaintext mismatch");
+
+    c2t_secure_zero(decrypted, sizeof(decrypted));
+    for (size_t i = 0; i < sizeof(decrypted); ++i) {
+        if (decrypted[i] != 0)
+            return fail("c2t_secure_zero failed");
+    }
+
+    c2t_crypto_cleanup();
     return 0;
 }

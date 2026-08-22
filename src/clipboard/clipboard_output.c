@@ -17,6 +17,7 @@
 
 #include "clipboard_output.h"
 #include "../config/config.h"
+#include "../crypto/crypto.h"
 #include "../files/files.h"
 #include "../logging/logging.h"
 #include "../telegram/telegram.h"
@@ -46,7 +47,8 @@ typedef struct clipboard_event {
     char mime_type[C2T_MIME_CAPACITY];
     c2t_clipboard_source_t source;
     int has_source;
-    unsigned char data[];
+    unsigned char nonce[C2T_CRYPTO_NONCE_SIZE];
+    unsigned char encrypted_data[];
 } clipboard_event_t;
 
 static clipboard_event_t *queue_head;
@@ -160,17 +162,16 @@ static void retry_delay(size_t attempt)
 #endif
 }
 
-static int deliver_payload(const clipboard_event_t *event,
+static int deliver_payload(const void *data, size_t length, const char *mime_type,
                            const c2t_clipboard_source_t *source)
 {
     int file_result = c2t_file_try_clipboard_path(
-        event->data, event->length, event->mime_type, source);
+        data, length, mime_type, source);
     if (file_result != C2T_FILE_NOT_HANDLED) {
         return file_result == C2T_FILE_SENT;
     }
 
-    return telegram_send_data(event->data, event->length, event->mime_type,
-                              source);
+    return telegram_send_data(data, length, mime_type, source);
 }
 
 static void deliver_event(const clipboard_event_t *event)
@@ -178,9 +179,23 @@ static void deliver_event(const clipboard_event_t *event)
     const c2t_clipboard_source_t *source =
         event->has_source ? &event->source : nullptr;
 
+    unsigned char *plaintext = nullptr;
+    if (event->length > 0) {
+        plaintext = malloc(event->length);
+        if (!plaintext) {
+            c2t_log_error("clipboard", "Failed to allocate memory for event decryption");
+            return;
+        }
+        if (!c2t_crypto_decrypt(event->encrypted_data, event->length, event->nonce, plaintext)) {
+            c2t_log_error("clipboard", "Failed to decrypt clipboard payload in RAM");
+            free(plaintext);
+            return;
+        }
+    }
+
     if (strncmp(event->mime_type, "text/", 5) == 0) {
-        if (event->length > 0 &&
-            fwrite(event->data, 1, event->length, stdout) != event->length)
+        if (event->length > 0 && plaintext &&
+            fwrite(plaintext, 1, event->length, stdout) != event->length)
             c2t_log_warning("clipboard", "Unable to write content to stdout");
         if (fputc('\n', stdout) == EOF || fflush(stdout) == EOF)
             c2t_log_warning("clipboard", "Unable to flush stdout");
@@ -189,8 +204,13 @@ static void deliver_event(const clipboard_event_t *event)
     }
 
     for (size_t attempt = 1; attempt <= delivery_attempts; ++attempt) {
-        if (deliver_payload(event, source))
+        if (deliver_payload(plaintext, event->length, event->mime_type, source)) {
+            if (plaintext) {
+                c2t_secure_zero(plaintext, event->length);
+                free(plaintext);
+            }
             return;
+        }
         if (attempt < delivery_attempts) {
             c2t_log_warning("clipboard",
                             "Delivery attempt %llu/%llu failed; retrying",
@@ -201,6 +221,10 @@ static void deliver_event(const clipboard_event_t *event)
     }
     c2t_log_error("clipboard", "Clipboard delivery failed after %llu attempts",
                   (unsigned long long)delivery_attempts);
+    if (plaintext) {
+        c2t_secure_zero(plaintext, event->length);
+        free(plaintext);
+    }
 }
 
 #ifdef _WIN32
@@ -229,6 +253,7 @@ static void *delivery_worker([[maybe_unused]] void *context)
         queue_bytes -= event->allocation_size;
         --queue_items;
         queue_unlock();
+        c2t_secure_zero(event, event->allocation_size);
         free(event);
     }
     telegram_http_thread_cleanup();
@@ -243,6 +268,10 @@ int clipboard_output_init(void)
 {
     if (worker_started)
         return 1;
+    if (!c2t_crypto_init()) {
+        c2t_log_error("clipboard", "Unable to initialize crypto session key");
+        return 0;
+    }
     maximum_queue_bytes = c2t_config_get()->queue_max_bytes;
     maximum_queue_items = c2t_config_get()->queue_max_items;
     delivery_attempts = c2t_config_get()->delivery_attempts;
@@ -360,8 +389,20 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
         event->source = *source;
     else
         memset(&event->source, 0, sizeof(event->source));
-    if (length)
-        memcpy(event->data, data, length);
+    if (!c2t_crypto_get_random_bytes(event->nonce, C2T_CRYPTO_NONCE_SIZE)) {
+        queue_unlock();
+        c2t_secure_zero(event, allocation_size);
+        free(event);
+        c2t_log_error("clipboard", "Failed to generate random nonce for RAM encryption");
+        return;
+    }
+    if (length > 0 && !c2t_crypto_encrypt(data, length, event->nonce, event->encrypted_data)) {
+        queue_unlock();
+        c2t_secure_zero(event, allocation_size);
+        free(event);
+        c2t_log_error("clipboard", "Failed to encrypt clipboard data in RAM");
+        return;
+    }
 
     if (queue_tail)
         queue_tail->next = event;
@@ -405,6 +446,7 @@ void clipboard_output_cleanup(void)
     clipboard_event_t *current = queue_head;
     while (current) {
         clipboard_event_t *next = current->next;
+        c2t_secure_zero(current, current->allocation_size);
         free(current);
         current = next;
     }
@@ -413,6 +455,8 @@ void clipboard_output_cleanup(void)
     queue_bytes = 0;
     queue_items = 0;
     queue_unlock();
+
+    c2t_crypto_cleanup();
 
     last_duplicate_hash = 0;
     last_duplicate_length = 0;
