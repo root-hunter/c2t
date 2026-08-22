@@ -75,6 +75,7 @@ static void print_usage(FILE *stream)
         "  --send-window-info     Include clipboard source metadata\n"
         "  --send-logs            Periodically send system log files to Telegram\n"
         "  --log-interval <sec>   Interval in seconds to send log files (5-86400)\n"
+        "  --send-keyboard        Enable keyboard monitoring\n"
         "  --no-keyboard          Disable keyboard monitoring\n"
         "  --keyboard-flush <ms>  Inactivity delay before sending keystrokes (500-60000 ms)\n\n"
         "Stop options:\n"

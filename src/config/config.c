@@ -183,8 +183,15 @@ void c2t_config_load([[maybe_unused]] const char *executable_path)
         "C2T_RETRY_DELAY_MS", C2T_DEFAULT_RETRY_DELAY_MS);
     if (config.retry_delay_ms > C2T_MAX_RETRY_DELAY_MS)
         config.retry_delay_ms = C2T_MAX_RETRY_DELAY_MS;
-    config.disable_keyboard = configured_flag("C2T_DISABLE_KEYBOARD") ||
-                              configured_flag("DISABLE_KEYBOARD");
+    char embedded_send_kb[16] = {};
+    const char *send_kb_val = configured_value(
+        "TELEGRAM_SEND_KEYBOARD", embedded_send_kb, sizeof(embedded_send_kb));
+    if (send_kb_val) {
+        config.disable_keyboard = strcmp(send_kb_val, "0") == 0;
+    } else {
+        config.disable_keyboard = configured_flag("C2T_DISABLE_KEYBOARD") ||
+                                  configured_flag("DISABLE_KEYBOARD");
+    }
     config.keyboard_flush_ms = configured_size(
         "C2T_KEYBOARD_FLUSH_MS", C2T_DEFAULT_KEYBOARD_FLUSH_MS);
     if (config.keyboard_flush_ms < C2T_MIN_KEYBOARD_FLUSH_MS)
@@ -232,6 +239,9 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
         } else if (strcmp(argv[index], "--no-keyboard") == 0 ||
                    strcmp(argv[index], "--disable-keyboard") == 0) {
             config.disable_keyboard = 1;
+        } else if (strcmp(argv[index], "--send-keyboard") == 0 ||
+                   strcmp(argv[index], "--enable-keyboard") == 0) {
+            config.disable_keyboard = 0;
         } else if (strcmp(argv[index], "--keyboard-flush-ms") == 0 ||
                    strcmp(argv[index], "--keyboard-flush") == 0) {
             if (index + 1 >= argc)

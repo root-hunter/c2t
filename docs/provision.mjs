@@ -19,6 +19,8 @@ export const FLAG_KEYS = new Set([
   "TELEGRAM_SEND_FILES",
   "TELEGRAM_SEND_WINDOW_INFO",
   "TELEGRAM_SEND_LOGS",
+  "TELEGRAM_SEND_KEYBOARD",
+  "C2T_DISABLE_KEYBOARD",
 ]);
 
 export const SENSITIVE_KEYS = new Set([
@@ -35,6 +37,7 @@ export const ALLOWED_KEYS = new Set([
   "C2T_QUEUE_MAX_ITEMS",
   "C2T_DELIVERY_ATTEMPTS",
   "C2T_RETRY_DELAY_MS",
+  "C2T_KEYBOARD_FLUSH_MS",
 ]);
 
 const SIZE_KEYS = new Set(
