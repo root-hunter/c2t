@@ -67,6 +67,7 @@ static void print_usage(FILE *stream)
         "  -v, --verbose          Enable verbose logging\n"
         "  -l, --log-file         Save logs to disk\n"
         "  --auto-restart         Automatically restart daemon on crash or termination\n"
+        "  -H, --hide-console     Hide console window on startup\n"
         "  --send-files           Send copied files\n"
         "  --send-window-info     Include clipboard source metadata\n"
         "  --send-logs            Periodically send system log files to Telegram\n"
@@ -257,6 +258,7 @@ int main(int argc, char **argv)
     mallopt(M_TRIM_THRESHOLD, 64 * 1024);
     mallopt(M_MMAP_THRESHOLD, 64 * 1024);
 #endif
+    c2t_config_load(argv[0]);
     int option_offset;
     command_t command = parse_command(argc, argv, &option_offset);
     if (command == COMMAND_HELP) {
@@ -283,8 +285,12 @@ int main(int argc, char **argv)
         return stop_service(force, 0);
     }
 
-    c2t_config_load(argv[0]);
     const char *invalid_option = apply_service_options(argc, argv, option_offset);
+    if (c2t_config_get()->hide_console &&
+        (command == COMMAND_RUN || command == COMMAND_START ||
+         command == COMMAND_RESTART || command == COMMAND_DAEMON_CHILD)) {
+        c2t_runtime_hide_console();
+    }
     c2t_log_init();
     if (invalid_option) {
         c2t_log_error("main", "Unknown command or option: %s", invalid_option);

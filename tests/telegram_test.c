@@ -177,6 +177,28 @@ int main(void)
     c2t_config_load_environment();
     c2t_log_init();
 
+    unsetenv("C2T_HIDE_CONSOLE");
+    unsetenv("HIDE_CONSOLE");
+    c2t_config_load_environment();
+    if (c2t_config_get()->hide_console)
+        return fail("hide_console must be disabled by default");
+    setenv("C2T_HIDE_CONSOLE", "1", 1);
+    c2t_config_load_environment();
+    if (!c2t_config_get()->hide_console)
+        return fail("C2T_HIDE_CONSOLE must enable hide_console");
+    unsetenv("C2T_HIDE_CONSOLE");
+    setenv("HIDE_CONSOLE", "1", 1);
+    c2t_config_load_environment();
+    if (!c2t_config_get()->hide_console)
+        return fail("HIDE_CONSOLE must enable hide_console");
+    unsetenv("HIDE_CONSOLE");
+    c2t_config_load_environment();
+    char *hide_option[] = {(char *)"c2t", (char *)"--hide-console"};
+    if (c2t_config_apply_arguments(2, hide_option) != NULL ||
+        !c2t_config_get()->hide_console)
+        return fail("--hide-console must enable hide_console");
+    c2t_config_load_environment();
+
     unsetenv("TELEGRAM_ENABLED");
     c2t_config_load_environment();
     if (!telegram_init() || http_init_calls != 0)

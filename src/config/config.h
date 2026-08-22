@@ -24,6 +24,7 @@ typedef struct {
     int verbose;
     int log_file;
     int auto_restart;
+    int hide_console;
     int is_worker;
     int telegram_enabled;
     int telegram_deduplicate;

@@ -423,7 +423,7 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION process;
         BOOL created = CreateProcessA(executable, command, nullptr, nullptr, FALSE,
-            0, nullptr, nullptr, &startup, &process);
+            CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
         if (!created) {
             c2t_log_error("supervisor", "Failed to create worker process");
             sleep_ms(1000);
@@ -469,6 +469,15 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
 
     c2t_runtime_release();
     return 0;
+}
+
+void c2t_runtime_hide_console(void)
+{
+    HWND console_window = GetConsoleWindow();
+    if (console_window) {
+        ShowWindow(console_window, SW_HIDE);
+    }
+    FreeConsole();
 }
 
 #else
@@ -840,6 +849,11 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
     free(worker_argv);
     c2t_runtime_release();
     return 0;
+}
+
+void c2t_runtime_hide_console(void)
+{
+    (void)redirect_background_io();
 }
 
 #endif
