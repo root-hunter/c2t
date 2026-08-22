@@ -37,6 +37,9 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 #endif
 
 #define C2T_PATH_CAPACITY 4096U
