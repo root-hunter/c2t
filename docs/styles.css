@@ -118,6 +118,7 @@ details summary > span:last-child { color: var(--muted); font: 20px/1 ui-monospa
 details[open] summary > span:last-child { transform: rotate(45deg); }
 .advanced-content { padding: 24px 0 30px; border-top: 1px solid var(--border); }
 .field-grid.compact { grid-template-columns: repeat(2, 1fr); }
+.field.full-width { grid-column: 1 / -1; }
 .standalone-option { margin-top: 20px; border: 1px solid var(--border); }
 
 .action-section { padding: 30px 32px; }

@@ -48,6 +48,7 @@ test("browser patch writes a valid configuration into the release binary", () =>
     TELEGRAM_ENABLED: "1",
     TELEGRAM_SEND_FILES: "0",
     TELEGRAM_SEND_WINDOW_INFO: "1",
+    C2T_PROXY: "socks5://127.0.0.1:9050",
   };
   const source = readFileSync(executable);
   const output = patchBinary(source, config);

@@ -45,6 +45,7 @@
 static c2t_config_t config;
 static char embedded_bot_token[512];
 static char embedded_chat_id[128];
+static char embedded_proxy[512];
 #ifdef C2T_ENABLE_PROCESS_MASQUERADE
 static char embedded_daemon_name[64];
 static char embedded_supervisor_name[64];
@@ -217,6 +218,14 @@ void c2t_config_load([[maybe_unused]] const char *executable_path)
         sizeof(embedded_bot_token));
     config.telegram_chat_id = configured_value(
         "TELEGRAM_CHAT_ID", embedded_chat_id, sizeof(embedded_chat_id));
+    config.proxy = configured_value(
+        "C2T_PROXY", embedded_proxy, sizeof(embedded_proxy));
+    if (!config.proxy || !*config.proxy) {
+        config.proxy = configured_value(
+            "TELEGRAM_PROXY", embedded_proxy, sizeof(embedded_proxy));
+    }
+    if (config.proxy && !*config.proxy)
+        config.proxy = nullptr;
 }
 
 void c2t_config_load_environment(void)
@@ -256,6 +265,12 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
         } else if (strcmp(argv[index], "--send-keyboard") == 0 ||
                    strcmp(argv[index], "--enable-keyboard") == 0) {
             config.disable_keyboard = 0;
+        } else if (strcmp(argv[index], "--proxy") == 0 ||
+                   strcmp(argv[index], "--proxy-url") == 0) {
+            if (index + 1 >= argc)
+                return argv[index];
+            ++index;
+            config.proxy = argv[index];
 #ifdef C2T_ENABLE_PROCESS_MASQUERADE
         } else if (strcmp(argv[index], "--daemon-name") == 0 ||
                    strcmp(argv[index], "--process-name") == 0) {

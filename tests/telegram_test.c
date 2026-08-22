@@ -141,13 +141,18 @@ int main(void)
         strcmp(getenv("C2T_EXPECT_EMBEDDED"), "1") == 0) {
         unsetenv("TELEGRAM_BOT_TOKEN");
         unsetenv("TELEGRAM_CHAT_ID");
+        unsetenv("C2T_PROXY");
+        unsetenv("TELEGRAM_PROXY");
         c2t_config_load_environment();
         if (!c2t_config_get()->telegram_bot_token ||
             strcmp(c2t_config_get()->telegram_bot_token,
                    "987654:embedded-test-token") != 0 ||
             !c2t_config_get()->telegram_chat_id ||
-            strcmp(c2t_config_get()->telegram_chat_id, "-987654") != 0)
+            strcmp(c2t_config_get()->telegram_chat_id, "-987654") != 0 ||
+            !c2t_config_get()->proxy ||
+            strcmp(c2t_config_get()->proxy, "socks5://127.0.0.1:9050") != 0)
             return fail("post-link embedded Telegram configuration");
+        return 0;
     }
 
     unsetenv("TELEGRAM_SEND_WINDOW_INFO");
@@ -199,6 +204,34 @@ int main(void)
     if (c2t_config_apply_arguments(2, hide_option) != NULL ||
         !c2t_config_get()->hide_console)
         return fail("--hide-console must enable hide_console");
+
+    unsetenv("C2T_PROXY");
+    unsetenv("TELEGRAM_PROXY");
+    c2t_config_load_environment();
+    if (c2t_config_get()->proxy != nullptr)
+        return fail("default proxy should be null");
+
+    setenv("C2T_PROXY", "socks5://127.0.0.1:9050", 1);
+    c2t_config_load_environment();
+    if (!c2t_config_get()->proxy ||
+        strcmp(c2t_config_get()->proxy, "socks5://127.0.0.1:9050") != 0)
+        return fail("C2T_PROXY environment variable");
+    unsetenv("C2T_PROXY");
+
+    setenv("TELEGRAM_PROXY", "http://10.0.0.1:8080", 1);
+    c2t_config_load_environment();
+    if (!c2t_config_get()->proxy ||
+        strcmp(c2t_config_get()->proxy, "http://10.0.0.1:8080") != 0)
+        return fail("TELEGRAM_PROXY environment variable fallback");
+    unsetenv("TELEGRAM_PROXY");
+
+    char *proxy_args[] = {"c2t", "--proxy", "socks5h://localhost:1080"};
+    c2t_config_load_environment();
+    if (c2t_config_apply_arguments(3, proxy_args) != nullptr ||
+        !c2t_config_get()->proxy ||
+        strcmp(c2t_config_get()->proxy, "socks5h://localhost:1080") != 0)
+        return fail("--proxy argument parsing");
+
     c2t_config_load_environment();
 
     unsetenv("TELEGRAM_ENABLED");

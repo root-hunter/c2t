@@ -43,17 +43,20 @@ def main() -> int:
         provision_environment = os.environ.copy()
         provision_environment["TELEGRAM_BOT_TOKEN"] = "987654:embedded-test-token"
         provision_environment["TELEGRAM_CHAT_ID"] = "-987654"
+        provision_environment["C2T_PROXY"] = "socks5://127.0.0.1:9050"
         if sys.platform == "darwin":
             shutil.copy2(executable, provisioned)
             (directory / ".c2t.env").write_text(
                 "TELEGRAM_BOT_TOKEN=987654:embedded-test-token\n"
-                "TELEGRAM_CHAT_ID=-987654\n",
+                "TELEGRAM_CHAT_ID=-987654\n"
+                "C2T_PROXY=socks5://127.0.0.1:9050\n",
                 encoding="utf-8",
             )
             environment = os.environ.copy()
             environment["C2T_EXPECT_EMBEDDED"] = "1"
             environment.pop("TELEGRAM_BOT_TOKEN", None)
             environment.pop("TELEGRAM_CHAT_ID", None)
+            environment.pop("C2T_PROXY", None)
             run([str(provisioned)], env=environment)
             return 0
         run(
@@ -67,6 +70,8 @@ def main() -> int:
                 "TELEGRAM_BOT_TOKEN",
                 "--from-env",
                 "TELEGRAM_CHAT_ID",
+                "--from-env",
+                "C2T_PROXY",
                 "--output",
                 str(provisioned),
             ],
@@ -79,6 +84,8 @@ def main() -> int:
             raise RuntimeError("inspect did not redact the bot token")
         if "embedded-test-token" in inspected:
             raise RuntimeError("inspect exposed the bot token")
+        if "C2T_PROXY=<redacted>" not in inspected:
+            raise RuntimeError("inspect did not redact C2T_PROXY")
 
         environment = os.environ.copy()
         environment["C2T_EXPECT_EMBEDDED"] = "1"

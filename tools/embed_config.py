@@ -23,6 +23,7 @@ import argparse
 import binascii
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import sys
@@ -34,7 +35,7 @@ VERSION = 1
 HEADER_SIZE = 32
 PAYLOAD_CAPACITY = 4096
 REGION_SIZE = HEADER_SIZE + PAYLOAD_CAPACITY
-SENSITIVE_KEYS = {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"}
+SENSITIVE_KEYS = {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "C2T_PROXY", "TELEGRAM_PROXY"}
 ALLOWED_KEYS = {
     "C2T_VERBOSE",
     "C2T_LOG_FILE",
@@ -57,6 +58,8 @@ ALLOWED_KEYS = {
     "C2T_KEYBOARD_FLUSH_MS",
     "C2T_DAEMON_NAME",
     "C2T_SUPERVISOR_NAME",
+    "C2T_PROXY",
+    "TELEGRAM_PROXY",
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_CHAT_ID",
 }
@@ -136,6 +139,8 @@ def parse_config(stream) -> dict[str, str]:
             raise ProvisionError("TELEGRAM_BOT_TOKEN is too long")
         if key == "TELEGRAM_CHAT_ID" and len(value.encode("utf-8")) >= 128:
             raise ProvisionError("TELEGRAM_CHAT_ID is too long")
+        if (key == "C2T_PROXY" or key == "TELEGRAM_PROXY") and len(value.encode("utf-8")) >= 512:
+            raise ProvisionError(f"{key} is too long")
         result[key] = value
     return result
 

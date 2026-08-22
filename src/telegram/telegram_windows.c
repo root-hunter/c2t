@@ -16,6 +16,7 @@
  */
 
 #include "telegram_platform.h"
+#include "../config/config.h"
 #include "../logging/logging.h"
 #include "c2t_version.h"
 
@@ -54,10 +55,31 @@ static void read_error_response(HINTERNET request,
 
 int telegram_http_init(void)
 {
-    session = WinHttpOpen(C2T_USER_AGENT_WIDE,
-                          WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                          WINHTTP_NO_PROXY_NAME,
-                          WINHTTP_NO_PROXY_BYPASS, 0);
+    const c2t_config_t *cfg = c2t_config_get();
+    if (cfg && cfg->proxy && *cfg->proxy) {
+        int proxy_length = MultiByteToWideChar(
+            CP_UTF8, 0, cfg->proxy, -1, NULL, 0);
+        wchar_t *wide_proxy = proxy_length > 0 ?
+            malloc((size_t)proxy_length * sizeof(wchar_t)) : NULL;
+        if (wide_proxy) {
+            MultiByteToWideChar(CP_UTF8, 0, cfg->proxy, -1, wide_proxy, proxy_length);
+            session = WinHttpOpen(C2T_USER_AGENT_WIDE,
+                                  WINHTTP_ACCESS_TYPE_NAMED_PROXY,
+                                  wide_proxy,
+                                  WINHTTP_NO_PROXY_BYPASS, 0);
+            free(wide_proxy);
+        } else {
+            session = WinHttpOpen(C2T_USER_AGENT_WIDE,
+                                  WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                                  WINHTTP_NO_PROXY_NAME,
+                                  WINHTTP_NO_PROXY_BYPASS, 0);
+        }
+    } else {
+        session = WinHttpOpen(C2T_USER_AGENT_WIDE,
+                              WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                              WINHTTP_NO_PROXY_NAME,
+                              WINHTTP_NO_PROXY_BYPASS, 0);
+    }
     if (session) {
         WinHttpSetTimeouts(session, 5000, 5000, 5000, 15000);
         connection = WinHttpConnect(session, L"api.telegram.org",

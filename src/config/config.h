@@ -45,6 +45,7 @@ typedef struct {
 #endif
     const char *telegram_bot_token;
     const char *telegram_chat_id;
+    const char *proxy;
 } c2t_config_t;
 
 void c2t_config_load(const char *executable_path);

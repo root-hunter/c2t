@@ -26,6 +26,8 @@ export const FLAG_KEYS = new Set([
 export const SENSITIVE_KEYS = new Set([
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_CHAT_ID",
+  "C2T_PROXY",
+  "TELEGRAM_PROXY",
 ]);
 
 export const ALLOWED_KEYS = new Set([
@@ -83,6 +85,9 @@ export function validateConfig(config) {
     }
     if (key === "TELEGRAM_CHAT_ID" && byteLength >= 128) {
       throw new Error("The Telegram chat ID is too long");
+    }
+    if ((key === "C2T_PROXY" || key === "TELEGRAM_PROXY") && byteLength >= 512) {
+      throw new Error("The proxy server address is too long");
     }
     normalized[key] = value;
   }

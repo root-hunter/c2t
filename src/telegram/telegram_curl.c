@@ -16,6 +16,7 @@
  */
 
 #include "telegram_platform.h"
+#include "../config/config.h"
 #include "../logging/logging.h"
 #include "c2t_version.h"
 
@@ -97,16 +98,19 @@ static CURL *acquire_curl_handle(void)
 {
     if (!thread_curl_handle) {
         thread_curl_handle = curl_easy_init();
-        if (thread_curl_handle) {
-            curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPALIVE, 1L);
-            curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPIDLE, 60L);
-            curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPINTVL, 60L);
-        }
     } else {
         curl_easy_reset(thread_curl_handle);
+    }
+    if (thread_curl_handle) {
         curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPALIVE, 1L);
         curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPIDLE, 60L);
         curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPINTVL, 60L);
+        const c2t_config_t *cfg = c2t_config_get();
+        if (cfg && cfg->proxy && *cfg->proxy) {
+            curl_easy_setopt(thread_curl_handle, CURLOPT_PROXY, cfg->proxy);
+        } else {
+            curl_easy_setopt(thread_curl_handle, CURLOPT_PROXY, "");
+        }
     }
     return thread_curl_handle;
 }
