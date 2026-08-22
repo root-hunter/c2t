@@ -1,5 +1,5 @@
 import { encodePayload, patchBinary } from "./provision.mjs";
-import { inferPlatform, PLATFORMS } from "./platforms.mjs";
+import { detectUserPlatform, inferPlatform, PLATFORMS } from "./platforms.mjs";
 import { createExecutableTarGz, createMacOSBundleTarGz } from "./archive.mjs";
 
 const RELEASE_METADATA_URL = "./release.json";
@@ -16,6 +16,16 @@ const linuxFormat = document.querySelector("#linux-format");
 const linuxFormatNote = document.querySelector("#linux-format-note");
 let latestRelease = null;
 let localBinary = null;
+
+function initPlatformSelection() {
+  const detected = detectUserPlatform();
+  if (detected && PLATFORMS[detected]) {
+    const radio = form.querySelector(`input[name="platform"][value="${detected}"]`);
+    if (radio) {
+      radio.checked = true;
+    }
+  }
+}
 
 function selectedPlatform() {
   return new FormData(form).get("platform");
@@ -278,4 +288,5 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
+initPlatformSelection();
 loadRelease();

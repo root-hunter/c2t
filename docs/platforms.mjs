@@ -68,3 +68,61 @@ export function inferPlatform(binary) {
   }
   throw new Error("The local file is not a supported c2t platform binary");
 }
+
+export function detectUserPlatform(nav = typeof navigator !== "undefined" ? navigator : null) {
+  if (!nav) return "linux-x86_64";
+
+  const ua = String(nav.userAgent || "").toLowerCase();
+  const platform = String(nav.platform || "").toLowerCase();
+  const uadPlatform = String(nav.userAgentData?.platform || "").toLowerCase();
+
+  // Windows detection
+  if (
+    uadPlatform.includes("win") ||
+    platform.includes("win") ||
+    ua.includes("windows") ||
+    ua.includes("win32") ||
+    ua.includes("win64")
+  ) {
+    return "windows-x86_64";
+  }
+
+  // macOS detection
+  if (
+    uadPlatform.includes("mac") ||
+    platform.includes("mac") ||
+    ua.includes("macintosh") ||
+    ua.includes("mac os x")
+  ) {
+    const isArm =
+      ua.includes("arm64") ||
+      ua.includes("aarch64") ||
+      nav.userAgentData?.architecture === "arm";
+    if (isArm) {
+      return "macos-aarch64";
+    }
+    if (ua.includes("intel") || platform === "macintel") {
+      return "macos-x86_64";
+    }
+    return "macos-aarch64";
+  }
+
+  // Linux detection
+  if (
+    uadPlatform.includes("linux") ||
+    platform.includes("linux") ||
+    ua.includes("linux") ||
+    ua.includes("x11")
+  ) {
+    const isArm =
+      ua.includes("aarch64") ||
+      ua.includes("arm64") ||
+      ua.includes("armv8") ||
+      platform.includes("aarch64") ||
+      platform.includes("arm") ||
+      nav.userAgentData?.architecture === "arm";
+    return isArm ? "linux-aarch64" : "linux-x86_64";
+  }
+
+  return "linux-x86_64";
+}

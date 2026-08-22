@@ -18,7 +18,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { inferPlatform, PLATFORMS } from "../docs/platforms.mjs";
+import { detectUserPlatform, inferPlatform, PLATFORMS } from "../docs/platforms.mjs";
 
 function elf(machine) {
   const binary = new Uint8Array(20);
@@ -60,4 +60,67 @@ test("thin Mach-O files select Intel or Apple Silicon", () => {
   ]);
   assert.equal(inferPlatform(macho(0x01000007)), "macos-x86_64");
   assert.equal(inferPlatform(macho(0x0100000c)), "macos-aarch64");
+});
+
+test("detectUserPlatform identifies the visitor platform correctly", () => {
+  assert.equal(detectUserPlatform(null), "linux-x86_64");
+
+  // Windows
+  assert.equal(
+    detectUserPlatform({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      platform: "Win32",
+    }),
+    "windows-x86_64",
+  );
+  assert.equal(
+    detectUserPlatform({
+      userAgent: "Mozilla/5.0",
+      userAgentData: { platform: "Windows" },
+    }),
+    "windows-x86_64",
+  );
+
+  // macOS Intel
+  assert.equal(
+    detectUserPlatform({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15",
+      platform: "MacIntel",
+    }),
+    "macos-x86_64",
+  );
+
+  // macOS Apple Silicon (ARM64)
+  assert.equal(
+    detectUserPlatform({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7; arm64)",
+      platform: "MacIntel",
+    }),
+    "macos-aarch64",
+  );
+  assert.equal(
+    detectUserPlatform({
+      userAgent: "Mozilla/5.0 (Macintosh)",
+      userAgentData: { platform: "macOS", architecture: "arm" },
+    }),
+    "macos-aarch64",
+  );
+
+  // Linux x86_64
+  assert.equal(
+    detectUserPlatform({
+      userAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/119.0",
+      platform: "Linux x86_64",
+    }),
+    "linux-x86_64",
+  );
+
+  // Linux ARM64
+  assert.equal(
+    detectUserPlatform({
+      userAgent: "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36",
+      platform: "Linux aarch64",
+    }),
+    "linux-aarch64",
+  );
 });
