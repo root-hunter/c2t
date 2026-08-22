@@ -59,6 +59,7 @@ target_compile_options(c2t PRIVATE
     $<$<AND:$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>,$<C_COMPILER_ID:GNU,Clang,AppleClang>>:-fno-unwind-tables;-fno-asynchronous-unwind-tables>
     $<$<AND:$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>,$<C_COMPILER_ID:GNU,Clang>>:-fno-ident>
     $<$<AND:$<CONFIG:MinSizeRel>,$<C_COMPILER_ID:Clang,AppleClang>>:-Oz>
+    $<$<AND:$<CONFIG:Release>,$<C_COMPILER_ID:GNU,Clang,AppleClang>>:-O3;-fmerge-all-constants>
 )
 target_link_options(c2t PRIVATE
     $<$<AND:$<NOT:$<PLATFORM_ID:Darwin>>,$<C_COMPILER_ID:GNU,Clang>>:-Wl,--gc-sections>

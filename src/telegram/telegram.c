@@ -686,14 +686,6 @@ static int contains_bytes(const unsigned char *data, size_t length,
     return 0;
 }
 
-static int add_size(size_t *total, size_t value)
-{
-    if (value > SIZE_MAX - *total)
-        return 0;
-    *total += value;
-    return 1;
-}
-
 static void sanitize_filename(const char *filename, char output[256])
 {
     size_t index = 0;
@@ -709,6 +701,57 @@ static void sanitize_filename(const char *filename, char output[256])
         return;
     }
     output[index] = '\0';
+}
+
+typedef struct {
+    const char *prefix;
+    size_t prefix_len;
+    const unsigned char *data;
+    size_t data_len;
+    const char *suffix;
+    size_t suffix_len;
+    size_t offset;
+} c2t_buffer_stream_t;
+
+static size_t c2t_buffer_stream_read(void *user_data, void *buffer, size_t max_len)
+{
+    c2t_buffer_stream_t *stream = (c2t_buffer_stream_t *)user_data;
+    if (!stream || !buffer || max_len == 0)
+        return 0;
+
+    size_t total_written = 0;
+    unsigned char *out = (unsigned char *)buffer;
+
+    while (total_written < max_len) {
+        size_t current = stream->offset;
+        size_t remaining_wanted = max_len - total_written;
+
+        if (current < stream->prefix_len) {
+            size_t avail = stream->prefix_len - current;
+            size_t chunk = remaining_wanted < avail ? remaining_wanted : avail;
+            memcpy(out + total_written, stream->prefix + current, chunk);
+            stream->offset += chunk;
+            total_written += chunk;
+        } else if (current < stream->prefix_len + stream->data_len) {
+            size_t data_offset = current - stream->prefix_len;
+            size_t avail = stream->data_len - data_offset;
+            size_t chunk = remaining_wanted < avail ? remaining_wanted : avail;
+            memcpy(out + total_written, stream->data + data_offset, chunk);
+            stream->offset += chunk;
+            total_written += chunk;
+        } else if (current < stream->prefix_len + stream->data_len + stream->suffix_len) {
+            size_t suffix_offset = current - stream->prefix_len - stream->data_len;
+            size_t avail = stream->suffix_len - suffix_offset;
+            size_t chunk = remaining_wanted < avail ? remaining_wanted : avail;
+            memcpy(out + total_written, stream->suffix + suffix_offset, chunk);
+            stream->offset += chunk;
+            total_written += chunk;
+        } else {
+            break;
+        }
+    }
+
+    return total_written;
 }
 
 static int send_file(const void *data, size_t length, const char *mime_type,
@@ -779,33 +822,26 @@ static int send_file(const void *data, size_t length, const char *mime_type,
         suffix_length < 0 || (size_t)suffix_length >= sizeof(suffix_buf))
         return 0;
 
-    size_t body_length = (size_t)prefix_length;
-    if (!add_size(&body_length, length) ||
-        !add_size(&body_length, (size_t)suffix_length)) {
-        c2t_log_error("telegram", "Clipboard file is too large");
-        return 0;
-    }
+    c2t_buffer_stream_t buf_stream = {
+        .prefix = prefix_buf,
+        .prefix_len = (size_t)prefix_length,
+        .data = (const unsigned char *)data,
+        .data_len = length,
+        .suffix = suffix_buf,
+        .suffix_len = (size_t)suffix_length,
+        .offset = 0
+    };
 
-    if (body_length == SIZE_MAX)
-        return 0;
-    unsigned char *body = malloc(body_length + 1);
-    if (!body) {
-        c2t_log_error("telegram", "Not enough memory for upload body");
-        return 0;
-    }
-    memcpy(body, prefix_buf, (size_t)prefix_length);
-    if (length)
-        memcpy(body + prefix_length, data, length);
-    memcpy(body + prefix_length + length, suffix_buf, (size_t)suffix_length);
-    body[body_length] = '\0';
+    c2t_stream_t stream = {
+        .read = c2t_buffer_stream_read,
+        .total_size = (size_t)prefix_length + length + (size_t)suffix_length,
+        .user_data = &buf_stream
+    };
 
     char content_type[96];
     snprintf(content_type, sizeof(content_type),
              "multipart/form-data; boundary=%s", boundary);
-    int result = telegram_http_post(bot_token, method, content_type,
-                                    body, body_length);
-    free(body);
-    return result;
+    return telegram_http_post_stream(bot_token, method, content_type, &stream);
 }
 
 static int send_encrypted_file(const void *encrypted_data, size_t length,
@@ -955,7 +991,8 @@ int telegram_send_keyboard(const char *text, size_t length)
     #define MAX_CODE_BODY_LEN 3200
 
     size_t max_escaped_len = length * 6 + 1;
-    char *escaped = malloc(max_escaped_len);
+    char stack_escaped[1024];
+    char *escaped = max_escaped_len <= sizeof(stack_escaped) ? stack_escaped : malloc(max_escaped_len);
     if (!escaped) {
         return telegram_send(text, length, nullptr);
     }
@@ -1006,7 +1043,8 @@ int telegram_send_keyboard(const char *text, size_t length)
         }
     }
 
-    free(escaped);
+    if (escaped != stack_escaped)
+        free(escaped);
     return result;
 }
 
@@ -1163,7 +1201,8 @@ int telegram_send(const char *text, size_t length,
         size_t available = TELEGRAM_MAX_CHARACTERS - source_characters - 2;
         size_t chunk_length = utf8_chunk_length(text, length, available);
         size_t message_length = source_length + 2 + chunk_length;
-        char *message = malloc(message_length);
+        char stack_message[4096];
+        char *message = message_length <= sizeof(stack_message) ? stack_message : malloc(message_length);
         if (!message) {
             return 0;
         }
@@ -1171,7 +1210,8 @@ int telegram_send(const char *text, size_t length,
         memcpy(message + source_length, "\n\n", 2);
         memcpy(message + source_length + 2, text, chunk_length);
         result = send_form(message, message_length);
-        free(message);
+        if (message != stack_message)
+            free(message);
         text += chunk_length;
         length -= chunk_length;
         ++chunk_index;
@@ -1265,41 +1305,23 @@ static int parse_json_field_in_range(const char *start, const char *end, const c
 {
     if (!start || !end || start >= end || !key || !output || capacity == 0) return 0;
     output[0] = '\0';
-
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    size_t pat_len = strlen(pattern);
+    size_t key_len = strlen(key);
 
     const char *pos = start;
-    while (pos + pat_len <= end) {
-        if (memcmp(pos, pattern, pat_len) == 0) {
-            pos += pat_len;
-            while (pos < end && (*pos == ' ' || *pos == ':')) pos++;
+    while (pos + key_len + 2 <= end) {
+        if (*pos == '"' && memcmp(pos + 1, key, key_len) == 0 && pos[1 + key_len] == '"') {
+            pos += 2 + key_len;
+            while (pos < end && (*pos == ' ' || *pos == '\t' || *pos == '\r' || *pos == '\n' || *pos == ':')) pos++;
             if (pos < end && *pos == '"') {
                 pos++;
                 size_t len = 0;
                 while (pos < end && *pos != '"' && len + 1 < capacity) {
                     if (*pos == '\\' && pos + 1 < end) {
                         pos++;
-                        if (*pos == 'n') {
-                            output[len++] = '\n';
-                            pos++;
-                            continue;
-                        }
-                        if (*pos == 'r') {
-                            output[len++] = '\r';
-                            pos++;
-                            continue;
-                        }
-                        if (*pos == 't') {
-                            output[len++] = '\t';
-                            pos++;
-                            continue;
-                        }
-                        if (*pos == '\"' || *pos == '\\' || *pos == '/') {
-                            output[len++] = *pos++;
-                            continue;
-                        }
+                        if (*pos == 'n') { output[len++] = '\n'; pos++; continue; }
+                        if (*pos == 'r') { output[len++] = '\r'; pos++; continue; }
+                        if (*pos == 't') { output[len++] = '\t'; pos++; continue; }
+                        if (*pos == '\"' || *pos == '\\' || *pos == '/') { output[len++] = *pos++; continue; }
                     }
                     output[len++] = *pos++;
                 }
@@ -1319,18 +1341,16 @@ static int parse_json_chat_id_in_range(const char *start, const char *end, char 
     output[0] = '\0';
 
     const char *chat_pos = nullptr;
-    char chat_pattern[] = "\"chat\"";
     for (const char *p = start; p + 6 <= end; p++) {
-        if (memcmp(p, chat_pattern, 6) == 0) {
-            chat_pos = p;
+        if (memcmp(p, "\"chat\"", 6) == 0) {
+            chat_pos = p + 6;
             break;
         }
     }
     if (!chat_pos) {
-        char from_pattern[] = "\"from\"";
         for (const char *p = start; p + 6 <= end; p++) {
-            if (memcmp(p, from_pattern, 6) == 0) {
-                chat_pos = p;
+            if (memcmp(p, "\"from\"", 6) == 0) {
+                chat_pos = p + 6;
                 break;
             }
         }
@@ -1338,16 +1358,15 @@ static int parse_json_chat_id_in_range(const char *start, const char *end, char 
     if (!chat_pos) chat_pos = start;
 
     const char *id_pos = nullptr;
-    char id_pattern[] = "\"id\"";
     for (const char *p = chat_pos; p + 4 <= end; p++) {
-        if (memcmp(p, id_pattern, 4) == 0) {
+        if (memcmp(p, "\"id\"", 4) == 0) {
             id_pos = p + 4;
             break;
         }
     }
     if (!id_pos) return 0;
 
-    while (id_pos < end && (*id_pos == ' ' || *id_pos == ':')) id_pos++;
+    while (id_pos < end && (*id_pos == ' ' || *id_pos == '\t' || *id_pos == '\r' || *id_pos == '\n' || *id_pos == ':')) id_pos++;
     if (id_pos < end && *id_pos == '"') id_pos++;
 
     size_t len = 0;
@@ -1362,24 +1381,20 @@ static int parse_json_number_in_range(const char *start, const char *end, const 
 {
     if (!start || !end || start >= end || !key || !val_out) return 0;
     *val_out = 0;
-
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    size_t pat_len = strlen(pattern);
+    size_t key_len = strlen(key);
 
     const char *pos = start;
-    while (pos + pat_len <= end) {
-        if (memcmp(pos, pattern, pat_len) == 0) {
-            pos += pat_len;
-            while (pos < end && (*pos == ' ' || *pos == ':')) pos++;
-            if (pos < end && (*pos >= '0' && *pos <= '9')) {
-                char num_buf[32];
-                size_t nlen = 0;
-                while (pos < end && (*pos >= '0' && *pos <= '9') && nlen + 1 < sizeof(num_buf)) {
-                    num_buf[nlen++] = *pos++;
+    while (pos + key_len + 2 <= end) {
+        if (*pos == '"' && memcmp(pos + 1, key, key_len) == 0 && pos[1 + key_len] == '"') {
+            pos += 2 + key_len;
+            while (pos < end && (*pos == ' ' || *pos == '\t' || *pos == '\r' || *pos == '\n' || *pos == ':')) pos++;
+            if (pos < end && *pos >= '0' && *pos <= '9') {
+                uint64_t v = 0;
+                while (pos < end && *pos >= '0' && *pos <= '9') {
+                    v = v * 10 + (uint64_t)(*pos - '0');
+                    pos++;
                 }
-                num_buf[nlen] = '\0';
-                *val_out = strtoull(num_buf, nullptr, 10);
+                *val_out = v;
                 return 1;
             }
             break;

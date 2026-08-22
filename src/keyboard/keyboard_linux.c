@@ -479,7 +479,21 @@ static const layout_def_t all_layouts[] = {
 
 static const size_t layout_count = sizeof(all_layouts) / sizeof(all_layouts[0]);
 static size_t current_layout_index = 0;
+static const key_entry_t *active_direct_keymap[256];
 static pthread_mutex_t layout_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void rebuild_direct_keymap_locked(size_t layout_idx)
+{
+    memset((void *)active_direct_keymap, 0, sizeof(active_direct_keymap));
+    if (layout_idx >= layout_count)
+        return;
+    const layout_def_t *cur = &all_layouts[layout_idx];
+    for (size_t i = 0; i < cur->count; i++) {
+        if (cur->entries[i].key < 256) {
+            active_direct_keymap[cur->entries[i].key] = &cur->entries[i];
+        }
+    }
+}
 
 static const char *detect_system_keyboard_layout(void)
 {
@@ -572,6 +586,7 @@ int keyboard_set_layout(const char *layout_name)
             strcasecmp(all_layouts[i].name, layout_name) == 0 ||
             (strcasecmp(layout_name, "gb") == 0 && strcmp(all_layouts[i].code, "uk") == 0)) {
             current_layout_index = i;
+            rebuild_direct_keymap_locked(i);
             pthread_mutex_unlock(&layout_lock);
             c2t_log_info("keyboard", "Active keyboard layout changed to %s (%s)",
                          all_layouts[i].name, all_layouts[i].code);
@@ -866,17 +881,9 @@ static void translate_and_emit_key(uint32_t key, int ev_value)
             is_printable = 1;
             break;
         default: {
-            /* Map through active keyboard layout */
+            /* Map through active keyboard layout (O(1) direct lookup) */
             pthread_mutex_lock(&layout_lock);
-            const layout_def_t *cur_layout = &all_layouts[current_layout_index];
-            const key_entry_t *found_entry = nullptr;
-
-            for (size_t i = 0; i < cur_layout->count; i++) {
-                if (cur_layout->entries[i].key == key) {
-                    found_entry = &cur_layout->entries[i];
-                    break;
-                }
-            }
+            const key_entry_t *found_entry = (key < 256) ? active_direct_keymap[key] : nullptr;
 
             if (found_entry) {
                 const char *glyph = nullptr;
