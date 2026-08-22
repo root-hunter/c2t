@@ -21,17 +21,17 @@ TAG := v$(VERSION)
 all: linux
 
 linux:
-	cmake -S . -B build/linux -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel
+	cmake -S . -B build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/linux
 
 windows:
 	cmake -S . -B build/windows -G Ninja \
-		-DCMAKE_BUILD_TYPE=MinSizeRel \
+		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake
 	cmake --build build/windows
 
 macos:
-	cmake -S . -B build/macos -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel
+	cmake -S . -B build/macos -G Ninja -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/macos
 
 run: linux

@@ -25,7 +25,7 @@ configure_file(src/version.h.in generated/c2t_version.h @ONLY)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE MinSizeRel CACHE STRING "Build type" FORCE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
 add_executable(c2t
@@ -42,21 +42,44 @@ add_executable(c2t
 )
 target_compile_features(c2t PRIVATE c_std_11)
 target_include_directories(c2t PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set_target_properties(c2t PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+)
 target_compile_options(c2t PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-ffunction-sections;-fdata-sections>
+    $<$<AND:$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>,$<C_COMPILER_ID:GNU,Clang,AppleClang>>:-fno-unwind-tables;-fno-asynchronous-unwind-tables>
+    $<$<AND:$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>,$<C_COMPILER_ID:GNU,Clang>>:-fno-ident>
+    $<$<AND:$<CONFIG:MinSizeRel>,$<C_COMPILER_ID:Clang,AppleClang>>:-Oz>
 )
 target_link_options(c2t PRIVATE
     $<$<AND:$<NOT:$<PLATFORM_ID:Darwin>>,$<C_COMPILER_ID:GNU,Clang>>:-Wl,--gc-sections>
     $<$<PLATFORM_ID:Darwin>:-Wl,-dead_strip>
-    $<$<AND:$<CONFIG:MinSizeRel>,$<C_COMPILER_ID:GNU,Clang>>:-s>
+    $<$<AND:$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>,$<C_COMPILER_ID:GNU,Clang>>:-s>
 )
 
 include(CheckIPOSupported)
 check_ipo_supported(RESULT C2T_IPO_SUPPORTED OUTPUT C2T_IPO_ERROR)
 if(C2T_IPO_SUPPORTED)
     set_property(TARGET c2t PROPERTY INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL TRUE)
+    set_property(TARGET c2t PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 else()
     message(STATUS "IPO/LTO is unavailable: ${C2T_IPO_ERROR}")
+endif()
+
+include(CheckLinkerFlag)
+check_linker_flag(C "-Wl,--icf=all" C2T_LINKER_HAS_ICF_ALL)
+if(C2T_LINKER_HAS_ICF_ALL)
+    target_link_options(c2t PRIVATE
+        $<$<AND:$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>,$<NOT:$<PLATFORM_ID:Darwin>>,$<C_COMPILER_ID:GNU,Clang>>:-Wl,--icf=all>
+    )
+else()
+    check_linker_flag(C "-Wl,--icf=safe" C2T_LINKER_HAS_ICF_SAFE)
+    if(C2T_LINKER_HAS_ICF_SAFE)
+        target_link_options(c2t PRIVATE
+            $<$<AND:$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>,$<NOT:$<PLATFORM_ID:Darwin>>,$<C_COMPILER_ID:GNU,Clang>>:-Wl,--icf=safe>
+        )
+    endif()
 endif()
 
 if(WIN32)

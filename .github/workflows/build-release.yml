@@ -136,7 +136,7 @@ jobs:
                 zstd-dev \
                 zstd-static
               cmake -S /src -B /build -G Ninja \
-                -DCMAKE_BUILD_TYPE=MinSizeRel \
+                -DCMAKE_BUILD_TYPE=Release \
                 -DBUILD_TESTING=ON
               cmake --build /build --parallel 2
               ctest --test-dir /build --output-on-failure
@@ -146,7 +146,7 @@ jobs:
         if: matrix.platform == 'linux-glibc'
         run: >-
           cmake -S . -B build/linux-glibc -G Ninja
-          -DCMAKE_BUILD_TYPE=MinSizeRel
+          -DCMAKE_BUILD_TYPE=Release
           -DBUILD_TESTING=ON
           -DC2T_STANDALONE_LINUX=OFF
 
@@ -154,7 +154,7 @@ jobs:
         if: matrix.platform == 'windows'
         run: >-
           cmake -S . -B build/windows -G Ninja
-          -DCMAKE_BUILD_TYPE=MinSizeRel
+          -DCMAKE_BUILD_TYPE=Release
           -DBUILD_TESTING=OFF
           -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake
 
@@ -162,7 +162,7 @@ jobs:
         if: matrix.platform == 'macos'
         run: >-
           cmake -S . -B build/macos -G Ninja
-          -DCMAKE_BUILD_TYPE=MinSizeRel
+          -DCMAKE_BUILD_TYPE=Release
           -DBUILD_TESTING=ON
 
       - name: Build
