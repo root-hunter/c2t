@@ -31,186 +31,258 @@ static HANDLE listener_thread;
 static DWORD listener_thread_id;
 static int listener_started;
 static volatile int stopping;
-static HHOOK keyboard_hook;
 
+#ifdef C2T_USE_LEGACY_KEYBOARD_HOOK
+static HHOOK keyboard_hook;
+#else
+static HWND raw_input_hwnd;
+static const wchar_t RAW_INPUT_CLASS_NAME[] = L"C2T_RawInputListenerWindow";
+#endif
+
+static void process_windows_key_event(DWORD vk, DWORD scan_code, [[maybe_unused]] int is_extended)
+{
+    if (vk == 0 || vk == 255)
+        return;
+
+    /* Ignore standalone modifier keydown events so they don't produce empty labels */
+    if (vk == VK_LCONTROL || vk == VK_RCONTROL || vk == VK_CONTROL ||
+        vk == VK_LMENU || vk == VK_RMENU || vk == VK_MENU ||
+        vk == VK_LSHIFT || vk == VK_RSHIFT || vk == VK_SHIFT ||
+        vk == VK_LWIN || vk == VK_RWIN) {
+        return;
+    }
+
+    int ctrl_down = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+    int shift_down = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    int alt_down = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+    int win_down = (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 ||
+                   (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
+
+    char key_label[64] = {0};
+    int is_special = 0;
+    int is_printable = 0;
+
+    if (vk >= VK_F1 && vk <= VK_F24) {
+        snprintf(key_label, sizeof(key_label), "F%lu", (unsigned long)(vk - VK_F1 + 1));
+        is_special = 1;
+    } else {
+        switch (vk) {
+        case VK_RETURN:
+            key_label[0] = '\n';
+            key_label[1] = '\0';
+            is_printable = 1;
+            break;
+        case VK_SPACE:
+            key_label[0] = ' ';
+            key_label[1] = '\0';
+            is_printable = 1;
+            break;
+        case VK_TAB:
+            key_label[0] = '\t';
+            key_label[1] = '\0';
+            is_printable = 1;
+            break;
+        case VK_BACK:
+            keyboard_output_backspace();
+            break;
+        case VK_ESCAPE:
+            snprintf(key_label, sizeof(key_label), "ESC");
+            is_special = 1;
+            break;
+        case VK_DELETE:
+            snprintf(key_label, sizeof(key_label), "Del");
+            is_special = 1;
+            break;
+        case VK_INSERT:
+            snprintf(key_label, sizeof(key_label), "Ins");
+            is_special = 1;
+            break;
+        case VK_HOME:
+            snprintf(key_label, sizeof(key_label), "Home");
+            is_special = 1;
+            break;
+        case VK_END:
+            snprintf(key_label, sizeof(key_label), "End");
+            is_special = 1;
+            break;
+        case VK_PRIOR:
+            snprintf(key_label, sizeof(key_label), "PgUp");
+            is_special = 1;
+            break;
+        case VK_NEXT:
+            snprintf(key_label, sizeof(key_label), "PgDn");
+            is_special = 1;
+            break;
+        case VK_LEFT:
+            snprintf(key_label, sizeof(key_label), "Left");
+            is_special = 1;
+            break;
+        case VK_UP:
+            snprintf(key_label, sizeof(key_label), "Up");
+            is_special = 1;
+            break;
+        case VK_RIGHT:
+            snprintf(key_label, sizeof(key_label), "Right");
+            is_special = 1;
+            break;
+        case VK_DOWN:
+            snprintf(key_label, sizeof(key_label), "Down");
+            is_special = 1;
+            break;
+        case VK_SNAPSHOT:
+            snprintf(key_label, sizeof(key_label), "PrtScn");
+            is_special = 1;
+            break;
+        case VK_PAUSE:
+            snprintf(key_label, sizeof(key_label), "Pause");
+            is_special = 1;
+            break;
+        case VK_SCROLL:
+            snprintf(key_label, sizeof(key_label), "ScrollLock");
+            is_special = 1;
+            break;
+        case VK_NUMLOCK:
+            snprintf(key_label, sizeof(key_label), "NumLock");
+            is_special = 1;
+            break;
+        default: {
+            BYTE key_state[256] = {0};
+            if (shift_down) key_state[VK_SHIFT] = 0x80;
+            if (ctrl_down) key_state[VK_CONTROL] = 0x80;
+            if (alt_down) key_state[VK_MENU] = 0x80;
+            if (GetKeyState(VK_CAPITAL) & 0x0001) key_state[VK_CAPITAL] = 0x01;
+
+            HWND fg_wnd = GetForegroundWindow();
+            DWORD fg_thread = fg_wnd ? GetWindowThreadProcessId(fg_wnd, nullptr) : 0;
+            HKL hkl = fg_thread ? GetKeyboardLayout(fg_thread) : GetKeyboardLayout(0);
+
+            WCHAR unicode_buf[8] = {0};
+            int count = ToUnicodeEx(vk, scan_code, key_state, unicode_buf, 4, 0, hkl);
+            if (count > 0) {
+                int utf8_bytes = WideCharToMultiByte(CP_UTF8, 0, unicode_buf, count,
+                                                     key_label, sizeof(key_label) - 1, nullptr, nullptr);
+                if (utf8_bytes > 0) {
+                    key_label[utf8_bytes] = '\0';
+                    is_printable = 1;
+                }
+            }
+            break;
+        }
+        }
+    }
+
+    if (is_special || is_printable) {
+        int is_altgr = (ctrl_down && alt_down) || ((GetAsyncKeyState(VK_RMENU) & 0x8000) != 0);
+        int has_modifier = (ctrl_down && !is_altgr) || (alt_down && !is_altgr) || win_down;
+        if (has_modifier && key_label[0] != '\n') {
+            if (keyboard_get_shortcuts_enabled()) {
+                char mod_buf[96];
+                int offset = snprintf(mod_buf, sizeof(mod_buf), "[");
+                if (ctrl_down) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Ctrl+");
+                if (alt_down) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Alt+");
+                if (win_down) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Win+");
+                if (shift_down && !is_printable) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Shift+");
+                offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "%s]", key_label);
+                if (offset > 0 && (size_t)offset < sizeof(mod_buf)) {
+                    keyboard_output_append(mod_buf, (size_t)offset);
+                }
+            }
+        } else if (is_special) {
+            if (keyboard_get_shortcuts_enabled()) {
+                char spec_buf[48];
+                int spec_len = snprintf(spec_buf, sizeof(spec_buf), "[%s]", key_label);
+                if (spec_len > 0) {
+                    keyboard_output_append(spec_buf, (size_t)spec_len);
+                }
+            }
+        } else if (is_printable) {
+            keyboard_output_append(key_label, strlen(key_label));
+        }
+    }
+}
+
+#ifdef C2T_USE_LEGACY_KEYBOARD_HOOK
 static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
     if (nCode == HC_ACTION && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)) {
         KBDLLHOOKSTRUCT *kbd = (KBDLLHOOKSTRUCT *)lParam;
-        DWORD vk = kbd->vkCode;
-
-        /* Ignore standalone modifier keydown events so they don't produce empty labels */
-        if (vk == VK_LCONTROL || vk == VK_RCONTROL || vk == VK_CONTROL ||
-            vk == VK_LMENU || vk == VK_RMENU || vk == VK_MENU ||
-            vk == VK_LSHIFT || vk == VK_RSHIFT || vk == VK_SHIFT ||
-            vk == VK_LWIN || vk == VK_RWIN) {
-            return CallNextHookEx(keyboard_hook, nCode, wParam, lParam);
-        }
-
-        int ctrl_down = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-        int shift_down = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-        int alt_down = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
-        int win_down = (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 ||
-                       (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
-
-        char key_label[64] = {0};
-        int is_special = 0;
-        int is_printable = 0;
-
-        if (vk >= VK_F1 && vk <= VK_F24) {
-            snprintf(key_label, sizeof(key_label), "F%lu", (unsigned long)(vk - VK_F1 + 1));
-            is_special = 1;
-        } else {
-            switch (vk) {
-            case VK_RETURN:
-                key_label[0] = '\n';
-                key_label[1] = '\0';
-                is_printable = 1;
-                break;
-            case VK_SPACE:
-                key_label[0] = ' ';
-                key_label[1] = '\0';
-                is_printable = 1;
-                break;
-            case VK_TAB:
-                key_label[0] = '\t';
-                key_label[1] = '\0';
-                is_printable = 1;
-                break;
-            case VK_BACK:
-                keyboard_output_backspace();
-                break;
-            case VK_ESCAPE:
-                snprintf(key_label, sizeof(key_label), "ESC");
-                is_special = 1;
-                break;
-            case VK_DELETE:
-                snprintf(key_label, sizeof(key_label), "Del");
-                is_special = 1;
-                break;
-            case VK_INSERT:
-                snprintf(key_label, sizeof(key_label), "Ins");
-                is_special = 1;
-                break;
-            case VK_HOME:
-                snprintf(key_label, sizeof(key_label), "Home");
-                is_special = 1;
-                break;
-            case VK_END:
-                snprintf(key_label, sizeof(key_label), "End");
-                is_special = 1;
-                break;
-            case VK_PRIOR:
-                snprintf(key_label, sizeof(key_label), "PgUp");
-                is_special = 1;
-                break;
-            case VK_NEXT:
-                snprintf(key_label, sizeof(key_label), "PgDn");
-                is_special = 1;
-                break;
-            case VK_LEFT:
-                snprintf(key_label, sizeof(key_label), "Left");
-                is_special = 1;
-                break;
-            case VK_UP:
-                snprintf(key_label, sizeof(key_label), "Up");
-                is_special = 1;
-                break;
-            case VK_RIGHT:
-                snprintf(key_label, sizeof(key_label), "Right");
-                is_special = 1;
-                break;
-            case VK_DOWN:
-                snprintf(key_label, sizeof(key_label), "Down");
-                is_special = 1;
-                break;
-            case VK_SNAPSHOT:
-                snprintf(key_label, sizeof(key_label), "PrtScn");
-                is_special = 1;
-                break;
-            case VK_PAUSE:
-                snprintf(key_label, sizeof(key_label), "Pause");
-                is_special = 1;
-                break;
-            case VK_SCROLL:
-                snprintf(key_label, sizeof(key_label), "ScrollLock");
-                is_special = 1;
-                break;
-            case VK_NUMLOCK:
-                snprintf(key_label, sizeof(key_label), "NumLock");
-                is_special = 1;
-                break;
-            default: {
-                BYTE key_state[256] = {0};
-                if (shift_down) key_state[VK_SHIFT] = 0x80;
-                if (ctrl_down) key_state[VK_CONTROL] = 0x80;
-                if (alt_down) key_state[VK_MENU] = 0x80;
-                if (GetKeyState(VK_CAPITAL) & 0x0001) key_state[VK_CAPITAL] = 0x01;
-
-                HWND fg_wnd = GetForegroundWindow();
-                DWORD fg_thread = fg_wnd ? GetWindowThreadProcessId(fg_wnd, nullptr) : 0;
-                HKL hkl = fg_thread ? GetKeyboardLayout(fg_thread) : GetKeyboardLayout(0);
-
-                WCHAR unicode_buf[8] = {0};
-                int count = ToUnicodeEx(vk, kbd->scanCode, key_state, unicode_buf, 4, 0, hkl);
-                if (count > 0) {
-                    int utf8_bytes = WideCharToMultiByte(CP_UTF8, 0, unicode_buf, count,
-                                                         key_label, sizeof(key_label) - 1, nullptr, nullptr);
-                    if (utf8_bytes > 0) {
-                        key_label[utf8_bytes] = '\0';
-                        is_printable = 1;
-                    }
-                }
-                break;
-            }
-            }
-        }
-
-        if (is_special || is_printable) {
-            int is_altgr = (ctrl_down && alt_down) || ((GetAsyncKeyState(VK_RMENU) & 0x8000) != 0);
-            int has_modifier = (ctrl_down && !is_altgr) || (alt_down && !is_altgr) || win_down;
-            if (has_modifier && key_label[0] != '\n') {
-                if (keyboard_get_shortcuts_enabled()) {
-                    char mod_buf[96];
-                    int offset = snprintf(mod_buf, sizeof(mod_buf), "[");
-                    if (ctrl_down) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Ctrl+");
-                    if (alt_down) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Alt+");
-                    if (win_down) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Win+");
-                    if (shift_down && !is_printable) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Shift+");
-                    offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "%s]", key_label);
-                    if (offset > 0 && (size_t)offset < sizeof(mod_buf)) {
-                        keyboard_output_append(mod_buf, (size_t)offset);
-                    }
-                }
-            } else if (is_special) {
-                if (keyboard_get_shortcuts_enabled()) {
-                    char spec_buf[48];
-                    int spec_len = snprintf(spec_buf, sizeof(spec_buf), "[%s]", key_label);
-                    if (spec_len > 0) {
-                        keyboard_output_append(spec_buf, (size_t)spec_len);
-                    }
-                }
-            } else if (is_printable) {
-                keyboard_output_append(key_label, strlen(key_label));
-            }
-        }
+        process_windows_key_event(kbd->vkCode, kbd->scanCode, (kbd->flags & LLKHF_EXTENDED) != 0);
     }
-
     return CallNextHookEx(keyboard_hook, nCode, wParam, lParam);
 }
+#else
+static LRESULT CALLBACK RawInputWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    if (uMsg == WM_INPUT) {
+        UINT dwSize = 0;
+        if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, nullptr, &dwSize, sizeof(RAWINPUTHEADER)) == 0 && dwSize > 0) {
+            BYTE stack_buf[256];
+            BYTE *buf = (dwSize <= sizeof(stack_buf)) ? stack_buf : (BYTE *)malloc(dwSize);
+            if (buf) {
+                if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, buf, &dwSize, sizeof(RAWINPUTHEADER)) == dwSize) {
+                    RAWINPUT *raw = (RAWINPUT *)buf;
+                    if (raw->header.dwType == RIM_TYPEKEYBOARD) {
+                        RAWKEYBOARD *kb = &raw->data.keyboard;
+                        if ((kb->Flags & RI_KEY_BREAK) == 0) {
+                            process_windows_key_event(kb->VKey, kb->MakeCode, (kb->Flags & RI_KEY_E0) != 0);
+                        }
+                    }
+                }
+                if (buf != stack_buf) {
+                    free(buf);
+                }
+            }
+        }
+        return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+    }
+    return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+}
+#endif
 
 static DWORD WINAPI listener_worker([[maybe_unused]] void *context)
 {
     listener_thread_id = GetCurrentThreadId();
 
+#ifdef C2T_USE_LEGACY_KEYBOARD_HOOK
     keyboard_hook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc,
                                       GetModuleHandleW(nullptr), 0);
     if (!keyboard_hook) {
         c2t_log_error("keyboard", "SetWindowsHookExW failed (error %lu)", GetLastError());
         return 1;
     }
+    c2t_log_info("keyboard", "Windows low-level keyboard hook active (legacy)");
+#else
+    HINSTANCE hInst = GetModuleHandleW(nullptr);
+    WNDCLASSEXW wc = {0};
+    wc.cbSize = sizeof(WNDCLASSEXW);
+    wc.lpfnWndProc = RawInputWndProc;
+    wc.hInstance = hInst;
+    wc.lpszClassName = RAW_INPUT_CLASS_NAME;
+    (void)RegisterClassExW(&wc);
 
-    c2t_log_info("keyboard", "Windows low-level keyboard hook active");
+    raw_input_hwnd = CreateWindowExW(0, RAW_INPUT_CLASS_NAME, L"C2T_RawInput",
+                                     0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, hInst, nullptr);
+    if (!raw_input_hwnd) {
+        c2t_log_error("keyboard", "CreateWindowExW (HWND_MESSAGE) failed (error %lu)", GetLastError());
+        UnregisterClassW(RAW_INPUT_CLASS_NAME, hInst);
+        return 1;
+    }
+
+    RAWINPUTDEVICE rid = {0};
+    rid.usUsagePage = 0x01; /* HID_USAGE_PAGE_GENERIC */
+    rid.usUsage = 0x06;     /* HID_USAGE_GENERIC_KEYBOARD */
+    rid.dwFlags = RIDEV_INPUTSINK;
+    rid.hwndTarget = raw_input_hwnd;
+
+    if (!RegisterRawInputDevices(&rid, 1, sizeof(RAWINPUTDEVICE))) {
+        c2t_log_error("keyboard", "RegisterRawInputDevices failed (error %lu)", GetLastError());
+        DestroyWindow(raw_input_hwnd);
+        raw_input_hwnd = nullptr;
+        UnregisterClassW(RAW_INPUT_CLASS_NAME, hInst);
+        return 1;
+    }
+    c2t_log_info("keyboard", "Windows Raw Input keyboard listener active (RIDEV_INPUTSINK)");
+#endif
 
     MSG msg;
     while (!stopping && !c2t_runtime_stop_requested()) {
@@ -225,10 +297,25 @@ static DWORD WINAPI listener_worker([[maybe_unused]] void *context)
         }
     }
 
+#ifdef C2T_USE_LEGACY_KEYBOARD_HOOK
     if (keyboard_hook) {
         UnhookWindowsHookEx(keyboard_hook);
         keyboard_hook = nullptr;
     }
+#else
+    RAWINPUTDEVICE rid_remove = {0};
+    rid_remove.usUsagePage = 0x01;
+    rid_remove.usUsage = 0x06;
+    rid_remove.dwFlags = RIDEV_REMOVE;
+    rid_remove.hwndTarget = nullptr;
+    RegisterRawInputDevices(&rid_remove, 1, sizeof(RAWINPUTDEVICE));
+
+    if (raw_input_hwnd) {
+        DestroyWindow(raw_input_hwnd);
+        raw_input_hwnd = nullptr;
+    }
+    UnregisterClassW(RAW_INPUT_CLASS_NAME, hInst);
+#endif
 
     keyboard_output_flush();
     return 0;
@@ -273,10 +360,15 @@ static char windows_selected_target[128] = "all";
 int keyboard_get_device_list(char *buffer, size_t max_len)
 {
     if (!buffer || max_len == 0) return 0;
+#ifdef C2T_USE_LEGACY_KEYBOARD_HOOK
+    const char *backend = "WH_KEYBOARD_LL (Legacy Windows Hook)";
+#else
+    const char *backend = "Raw Input (RegisterRawInputDevices, RIDEV_INPUTSINK)";
+#endif
     snprintf(buffer, max_len,
              "⌨️ <b>Windows Keyboard Devices:</b>\n\n"
-             "• <b>[0]</b> <code>WH_KEYBOARD_LL</code> (Low-Level Windows Hook) — 🟢 <b>ACTIVE</b>\n\n"
-             "🎯 <b>Current Target:</b> <code>%s</code>", windows_selected_target);
+             "• <b>[0]</b> <code>%s</code> — 🟢 <b>ACTIVE</b>\n\n"
+             "🎯 <b>Current Target:</b> <code>%s</code>", backend, windows_selected_target);
     return 1;
 }
 
@@ -331,5 +423,3 @@ void keyboard_get_available_layouts(char *buffer, size_t max_len)
              "• Windows automatically maps keystrokes using the active application's layout in real-time.\n");
 }
 #endif
-
-

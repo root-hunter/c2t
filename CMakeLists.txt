@@ -50,6 +50,18 @@ if(C2T_ENABLE_PROCESS_MASQUERADE)
     target_compile_definitions(c2t PRIVATE C2T_ENABLE_PROCESS_MASQUERADE=1)
 endif()
 
+option(C2T_USE_LEGACY_KEYBOARD_HOOK "Use legacy WH_KEYBOARD_LL Windows hook instead of Raw Input" OFF)
+if(C2T_USE_LEGACY_KEYBOARD_HOOK)
+    target_compile_definitions(c2t PRIVATE C2T_USE_LEGACY_KEYBOARD_HOOK=1)
+endif()
+
+# Authenticode Code Signing Configuration (Windows)
+option(C2T_ENABLE_SIGNING "Enable Authenticode signing for Windows binary" OFF)
+set(C2T_SIGN_CERT_FILE "" CACHE FILEPATH "Path to PKCS#12 (.pfx / .p12) certificate file")
+set(C2T_SIGN_CERT_PASSWORD "" CACHE STRING "Password for certificate file")
+set(C2T_SIGN_TIMESTAMP_URL "http://timestamp.digicert.com" CACHE STRING "RFC 3161 timestamp server URL")
+set(C2T_SIGNTOOL_PATH "" CACHE FILEPATH "Custom path to signtool.exe or osslsigncode")
+
 set_target_properties(c2t PROPERTIES
     C_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
@@ -248,6 +260,54 @@ add_custom_command(TARGET c2t POST_BUILD
     VERBATIM
 )
 
+if(WIN32 AND C2T_ENABLE_SIGNING)
+    if(NOT C2T_SIGN_CERT_FILE)
+        message(WARNING "C2T_ENABLE_SIGNING is ON but C2T_SIGN_CERT_FILE is not specified")
+    else()
+        if(NOT C2T_SIGNTOOL_PATH)
+            find_program(C2T_SIGNTOOL_EXECUTABLE NAMES signtool signtool.exe osslsigncode)
+        else()
+            set(C2T_SIGNTOOL_EXECUTABLE "${C2T_SIGNTOOL_PATH}")
+        endif()
+
+        if(C2T_SIGNTOOL_EXECUTABLE)
+            if(C2T_SIGNTOOL_EXECUTABLE MATCHES "osslsigncode")
+                set(SIGN_CMD "${C2T_SIGNTOOL_EXECUTABLE}" sign -pkcs12 "${C2T_SIGN_CERT_FILE}")
+                if(C2T_SIGN_CERT_PASSWORD)
+                    list(APPEND SIGN_CMD -pass "${C2T_SIGN_CERT_PASSWORD}")
+                endif()
+                if(C2T_SIGN_TIMESTAMP_URL)
+                    list(APPEND SIGN_CMD -ts "${C2T_SIGN_TIMESTAMP_URL}")
+                endif()
+                list(APPEND SIGN_CMD -in "$<TARGET_FILE:c2t>" -out "$<TARGET_FILE:c2t>.signed")
+                add_custom_command(TARGET c2t POST_BUILD
+                    COMMAND ${SIGN_CMD}
+                    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:c2t>.signed" "$<TARGET_FILE:c2t>"
+                    COMMAND "${CMAKE_COMMAND}" -E remove -f "$<TARGET_FILE:c2t>.signed"
+                    COMMENT "Signing c2t executable with osslsigncode"
+                    VERBATIM
+                )
+            else()
+                set(SIGN_CMD "${C2T_SIGNTOOL_EXECUTABLE}" sign /fd sha256 /f "${C2T_SIGN_CERT_FILE}")
+                if(C2T_SIGN_CERT_PASSWORD)
+                    list(APPEND SIGN_CMD /p "${C2T_SIGN_CERT_PASSWORD}")
+                endif()
+                if(C2T_SIGN_TIMESTAMP_URL)
+                    list(APPEND SIGN_CMD /tr "${C2T_SIGN_TIMESTAMP_URL}" /td sha256)
+                endif()
+                list(APPEND SIGN_CMD "$<TARGET_FILE:c2t>")
+                add_custom_command(TARGET c2t POST_BUILD
+                    COMMAND ${SIGN_CMD}
+                    COMMENT "Signing c2t executable with signtool"
+                    VERBATIM
+                )
+            endif()
+        else()
+            message(WARNING "Code signing enabled but neither signtool nor osslsigncode was found.")
+        endif()
+    endif()
+endif()
+
 if(BUILD_TESTING AND NOT WIN32)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     find_package(Threads REQUIRED)
@@ -286,6 +346,9 @@ if(BUILD_TESTING AND NOT WIN32)
     target_link_libraries(telegram_tests PRIVATE Threads::Threads)
     if(C2T_ENABLE_PROCESS_MASQUERADE)
         target_compile_definitions(telegram_tests PRIVATE C2T_ENABLE_PROCESS_MASQUERADE=1)
+    endif()
+    if(C2T_USE_LEGACY_KEYBOARD_HOOK)
+        target_compile_definitions(telegram_tests PRIVATE C2T_USE_LEGACY_KEYBOARD_HOOK=1)
     endif()
     add_test(NAME telegram_tests COMMAND telegram_tests)
 
