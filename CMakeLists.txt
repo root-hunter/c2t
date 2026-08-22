@@ -189,7 +189,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(c2t PRIVATE
         "-Wl,--start-group"
         CURL::libcurl
-        xcb Xau Xdmcp pthread input
+        xcb Xau Xdmcp pthread
         OpenSSL::SSL OpenSSL::Crypto
         zstd jitterentropy
         "-Wl,--end-group"

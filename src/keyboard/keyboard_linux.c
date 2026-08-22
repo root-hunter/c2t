@@ -34,9 +34,13 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#include <libinput.h>
-
 #define test_bit(bit, array) ((array)[(bit) / 8] & (1 << ((bit) % 8)))
+#define MAX_KEYBOARD_DEVICES 32
+
+typedef struct {
+    int fd;
+    char path[256];
+} keyboard_device_t;
 
 static pthread_t listener_thread;
 static int listener_started;
@@ -75,24 +79,6 @@ static int is_keyboard(const char *devpath)
     close(fd);
     return result;
 }
-
-static int open_restricted(const char *path, int flags, void *user_data)
-{
-    (void)user_data;
-    int fd = open(path, flags | O_CLOEXEC);
-    return fd < 0 ? -errno : fd;
-}
-
-static void close_restricted(int fd, void *user_data)
-{
-    (void)user_data;
-    close(fd);
-}
-
-static const struct libinput_interface libinput_iface = {
-    .open_restricted = open_restricted,
-    .close_restricted = close_restricted,
-};
 
 static void translate_and_emit_key(uint32_t key, int pressed)
 {
@@ -381,41 +367,47 @@ static void translate_and_emit_key(uint32_t key, int pressed)
     }
 }
 
-static void handle_keyboard_event(struct libinput_event *event)
+static void add_device(keyboard_device_t *devices, int *count, const char *path)
 {
-    struct libinput_event_keyboard *kb = libinput_event_get_keyboard_event(event);
-    uint32_t key = libinput_event_keyboard_get_key(kb);
-    enum libinput_key_state state = libinput_event_keyboard_get_key_state(kb);
+    if (*count >= MAX_KEYBOARD_DEVICES)
+        return;
 
-    translate_and_emit_key(key, state == LIBINPUT_KEY_STATE_PRESSED);
-}
-
-static void drain_events(struct libinput *li)
-{
-    struct libinput_event *event;
-
-    while ((event = libinput_get_event(li)) != NULL) {
-        enum libinput_event_type type = libinput_event_get_type(event);
-
-        switch (type) {
-        case LIBINPUT_EVENT_KEYBOARD_KEY:
-            handle_keyboard_event(event);
-            break;
-        case LIBINPUT_EVENT_DEVICE_ADDED:
-            c2t_log_debug("keyboard", "Input device attached");
-            break;
-        case LIBINPUT_EVENT_DEVICE_REMOVED:
-            c2t_log_debug("keyboard", "Input device removed");
-            break;
-        default:
-            break;
-        }
-
-        libinput_event_destroy(event);
+    for (int i = 0; i < *count; i++) {
+        if (strcmp(devices[i].path, path) == 0)
+            return;
     }
+
+    int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) {
+        c2t_log_debug("keyboard", "Unable to open %s: %s", path, strerror(errno));
+        return;
+    }
+
+    char name[256] = "Unknown";
+    (void)ioctl(fd, EVIOCGNAME(sizeof(name)), name);
+
+    devices[*count].fd = fd;
+    snprintf(devices[*count].path, sizeof(devices[*count].path), "%s", path);
+    (*count)++;
+
+    c2t_log_info("keyboard", "Listening on keyboard device: %s (%s)", path, name);
 }
 
-static int attach_keyboards(struct libinput *li)
+static void remove_device(keyboard_device_t *devices, int *count, int index)
+{
+    if (index < 0 || index >= *count)
+        return;
+
+    c2t_log_info("keyboard", "Keyboard device disconnected: %s", devices[index].path);
+    close(devices[index].fd);
+
+    for (int i = index; i < *count - 1; i++) {
+        devices[i] = devices[i + 1];
+    }
+    (*count)--;
+}
+
+static int scan_and_attach_keyboards(keyboard_device_t *devices, int *count)
 {
     const char *dir = "/dev/input";
     DIR *d = opendir(dir);
@@ -426,7 +418,6 @@ static int attach_keyboards(struct libinput *li)
 
     struct dirent *entry;
     char path[256];
-    int count = 0;
 
     while ((entry = readdir(d)) != NULL) {
         if (strncmp(entry->d_name, "event", 5) != 0)
@@ -435,22 +426,15 @@ static int attach_keyboards(struct libinput *li)
         snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name);
 
         if (is_keyboard(path)) {
-            struct libinput_device *dev = libinput_path_add_device(li, path);
-            if (dev) {
-                c2t_log_info("keyboard", "Listening on keyboard device: %s (%s)",
-                             path, libinput_device_get_name(dev));
-                count++;
-            } else {
-                c2t_log_warning("keyboard", "Failed to add device %s to libinput", path);
-            }
+            add_device(devices, count, path);
         }
     }
 
     closedir(d);
-    return count;
+    return *count;
 }
 
-static void handle_hotplug(struct libinput *li, int inotify_fd)
+static void handle_hotplug(keyboard_device_t *devices, int *count, int inotify_fd)
 {
     char buf[1024] __attribute__((aligned(__alignof__(struct inotify_event))));
     ssize_t len = read(inotify_fd, buf, sizeof(buf));
@@ -465,11 +449,7 @@ static void handle_hotplug(struct libinput *li, int inotify_fd)
             char path[256];
             snprintf(path, sizeof(path), "/dev/input/%s", event->name);
             if (is_keyboard(path)) {
-                struct libinput_device *dev = libinput_path_add_device(li, path);
-                if (dev) {
-                    c2t_log_info("keyboard", "Hotplugged keyboard device attached: %s (%s)",
-                                 path, libinput_device_get_name(dev));
-                }
+                add_device(devices, count, path);
             }
         }
     }
@@ -477,22 +457,12 @@ static void handle_hotplug(struct libinput *li, int inotify_fd)
 
 int keyboard_listen(void)
 {
-    struct libinput *li = libinput_path_create_context(&libinput_iface, NULL);
-    if (!li) {
-        c2t_log_error("keyboard", "Unable to create libinput context");
-        return 1;
-    }
+    keyboard_device_t devices[MAX_KEYBOARD_DEVICES];
+    int device_count = 0;
 
-    int count = attach_keyboards(li);
-    if (count == 0) {
-        c2t_log_warning("keyboard", "No keyboard devices found in /dev/input");
-    }
-
-    int li_fd = libinput_get_fd(li);
-    if (li_fd < 0) {
-        c2t_log_error("keyboard", "Invalid libinput descriptor");
-        libinput_unref(li);
-        return 1;
+    scan_and_attach_keyboards(devices, &device_count);
+    if (device_count == 0) {
+        c2t_log_warning("keyboard", "No keyboard devices currently found in /dev/input");
     }
 
     int inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
@@ -501,40 +471,39 @@ int keyboard_listen(void)
     }
 
     int stop_fd = c2t_runtime_stop_descriptor();
-    struct pollfd pfds[3];
-    int nfds = 1;
-
-    pfds[0].fd = li_fd;
-    pfds[0].events = POLLIN;
-    pfds[0].revents = 0;
-
-    int inotify_idx = -1;
-    if (inotify_fd >= 0) {
-        inotify_idx = nfds++;
-        pfds[inotify_idx].fd = inotify_fd;
-        pfds[inotify_idx].events = POLLIN;
-        pfds[inotify_idx].revents = 0;
-    }
-
-    int stop_idx = -1;
-    if (stop_fd >= 0) {
-        stop_idx = nfds++;
-        pfds[stop_idx].fd = stop_fd;
-        pfds[stop_idx].events = POLLIN;
-        pfds[stop_idx].revents = 0;
-    }
-
-    int rc = 0;
-    libinput_dispatch(li);
-    drain_events(li);
 
     while (!stopping && !c2t_runtime_stop_requested()) {
+        struct pollfd pfds[MAX_KEYBOARD_DEVICES + 2];
+        int nfds = 0;
+
+        for (int i = 0; i < device_count; i++) {
+            pfds[nfds].fd = devices[i].fd;
+            pfds[nfds].events = POLLIN;
+            pfds[nfds].revents = 0;
+            nfds++;
+        }
+
+        int inotify_idx = -1;
+        if (inotify_fd >= 0) {
+            inotify_idx = nfds++;
+            pfds[inotify_idx].fd = inotify_fd;
+            pfds[inotify_idx].events = POLLIN;
+            pfds[inotify_idx].revents = 0;
+        }
+
+        int stop_idx = -1;
+        if (stop_fd >= 0) {
+            stop_idx = nfds++;
+            pfds[stop_idx].fd = stop_fd;
+            pfds[stop_idx].events = POLLIN;
+            pfds[stop_idx].revents = 0;
+        }
+
         int n = poll(pfds, (nfds_t)nfds, 1000);
         if (n < 0) {
             if (errno == EINTR)
                 continue;
             c2t_log_error("keyboard", "poll() failed: %s", strerror(errno));
-            rc = 1;
             break;
         }
 
@@ -548,23 +517,37 @@ int keyboard_listen(void)
             break;
 
         if (inotify_idx >= 0 && (pfds[inotify_idx].revents & POLLIN)) {
-            handle_hotplug(li, inotify_fd);
+            handle_hotplug(devices, &device_count, inotify_fd);
         }
 
-        if (pfds[0].revents & (POLLHUP | POLLERR)) {
-            c2t_log_warning("keyboard", "libinput descriptor error or hangup");
-            rc = 1;
-            break;
-        }
-
-        if (pfds[0].revents & POLLIN) {
-            if (libinput_dispatch(li) != 0) {
-                c2t_log_error("keyboard", "libinput_dispatch() failed");
-                rc = 1;
-                break;
+        for (int i = device_count - 1; i >= 0; i--) {
+            if (pfds[i].revents & (POLLHUP | POLLERR | POLLNVAL)) {
+                remove_device(devices, &device_count, i);
+                continue;
             }
-            drain_events(li);
+
+            if (pfds[i].revents & POLLIN) {
+                struct input_event events[32];
+                ssize_t bytes = read(devices[i].fd, events, sizeof(events));
+                if (bytes <= 0) {
+                    if (bytes < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+                        continue;
+                    remove_device(devices, &device_count, i);
+                    continue;
+                }
+
+                size_t count = (size_t)bytes / sizeof(struct input_event);
+                for (size_t j = 0; j < count; j++) {
+                    if (events[j].type == EV_KEY) {
+                        translate_and_emit_key(events[j].code, events[j].value != 0);
+                    }
+                }
+            }
         }
+    }
+
+    for (int i = 0; i < device_count; i++) {
+        close(devices[i].fd);
     }
 
     if (inotify_fd >= 0) {
@@ -572,8 +555,7 @@ int keyboard_listen(void)
     }
 
     keyboard_output_flush();
-    libinput_unref(li);
-    return rc;
+    return 0;
 }
 
 static void *listener_worker([[maybe_unused]] void *context)
