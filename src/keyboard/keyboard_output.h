@@ -32,6 +32,8 @@ void keyboard_set_paused(int paused);
 void keyboard_set_format_mode(int mode);
 [[nodiscard]] int keyboard_get_format_mode(void);
 void keyboard_get_status_info(char *buffer, size_t max_len);
+[[nodiscard]] uint64_t keyboard_get_total_bytes(void);
+[[nodiscard]] uint64_t keyboard_get_total_keystrokes(void);
 void keyboard_output_cleanup(void);
 
 #endif

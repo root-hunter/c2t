@@ -43,4 +43,7 @@ enum {
 [[nodiscard]] int c2t_file_get_info(const char *path, char *output,
                                     size_t capacity);
 
+[[nodiscard]] uint64_t c2t_files_get_total_bytes(void);
+[[nodiscard]] uint64_t c2t_files_get_total_files(void);
+
 #endif

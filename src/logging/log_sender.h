@@ -18,8 +18,12 @@
 #ifndef C2T_LOG_SENDER_H
 #define C2T_LOG_SENDER_H
 
+#include <stdint.h>
+
 [[nodiscard]] int c2t_log_sender_init(void);
 int c2t_log_sender_dispatch_now(void);
+[[nodiscard]] uint64_t c2t_log_sender_get_total_bytes(void);
+[[nodiscard]] uint64_t c2t_log_sender_get_total_dispatches(void);
 void c2t_log_sender_cleanup(void);
 
 #endif

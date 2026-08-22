@@ -907,8 +907,21 @@ int main(void)
 
     char kb_stat_buf[1024] = {};
     keyboard_get_status_info(kb_stat_buf, sizeof(kb_stat_buf));
-    if (strstr(kb_stat_buf, "Active Layout:") == nullptr)
-        return fail("keyboard_get_status_info layout field missing");
+    if (strstr(kb_stat_buf, "Active Layout:") == nullptr ||
+        strstr(kb_stat_buf, "Total Delivered:") == nullptr)
+        return fail("keyboard_get_status_info layout or total field missing");
+
+    if (strstr(clip_stat_buf, "Total Delivered:") == nullptr)
+        return fail("clipboard_get_status_info total field missing");
+
+    (void)clipboard_get_total_bytes();
+    (void)clipboard_get_total_events();
+    (void)keyboard_get_total_bytes();
+    (void)keyboard_get_total_keystrokes();
+    (void)c2t_files_get_total_bytes();
+    (void)c2t_files_get_total_files();
+    (void)c2t_log_sender_get_total_bytes();
+    (void)c2t_log_sender_get_total_dispatches();
 
     c2t_crypto_cleanup();
     return 0;

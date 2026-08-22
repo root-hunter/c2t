@@ -29,6 +29,8 @@ void clipboard_set_paused(int paused);
 [[nodiscard]] int clipboard_toggle_paused(void);
 void clipboard_output_flush(void);
 void clipboard_get_status_info(char *buffer, size_t max_len);
+[[nodiscard]] uint64_t clipboard_get_total_bytes(void);
+[[nodiscard]] uint64_t clipboard_get_total_events(void);
 void clipboard_output_cleanup(void);
 
 #endif

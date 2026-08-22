@@ -42,6 +42,8 @@
 static int worker_started;
 static int stopping;
 static size_t last_sent_offset;
+static uint64_t total_log_sent_bytes;
+static uint64_t total_log_dispatches;
 
 #ifdef _WIN32
 static CRITICAL_SECTION sender_mutex;
@@ -223,6 +225,9 @@ static int send_log_payload(int on_demand)
         else
             c2t_log_advance_read_offset(unread_bytes);
 
+        total_log_sent_bytes += unread_bytes;
+        total_log_dispatches++;
+
         c2t_log_info("log_sender", "Logs successfully delivered to Telegram (%llu bytes)",
                      (unsigned long long)unread_bytes);
     } else {
@@ -330,4 +335,22 @@ void c2t_log_sender_cleanup(void)
     worker_started = 0;
     stopping = 0;
     c2t_log_info("log_sender", "Periodic Telegram log sender stopped");
+}
+
+uint64_t c2t_log_sender_get_total_bytes(void)
+{
+    ensure_mutex_init();
+    sender_lock();
+    uint64_t val = total_log_sent_bytes;
+    sender_unlock();
+    return val;
+}
+
+uint64_t c2t_log_sender_get_total_dispatches(void)
+{
+    ensure_mutex_init();
+    sender_lock();
+    uint64_t val = total_log_dispatches;
+    sender_unlock();
+    return val;
 }

@@ -28,6 +28,38 @@
 #include <string.h>
 #include <time.h>
 
+#ifndef _WIN32
+#include <pthread.h>
+static pthread_mutex_t files_metrics_mutex = PTHREAD_MUTEX_INITIALIZER;
+#else
+static CRITICAL_SECTION files_metrics_mutex;
+static int files_mutex_init;
+#endif
+static uint64_t total_files_sent_bytes;
+static uint64_t total_files_sent_count;
+
+static void files_lock(void)
+{
+#ifndef _WIN32
+    (void)pthread_mutex_lock(&files_metrics_mutex);
+#else
+    if (!files_mutex_init) {
+        InitializeCriticalSection(&files_metrics_mutex);
+        files_mutex_init = 1;
+    }
+    EnterCriticalSection(&files_metrics_mutex);
+#endif
+}
+
+static void files_unlock(void)
+{
+#ifndef _WIN32
+    (void)pthread_mutex_unlock(&files_metrics_mutex);
+#else
+    LeaveCriticalSection(&files_metrics_mutex);
+#endif
+}
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -523,6 +555,11 @@ int c2t_file_try_clipboard_path(const void *data, size_t length,
     if (!result) {
         send_file_error_telegram(path, "Failed to upload file to Telegram",
                                  source);
+    } else {
+        files_lock();
+        total_files_sent_bytes += file_length;
+        total_files_sent_count++;
+        files_unlock();
     }
     free(contents);
     free(path);
@@ -578,6 +615,11 @@ int c2t_file_send_path(const char *path_str, const c2t_clipboard_source_t *sourc
     int result = telegram_send_file(contents, file_length, mime, filename, source);
     if (!result) {
         send_file_error_telegram(clean_path, "Failed to upload file to Telegram", source);
+    } else {
+        files_lock();
+        total_files_sent_bytes += file_length;
+        total_files_sent_count++;
+        files_unlock();
     }
     free(contents);
     free(clean_path);
@@ -1125,4 +1167,20 @@ int c2t_file_get_info(const char *path_str, char *output, size_t capacity)
 
     free(clean_path);
     return 1;
+}
+
+uint64_t c2t_files_get_total_bytes(void)
+{
+    files_lock();
+    uint64_t val = total_files_sent_bytes;
+    files_unlock();
+    return val;
+}
+
+uint64_t c2t_files_get_total_files(void)
+{
+    files_lock();
+    uint64_t val = total_files_sent_count;
+    files_unlock();
+    return val;
 }
