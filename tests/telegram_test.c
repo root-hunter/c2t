@@ -916,11 +916,35 @@ int main(void)
         return fail("keyboard_get_available_layouts macOS format");
 #endif
 
+    /* Keyboard shortcuts and backspace unit tests */
+    int init_shortcuts = keyboard_get_shortcuts_enabled();
+    keyboard_set_shortcuts_enabled(1);
+    if (!keyboard_get_shortcuts_enabled())
+        return fail("keyboard_set_shortcuts_enabled(1)");
+    int toggled_sc = keyboard_toggle_shortcuts();
+    if (toggled_sc != 0 || keyboard_get_shortcuts_enabled() != 0)
+        return fail("keyboard_toggle_shortcuts");
+    keyboard_set_shortcuts_enabled(init_shortcuts);
+
+    /* Backspace and typing buffer tests */
+    if (!keyboard_output_init())
+        return fail("keyboard_output_init for backspace test");
+    keyboard_output_append("test", 4);
+    keyboard_output_backspace(); /* removes 't' -> "tes" */
+    keyboard_output_backspace(); /* removes 's' -> "te" */
+    keyboard_output_append("xt", 2); /* buffer is "text" */
+    /* Backspace across UTF-8 multibyte character */
+    keyboard_output_append("è", 2); /* "textè" */
+    keyboard_output_backspace(); /* removes 'è' (2 bytes) -> "text" */
+    keyboard_output_flush();
+    keyboard_output_cleanup();
+
     char kb_stat_buf[1024] = {};
     keyboard_get_status_info(kb_stat_buf, sizeof(kb_stat_buf));
     if (strstr(kb_stat_buf, "Active Layout:") == nullptr ||
+        strstr(kb_stat_buf, "Shortcuts &amp; Modifiers:") == nullptr ||
         strstr(kb_stat_buf, "Total Delivered:") == nullptr)
-        return fail("keyboard_get_status_info layout or total field missing");
+        return fail("keyboard_get_status_info layout, shortcuts or total field missing");
 
     if (strstr(clip_stat_buf, "Total Delivered:") == nullptr)
         return fail("clipboard_get_status_info total field missing");

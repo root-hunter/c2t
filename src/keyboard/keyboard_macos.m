@@ -80,6 +80,10 @@ static CGEventRef event_callback([[maybe_unused]] CGEventTapProxy proxy,
         int shift_down = (flags & kCGEventFlagMaskShift) != 0;
 
         int64_t keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+        if (keycode == 0x33) {
+            keyboard_output_backspace();
+            return event;
+        }
         const char *special = get_macos_special_key_label(keycode);
 
         char key_label[64] = {0};
@@ -113,21 +117,25 @@ static CGEventRef event_callback([[maybe_unused]] CGEventTapProxy proxy,
         if (is_special || is_printable) {
             int has_modifier = cmd_down || ctrl_down || alt_down;
             if (has_modifier && key_label[0] != '\n') {
-                char mod_buf[96];
-                int offset = snprintf(mod_buf, sizeof(mod_buf), "[");
-                if (cmd_down) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Cmd+");
-                if (ctrl_down) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Ctrl+");
-                if (alt_down) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Option+");
-                if (shift_down && !is_printable) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Shift+");
-                offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "%s]", key_label);
-                if (offset > 0 && (size_t)offset < sizeof(mod_buf)) {
-                    keyboard_output_append(mod_buf, (size_t)offset);
+                if (keyboard_get_shortcuts_enabled()) {
+                    char mod_buf[96];
+                    int offset = snprintf(mod_buf, sizeof(mod_buf), "[");
+                    if (cmd_down) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Cmd+");
+                    if (ctrl_down) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Ctrl+");
+                    if (alt_down) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Option+");
+                    if (shift_down && !is_printable) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Shift+");
+                    offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "%s]", key_label);
+                    if (offset > 0 && (size_t)offset < sizeof(mod_buf)) {
+                        keyboard_output_append(mod_buf, (size_t)offset);
+                    }
                 }
             } else if (is_special) {
-                char spec_buf[48];
-                int spec_len = snprintf(spec_buf, sizeof(spec_buf), "[%s]", key_label);
-                if (spec_len > 0) {
-                    keyboard_output_append(spec_buf, (size_t)spec_len);
+                if (keyboard_get_shortcuts_enabled()) {
+                    char spec_buf[48];
+                    int spec_len = snprintf(spec_buf, sizeof(spec_buf), "[%s]", key_label);
+                    if (spec_len > 0) {
+                        keyboard_output_append(spec_buf, (size_t)spec_len);
+                    }
                 }
             } else if (is_printable) {
                 keyboard_output_append(key_label, strlen(key_label));

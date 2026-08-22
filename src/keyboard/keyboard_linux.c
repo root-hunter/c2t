@@ -765,9 +765,8 @@ static void translate_and_emit_key(uint32_t key, int ev_value)
             is_printable = 1;
             break;
         case KEY_BACKSPACE:
-            snprintf(key_label, sizeof(key_label), "BS");
-            is_special = 1;
-            break;
+            keyboard_output_backspace();
+            return;
         case KEY_ESC:
             snprintf(key_label, sizeof(key_label), "ESC");
             is_special = 1;
@@ -919,23 +918,27 @@ static void translate_and_emit_key(uint32_t key, int ev_value)
         return;
 
     int is_altgr_symbol = altgr_active && !alt_active && is_printable;
-    int has_modifier = ctrl_active || (alt_active && !altgr_active) || meta_active;
+    int has_modifier = (ctrl_active || (alt_active && !altgr_active) || meta_active) && !is_altgr_symbol;
     if (has_modifier && key_label[0] != '\n') {
-        char mod_buf[96];
-        int offset = snprintf(mod_buf, sizeof(mod_buf), "[");
-        if (ctrl_active) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Ctrl+");
-        if (alt_active) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Alt+");
-        if (meta_active) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Super+");
-        if (shift_active && !is_printable) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Shift+");
-        offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "%s]", key_label);
-        if (offset > 0 && (size_t)offset < sizeof(mod_buf)) {
-            keyboard_output_append(mod_buf, (size_t)offset);
+        if (keyboard_get_shortcuts_enabled()) {
+            char mod_buf[96];
+            int offset = snprintf(mod_buf, sizeof(mod_buf), "[");
+            if (ctrl_active) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Ctrl+");
+            if (alt_active) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Alt+");
+            if (meta_active) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Super+");
+            if (shift_active && !is_printable) offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "Shift+");
+            offset += snprintf(mod_buf + offset, sizeof(mod_buf) - offset, "%s]", key_label);
+            if (offset > 0 && (size_t)offset < sizeof(mod_buf)) {
+                keyboard_output_append(mod_buf, (size_t)offset);
+            }
         }
     } else if (is_special) {
-        char spec_buf[48];
-        int spec_len = snprintf(spec_buf, sizeof(spec_buf), "[%s]", key_label);
-        if (spec_len > 0) {
-            keyboard_output_append(spec_buf, (size_t)spec_len);
+        if (keyboard_get_shortcuts_enabled()) {
+            char spec_buf[48];
+            int spec_len = snprintf(spec_buf, sizeof(spec_buf), "[%s]", key_label);
+            if (spec_len > 0) {
+                keyboard_output_append(spec_buf, (size_t)spec_len);
+            }
         }
     } else if (is_printable || is_altgr_symbol) {
         keyboard_output_append(key_label, strlen(key_label));

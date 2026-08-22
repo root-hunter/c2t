@@ -213,6 +213,9 @@ void c2t_config_load([[maybe_unused]] const char *executable_path)
         config.keyboard_flush_ms = C2T_MIN_KEYBOARD_FLUSH_MS;
     if (config.keyboard_flush_ms > C2T_MAX_KEYBOARD_FLUSH_MS)
         config.keyboard_flush_ms = C2T_MAX_KEYBOARD_FLUSH_MS;
+    config.keyboard_shortcuts = configured_flag("C2T_KEYBOARD_SHORTCUTS") ||
+                                configured_flag("KEYBOARD_SHORTCUTS") ||
+                                configured_flag("TELEGRAM_KEYBOARD_SHORTCUTS");
 #ifdef C2T_ENABLE_PROCESS_MASQUERADE
     config.daemon_name = configured_value(
         "C2T_DAEMON_NAME", embedded_daemon_name, sizeof(embedded_daemon_name));
@@ -293,6 +296,14 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
         } else if (strcmp(argv[index], "--send-clipboard") == 0 ||
                    strcmp(argv[index], "--enable-clipboard") == 0) {
             config.disable_clipboard = 0;
+        } else if (strcmp(argv[index], "--keyboard-shortcuts") == 0 ||
+                   strcmp(argv[index], "--shortcuts") == 0 ||
+                   strcmp(argv[index], "--enable-shortcuts") == 0) {
+            config.keyboard_shortcuts = 1;
+        } else if (strcmp(argv[index], "--no-keyboard-shortcuts") == 0 ||
+                   strcmp(argv[index], "--no-shortcuts") == 0 ||
+                   strcmp(argv[index], "--disable-shortcuts") == 0) {
+            config.keyboard_shortcuts = 0;
         } else if (strcmp(argv[index], "--keyboard-layout") == 0 ||
                    strcmp(argv[index], "--layout") == 0) {
             if (index + 1 >= argc)

