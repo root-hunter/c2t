@@ -39,128 +39,13 @@ static HWND raw_input_hwnd;
 static const wchar_t RAW_INPUT_CLASS_NAME[] = L"C2T_RawInputListenerWindow";
 #endif
 
-typedef DWORD(WINAPI *pfn_GetWindowThreadProcessId)(HWND hWnd,
-                                                    LPDWORD lpdwProcessId);
-typedef HKL(WINAPI *pfn_GetKeyboardLayout)(DWORD idThread);
-
-static inline void c2t_xor_decode(char *dest, const unsigned char *src,
-                                  size_t len, unsigned char key) {
-  for (size_t i = 0; i < len; ++i) {
-    dest[i] = (char)(src[i] ^ key);
-  }
-  dest[len] = '\0';
-}
-
-typedef struct _C2T_UNICODE_STRING {
-  USHORT Length;
-  USHORT MaximumLength;
-  PWSTR Buffer;
-} C2T_UNICODE_STRING;
-
-typedef struct _C2T_LDR_DATA_TABLE_ENTRY {
-  LIST_ENTRY InLoadOrderLinks;
-  LIST_ENTRY InMemoryOrderLinks;
-  LIST_ENTRY InInitializationOrderLinks;
-  PVOID DllBase;
-  PVOID EntryPoint;
-  ULONG SizeOfImage;
-  C2T_UNICODE_STRING FullDllName;
-  C2T_UNICODE_STRING BaseDllName;
-} C2T_LDR_DATA_TABLE_ENTRY;
-
-typedef struct _C2T_PEB_LDR_DATA {
-  ULONG Length;
-  BOOLEAN Initialized;
-  HANDLE SsHandle;
-  LIST_ENTRY InLoadOrderModuleList;
-  LIST_ENTRY InMemoryOrderModuleList;
-  LIST_ENTRY InInitializationOrderModuleList;
-} C2T_PEB_LDR_DATA;
-
-typedef struct _C2T_PEB {
-  BOOLEAN InheritedAddressSpace;
-  BOOLEAN ReadImageFileExecOptions;
-  BOOLEAN BeingDebugged;
-  BOOLEAN BitField;
-  HANDLE Mutant;
-  PVOID ImageBaseAddress;
-  C2T_PEB_LDR_DATA *Ldr;
-} C2T_PEB;
-
-static HMODULE c2t_get_module_handle_peb(const wchar_t *module_name) {
-#if defined(_WIN64)
-  C2T_PEB *peb = (C2T_PEB *)__readgsqword(0x60);
-#elif defined(_WIN32)
-  C2T_PEB *peb = (C2T_PEB *)__readfsdword(0x30);
-#else
-  C2T_PEB *peb = nullptr;
-#endif
-  if (!peb || !peb->Ldr)
-    return nullptr;
-
-  PLIST_ENTRY head = &peb->Ldr->InLoadOrderModuleList;
-  PLIST_ENTRY curr = head->Flink;
-
-  while (curr && curr != head) {
-    C2T_LDR_DATA_TABLE_ENTRY *entry =
-        CONTAINING_RECORD(curr, C2T_LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
-    if (entry->BaseDllName.Buffer) {
-      if (_wcsicmp(entry->BaseDllName.Buffer, module_name) == 0) {
-        return (HMODULE)entry->DllBase;
-      }
-    }
-    curr = curr->Flink;
-  }
-  return nullptr;
-}
+#include "../win32/win32_api.h"
 
 static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId) {
-  static pfn_GetWindowThreadProcessId p_func = nullptr;
-  if (!p_func) {
-    static const unsigned char enc_u32[] = {47,  41,  63, 40, 105,
-                                            104, 116, 62, 54, 54};
-    static const unsigned char enc_fn[] = {29, 63, 46, 13, 51, 52, 62, 53,
-                                           45, 14, 50, 40, 63, 59, 62, 10,
-                                           40, 53, 57, 63, 41, 41, 19, 62};
-    char u32_buf[16];
-    char fn_buf[32];
-    c2t_xor_decode(u32_buf, enc_u32, sizeof(enc_u32), 0x5A);
-    c2t_xor_decode(fn_buf, enc_fn, sizeof(enc_fn), 0x5A);
-    HMODULE hUser32 = c2t_get_module_handle_peb(L"user32.dll");
-    if (!hUser32)
-      hUser32 = GetModuleHandleA(u32_buf);
-    if (hUser32) {
-      FARPROC proc = GetProcAddress(hUser32, fn_buf);
-      memcpy(&p_func, &proc, sizeof(p_func));
-    }
-  }
-  if (p_func)
-    return p_func(hWnd, lpdwProcessId);
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetWindowThreadProcessId)
+    return g_c2t_win32.GetWindowThreadProcessId(hWnd, lpdwProcessId);
   return 0;
-}
-
-static HKL c2t_GetKeyboardLayout(DWORD idThread) {
-  static pfn_GetKeyboardLayout p_func = nullptr;
-  if (!p_func) {
-    static const unsigned char enc_u32[] = {47,  41,  63, 40, 105,
-                                            104, 116, 62, 54, 54};
-    static const unsigned char enc_fn[] = {29, 63, 46, 17, 63, 35, 56, 53, 59,
-                                           40, 62, 22, 59, 35, 53, 47, 46};
-    char u32_buf[16];
-    char fn_buf[32];
-    c2t_xor_decode(u32_buf, enc_u32, sizeof(enc_u32), 0x5A);
-    c2t_xor_decode(fn_buf, enc_fn, sizeof(enc_fn), 0x5A);
-    HMODULE hUser32 = c2t_get_module_handle_peb(L"user32.dll");
-    if (!hUser32)
-      hUser32 = GetModuleHandleA(u32_buf);
-    if (hUser32) {
-      FARPROC proc = GetProcAddress(hUser32, fn_buf);
-      memcpy(&p_func, &proc, sizeof(p_func));
-    }
-  }
-  if (p_func)
-    return p_func(idThread);
-  return nullptr;
 }
 
 static void process_windows_key_event(DWORD vk, DWORD scan_code,

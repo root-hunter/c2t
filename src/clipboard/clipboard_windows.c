@@ -39,270 +39,68 @@ typedef struct {
   BOOL wide;
 } c2t_dropfiles_t;
 
-typedef DWORD(WINAPI *pfn_GetWindowThreadProcessId)(HWND hWnd,
-                                                    LPDWORD lpdwProcessId);
-typedef BOOL(WINAPI *pfn_OpenClipboard)(HWND hWndNewOwner);
-typedef BOOL(WINAPI *pfn_CloseClipboard)(VOID);
-typedef HANDLE(WINAPI *pfn_GetClipboardData)(UINT uFormat);
-typedef BOOL(WINAPI *pfn_IsClipboardFormatAvailable)(UINT format);
-typedef BOOL(WINAPI *pfn_AddClipboardFormatListener)(HWND hwnd);
-typedef BOOL(WINAPI *pfn_RemoveClipboardFormatListener)(HWND hwnd);
-typedef HWND(WINAPI *pfn_GetForegroundWindow)(VOID);
-typedef int(WINAPI *pfn_GetWindowTextW)(HWND hWnd, LPWSTR lpString, int nMaxCount);
-typedef HWND(WINAPI *pfn_CreateWindowExW)(DWORD dwExStyle, LPCWSTR lpClassName,
-                                          LPCWSTR lpWindowName, DWORD dwStyle,
-                                          int X, int Y, int nWidth, int nHeight,
-                                          HWND hWndParent, HMENU hMenu,
-                                          HINSTANCE hInstance, LPVOID lpParam);
-typedef BOOL(WINAPI *pfn_DestroyWindow)(HWND hWnd);
-typedef ATOM(WINAPI *pfn_RegisterClassW)(const WNDCLASSW *lpWndClass);
-typedef BOOL(WINAPI *pfn_UnregisterClassW)(LPCWSTR lpClassName, HINSTANCE hInstance);
-typedef LRESULT(WINAPI *pfn_DefWindowProcW)(HWND hWnd, UINT Msg, WPARAM wParam,
-                                            LPARAM lParam);
-typedef BOOL(WINAPI *pfn_PeekMessageW)(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin,
-                                       UINT wMsgFilterMax, UINT wRemoveMsg);
-typedef BOOL(WINAPI *pfn_TranslateMessage)(const MSG *lpMsg);
-typedef LRESULT(WINAPI *pfn_DispatchMessageW)(const MSG *lpMsg);
-
-typedef struct {
-  pfn_GetWindowThreadProcessId GetWindowThreadProcessId;
-  pfn_OpenClipboard OpenClipboard;
-  pfn_CloseClipboard CloseClipboard;
-  pfn_GetClipboardData GetClipboardData;
-  pfn_IsClipboardFormatAvailable IsClipboardFormatAvailable;
-  pfn_AddClipboardFormatListener AddClipboardFormatListener;
-  pfn_RemoveClipboardFormatListener RemoveClipboardFormatListener;
-  pfn_GetForegroundWindow GetForegroundWindow;
-  pfn_GetWindowTextW GetWindowTextW;
-  pfn_CreateWindowExW CreateWindowExW;
-  pfn_DestroyWindow DestroyWindow;
-  pfn_RegisterClassW RegisterClassW;
-  pfn_UnregisterClassW UnregisterClassW;
-  pfn_DefWindowProcW DefWindowProcW;
-  pfn_PeekMessageW PeekMessageW;
-  pfn_TranslateMessage TranslateMessage;
-  pfn_DispatchMessageW DispatchMessageW;
-} c2t_user32_api_t;
-
-static c2t_user32_api_t g_user32 = {0};
-static int g_user32_initialized = 0;
-
-static inline void c2t_xor_decode_cb(char *dest, const unsigned char *src,
-                                     size_t len, unsigned char key) {
-  for (size_t i = 0; i < len; ++i) {
-    dest[i] = (char)(src[i] ^ key);
-  }
-  dest[len] = '\0';
-}
-
-typedef struct _C2T_UNICODE_STRING {
-  USHORT Length;
-  USHORT MaximumLength;
-  PWSTR Buffer;
-} C2T_UNICODE_STRING;
-
-typedef struct _C2T_LDR_DATA_TABLE_ENTRY {
-  LIST_ENTRY InLoadOrderLinks;
-  LIST_ENTRY InMemoryOrderLinks;
-  LIST_ENTRY InInitializationOrderLinks;
-  PVOID DllBase;
-  PVOID EntryPoint;
-  ULONG SizeOfImage;
-  C2T_UNICODE_STRING FullDllName;
-  C2T_UNICODE_STRING BaseDllName;
-} C2T_LDR_DATA_TABLE_ENTRY;
-
-typedef struct _C2T_PEB_LDR_DATA {
-  ULONG Length;
-  BOOLEAN Initialized;
-  HANDLE SsHandle;
-  LIST_ENTRY InLoadOrderModuleList;
-  LIST_ENTRY InMemoryOrderModuleList;
-  LIST_ENTRY InInitializationOrderModuleList;
-} C2T_PEB_LDR_DATA;
-
-typedef struct _C2T_PEB {
-  BOOLEAN InheritedAddressSpace;
-  BOOLEAN ReadImageFileExecOptions;
-  BOOLEAN BeingDebugged;
-  BOOLEAN BitField;
-  HANDLE Mutant;
-  PVOID ImageBaseAddress;
-  C2T_PEB_LDR_DATA *Ldr;
-} C2T_PEB;
-
-static HMODULE c2t_get_module_handle_peb(const wchar_t *module_name) {
-#if defined(_WIN64)
-  C2T_PEB *peb = (C2T_PEB *)__readgsqword(0x60);
-#elif defined(_WIN32)
-  C2T_PEB *peb = (C2T_PEB *)__readfsdword(0x30);
-#else
-  C2T_PEB *peb = nullptr;
-#endif
-  if (!peb || !peb->Ldr)
-    return nullptr;
-
-  PLIST_ENTRY head = &peb->Ldr->InLoadOrderModuleList;
-  PLIST_ENTRY curr = head->Flink;
-
-  while (curr && curr != head) {
-    C2T_LDR_DATA_TABLE_ENTRY *entry =
-        CONTAINING_RECORD(curr, C2T_LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
-    if (entry->BaseDllName.Buffer) {
-      if (_wcsicmp(entry->BaseDllName.Buffer, module_name) == 0) {
-        return (HMODULE)entry->DllBase;
-      }
-    }
-    curr = curr->Flink;
-  }
-  return nullptr;
-}
-
-static void c2t_init_user32_apis(void) {
-  if (g_user32_initialized)
-    return;
-
-  static const unsigned char enc_u32[] = {47, 41, 63, 40, 105, 104, 116, 62, 54, 54};
-  char u32_buf[16];
-  c2t_xor_decode_cb(u32_buf, enc_u32, sizeof(enc_u32), 0x5A);
-
-  HMODULE hUser32 = c2t_get_module_handle_peb(L"user32.dll");
-  if (!hUser32)
-    hUser32 = GetModuleHandleA(u32_buf);
-  if (!hUser32)
-    hUser32 = LoadLibraryA(u32_buf);
-
-  if (hUser32) {
-#define LOAD_USER32_API(name, enc_arr)                                         \
-    do {                                                                       \
-      char fn_buf[64];                                                         \
-      c2t_xor_decode_cb(fn_buf, enc_arr, sizeof(enc_arr), 0x5A);               \
-      FARPROC proc = GetProcAddress(hUser32, fn_buf);                          \
-      memcpy(&g_user32.name, &proc, sizeof(g_user32.name));                   \
-    } while (0)
-
-    static const unsigned char enc_GetWindowThreadProcessId[] = {
-        29, 63, 46, 13, 51, 52, 62, 53, 45, 14, 50, 40,
-        63, 59, 62, 10, 40, 53, 57, 63, 41, 41, 19, 62};
-    static const unsigned char enc_OpenClipboard[] = {
-        21, 42, 63, 52, 25, 54, 51, 42, 56, 53, 59, 40, 62};
-    static const unsigned char enc_CloseClipboard[] = {
-        25, 54, 53, 41, 63, 25, 54, 51, 42, 56, 53, 59, 40, 62};
-    static const unsigned char enc_GetClipboardData[] = {
-        29, 63, 46, 25, 54, 51, 42, 56, 53, 59, 40, 62, 30, 59, 46, 59};
-    static const unsigned char enc_IsClipboardFormatAvailable[] = {
-        19, 41, 25, 54, 51, 42, 56, 53, 59, 40, 62, 28, 53,
-        40, 55, 59, 46, 27, 44, 59, 51, 54, 59, 56, 54, 63};
-    static const unsigned char enc_AddClipboardFormatListener[] = {
-        27, 62, 62, 25, 54, 51, 42, 56, 53, 59, 40, 62, 28, 53,
-        40, 55, 59, 46, 22, 51, 41, 46, 63, 52, 63, 40};
-    static const unsigned char enc_RemoveClipboardFormatListener[] = {
-        8,  63, 55, 53, 44, 63, 25, 54, 51, 42, 56, 53, 59, 40, 62,
-        28, 53, 40, 55, 59, 46, 22, 51, 41, 46, 63, 52, 63, 40};
-    static const unsigned char enc_GetForegroundWindow[] = {
-        29, 63, 46, 28, 53, 40, 63, 61, 40, 53, 47, 52, 62, 13, 51, 52, 62, 53, 45};
-    static const unsigned char enc_GetWindowTextW[] = {
-        29, 63, 46, 13, 51, 52, 62, 53, 45, 14, 63, 34, 46, 13};
-    static const unsigned char enc_CreateWindowExW[] = {
-        25, 40, 63, 59, 46, 63, 13, 51, 52, 62, 53, 45, 31, 34, 13};
-    static const unsigned char enc_DestroyWindow[] = {
-        30, 63, 41, 46, 40, 53, 35, 13, 51, 52, 62, 53, 45};
-    static const unsigned char enc_RegisterClassW[] = {
-        8, 63, 61, 51, 41, 46, 63, 40, 25, 54, 59, 41, 41, 13};
-    static const unsigned char enc_UnregisterClassW[] = {
-        15, 52, 40, 63, 61, 51, 41, 46, 63, 40, 25, 54, 59, 41, 41, 13};
-    static const unsigned char enc_DefWindowProcW[] = {
-        30, 63, 60, 13, 51, 52, 62, 53, 45, 10, 40, 53, 57, 13};
-    static const unsigned char enc_PeekMessageW[] = {
-        10, 63, 63, 49, 23, 63, 41, 41, 59, 61, 63, 13};
-    static const unsigned char enc_TranslateMessage[] = {
-        14, 40, 59, 52, 41, 54, 59, 46, 63, 23, 63, 41, 41, 59, 61, 63};
-    static const unsigned char enc_DispatchMessageW[] = {
-        30, 51, 41, 42, 59, 46, 57, 50, 23, 63, 41, 41, 59, 61, 63, 13};
-
-    LOAD_USER32_API(GetWindowThreadProcessId, enc_GetWindowThreadProcessId);
-    LOAD_USER32_API(OpenClipboard, enc_OpenClipboard);
-    LOAD_USER32_API(CloseClipboard, enc_CloseClipboard);
-    LOAD_USER32_API(GetClipboardData, enc_GetClipboardData);
-    LOAD_USER32_API(IsClipboardFormatAvailable, enc_IsClipboardFormatAvailable);
-    LOAD_USER32_API(AddClipboardFormatListener, enc_AddClipboardFormatListener);
-    LOAD_USER32_API(RemoveClipboardFormatListener, enc_RemoveClipboardFormatListener);
-    LOAD_USER32_API(GetForegroundWindow, enc_GetForegroundWindow);
-    LOAD_USER32_API(GetWindowTextW, enc_GetWindowTextW);
-    LOAD_USER32_API(CreateWindowExW, enc_CreateWindowExW);
-    LOAD_USER32_API(DestroyWindow, enc_DestroyWindow);
-    LOAD_USER32_API(RegisterClassW, enc_RegisterClassW);
-    LOAD_USER32_API(UnregisterClassW, enc_UnregisterClassW);
-    LOAD_USER32_API(DefWindowProcW, enc_DefWindowProcW);
-    LOAD_USER32_API(PeekMessageW, enc_PeekMessageW);
-    LOAD_USER32_API(TranslateMessage, enc_TranslateMessage);
-    LOAD_USER32_API(DispatchMessageW, enc_DispatchMessageW);
-#undef LOAD_USER32_API
-  }
-
-  g_user32_initialized = 1;
-}
+#include "../win32/win32_api.h"
 
 static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId) {
-  c2t_init_user32_apis();
-  if (g_user32.GetWindowThreadProcessId)
-    return g_user32.GetWindowThreadProcessId(hWnd, lpdwProcessId);
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetWindowThreadProcessId)
+    return g_c2t_win32.GetWindowThreadProcessId(hWnd, lpdwProcessId);
   return 0;
 }
 
 static BOOL c2t_OpenClipboard(HWND hWndNewOwner) {
-  c2t_init_user32_apis();
-  if (g_user32.OpenClipboard)
-    return g_user32.OpenClipboard(hWndNewOwner);
+  c2t_win32_api_init();
+  if (g_c2t_win32.OpenClipboard)
+    return g_c2t_win32.OpenClipboard(hWndNewOwner);
   return FALSE;
 }
 
 static BOOL c2t_CloseClipboard(VOID) {
-  c2t_init_user32_apis();
-  if (g_user32.CloseClipboard)
-    return g_user32.CloseClipboard();
+  c2t_win32_api_init();
+  if (g_c2t_win32.CloseClipboard)
+    return g_c2t_win32.CloseClipboard();
   return FALSE;
 }
 
 static HANDLE c2t_GetClipboardData(UINT uFormat) {
-  c2t_init_user32_apis();
-  if (g_user32.GetClipboardData)
-    return g_user32.GetClipboardData(uFormat);
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetClipboardData)
+    return g_c2t_win32.GetClipboardData(uFormat);
   return NULL;
 }
 
 static BOOL c2t_IsClipboardFormatAvailable(UINT format) {
-  c2t_init_user32_apis();
-  if (g_user32.IsClipboardFormatAvailable)
-    return g_user32.IsClipboardFormatAvailable(format);
+  c2t_win32_api_init();
+  if (g_c2t_win32.IsClipboardFormatAvailable)
+    return g_c2t_win32.IsClipboardFormatAvailable(format);
   return FALSE;
 }
 
 static BOOL c2t_AddClipboardFormatListener(HWND hwnd) {
-  c2t_init_user32_apis();
-  if (g_user32.AddClipboardFormatListener)
-    return g_user32.AddClipboardFormatListener(hwnd);
+  c2t_win32_api_init();
+  if (g_c2t_win32.AddClipboardFormatListener)
+    return g_c2t_win32.AddClipboardFormatListener(hwnd);
   return FALSE;
 }
 
 static BOOL c2t_RemoveClipboardFormatListener(HWND hwnd) {
-  c2t_init_user32_apis();
-  if (g_user32.RemoveClipboardFormatListener)
-    return g_user32.RemoveClipboardFormatListener(hwnd);
+  c2t_win32_api_init();
+  if (g_c2t_win32.RemoveClipboardFormatListener)
+    return g_c2t_win32.RemoveClipboardFormatListener(hwnd);
   return FALSE;
 }
 
 static HWND c2t_GetForegroundWindow(VOID) {
-  c2t_init_user32_apis();
-  if (g_user32.GetForegroundWindow)
-    return g_user32.GetForegroundWindow();
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetForegroundWindow)
+    return g_c2t_win32.GetForegroundWindow();
   return NULL;
 }
 
 static int c2t_GetWindowTextW(HWND hWnd, LPWSTR lpString, int nMaxCount) {
-  c2t_init_user32_apis();
-  if (g_user32.GetWindowTextW)
-    return g_user32.GetWindowTextW(hWnd, lpString, nMaxCount);
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetWindowTextW)
+    return g_c2t_win32.GetWindowTextW(hWnd, lpString, nMaxCount);
   return 0;
 }
 
@@ -311,63 +109,63 @@ static HWND c2t_CreateWindowExW(DWORD dwExStyle, LPCWSTR lpClassName,
                                 int Y, int nWidth, int nHeight, HWND hWndParent,
                                 HMENU hMenu, HINSTANCE hInstance,
                                 LPVOID lpParam) {
-  c2t_init_user32_apis();
-  if (g_user32.CreateWindowExW)
-    return g_user32.CreateWindowExW(dwExStyle, lpClassName, lpWindowName,
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateWindowExW)
+    return g_c2t_win32.CreateWindowExW(dwExStyle, lpClassName, lpWindowName,
                                     dwStyle, X, Y, nWidth, nHeight, hWndParent,
                                     hMenu, hInstance, lpParam);
   return NULL;
 }
 
 static BOOL c2t_DestroyWindow(HWND hWnd) {
-  c2t_init_user32_apis();
-  if (g_user32.DestroyWindow)
-    return g_user32.DestroyWindow(hWnd);
+  c2t_win32_api_init();
+  if (g_c2t_win32.DestroyWindow)
+    return g_c2t_win32.DestroyWindow(hWnd);
   return FALSE;
 }
 
 static ATOM c2t_RegisterClassW(const WNDCLASSW *lpWndClass) {
-  c2t_init_user32_apis();
-  if (g_user32.RegisterClassW)
-    return g_user32.RegisterClassW(lpWndClass);
+  c2t_win32_api_init();
+  if (g_c2t_win32.RegisterClassW)
+    return g_c2t_win32.RegisterClassW(lpWndClass);
   return 0;
 }
 
 static BOOL c2t_UnregisterClassW(LPCWSTR lpClassName, HINSTANCE hInstance) {
-  c2t_init_user32_apis();
-  if (g_user32.UnregisterClassW)
-    return g_user32.UnregisterClassW(lpClassName, hInstance);
+  c2t_win32_api_init();
+  if (g_c2t_win32.UnregisterClassW)
+    return g_c2t_win32.UnregisterClassW(lpClassName, hInstance);
   return FALSE;
 }
 
 static LRESULT c2t_DefWindowProcW(HWND hWnd, UINT Msg, WPARAM wParam,
                                   LPARAM lParam) {
-  c2t_init_user32_apis();
-  if (g_user32.DefWindowProcW)
-    return g_user32.DefWindowProcW(hWnd, Msg, wParam, lParam);
+  c2t_win32_api_init();
+  if (g_c2t_win32.DefWindowProcW)
+    return g_c2t_win32.DefWindowProcW(hWnd, Msg, wParam, lParam);
   return 0;
 }
 
 static BOOL c2t_PeekMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin,
                              UINT wMsgFilterMax, UINT wRemoveMsg) {
-  c2t_init_user32_apis();
-  if (g_user32.PeekMessageW)
-    return g_user32.PeekMessageW(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax,
+  c2t_win32_api_init();
+  if (g_c2t_win32.PeekMessageW)
+    return g_c2t_win32.PeekMessageW(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax,
                                  wRemoveMsg);
   return FALSE;
 }
 
 static BOOL c2t_TranslateMessage(const MSG *lpMsg) {
-  c2t_init_user32_apis();
-  if (g_user32.TranslateMessage)
-    return g_user32.TranslateMessage(lpMsg);
+  c2t_win32_api_init();
+  if (g_c2t_win32.TranslateMessage)
+    return g_c2t_win32.TranslateMessage(lpMsg);
   return FALSE;
 }
 
 static LRESULT c2t_DispatchMessageW(const MSG *lpMsg) {
-  c2t_init_user32_apis();
-  if (g_user32.DispatchMessageW)
-    return g_user32.DispatchMessageW(lpMsg);
+  c2t_win32_api_init();
+  if (g_c2t_win32.DispatchMessageW)
+    return g_c2t_win32.DispatchMessageW(lpMsg);
   return 0;
 }
 
