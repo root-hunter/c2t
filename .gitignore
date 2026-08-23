@@ -11,3 +11,4 @@ __pycache__/
 /build-release
 /build-masq
 /analysis
+/build-plugin
