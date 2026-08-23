@@ -278,6 +278,9 @@ jobs:
         with:
           python-version: "3.x"
 
+      - name: Install VirusTotal Python client
+        run: pip install vt-py
+
       - name: Download packages
         uses: actions/download-artifact@v8.0.1
         with:
