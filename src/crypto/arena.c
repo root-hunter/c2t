@@ -56,13 +56,26 @@ void *c2t_arena_alloc(c2t_arena_t *arena, size_t size) {
   if (!arena || !arena->buffer || size == 0)
     return nullptr;
 
-  size_t aligned_size = (size + 15U) & ~15U;
-  if (arena->offset + aligned_size > arena->capacity)
+  const size_t alignment = _Alignof(max_align_t);
+  if (size > SIZE_MAX - (alignment - 1U))
+    return nullptr;
+  size_t aligned_size = (size + alignment - 1U) & ~(alignment - 1U);
+  if (arena->offset > arena->capacity ||
+      aligned_size > arena->capacity - arena->offset)
     return nullptr;
 
   void *ptr = arena->buffer + arena->offset;
   arena->offset += aligned_size;
   return ptr;
+}
+
+int c2t_arena_contains(const c2t_arena_t *arena, const void *pointer) {
+  if (!arena || !arena->buffer || !pointer)
+    return 0;
+
+  uintptr_t start = (uintptr_t)arena->buffer;
+  uintptr_t candidate = (uintptr_t)pointer;
+  return candidate >= start && candidate - start < arena->capacity;
 }
 
 void c2t_arena_reset(c2t_arena_t *arena) {

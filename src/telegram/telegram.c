@@ -1315,6 +1315,26 @@ int telegram_send_html(const char *html_text) {
   return send_fields("sendMessage", fields, 2);
 }
 
+static const char *find_in_range(const char *start, const char *end,
+                                 const char *needle, size_t needle_length) {
+  if (!start || !end || start >= end || !needle || needle_length == 0 ||
+      (size_t)(end - start) < needle_length)
+    return nullptr;
+
+  const char *cursor = start;
+  const char *last = end - needle_length;
+  while (cursor <= last) {
+    cursor = memchr(cursor, (unsigned char)needle[0],
+                    (size_t)(last - cursor) + 1U);
+    if (!cursor)
+      return nullptr;
+    if (memcmp(cursor, needle, needle_length) == 0)
+      return cursor;
+    ++cursor;
+  }
+  return nullptr;
+}
+
 static int parse_json_field_in_range(const char *start, const char *end,
                                      const char *key, char *output,
                                      size_t capacity) {
@@ -1450,6 +1470,38 @@ static int parse_json_number_in_range(const char *start, const char *end,
   return 0;
 }
 
+static int parse_json_int64_value(const char *start, const char *end,
+                                  int64_t *value_out) {
+  if (!start || !end || start >= end || !value_out)
+    return 0;
+
+  int negative = *start == '-';
+  if (negative && ++start == end)
+    return 0;
+  uint64_t limit = negative ? (uint64_t)INT64_MAX + 1U : (uint64_t)INT64_MAX;
+  uint64_t value = 0;
+  size_t digits = 0;
+  while (start < end && *start >= '0' && *start <= '9') {
+    unsigned int digit = (unsigned int)(*start - '0');
+    if (value > (limit - digit) / 10U)
+      return 0;
+    value = value * 10U + digit;
+    ++start;
+    ++digits;
+  }
+  if (digits == 0)
+    return 0;
+
+  if (negative) {
+    *value_out = value == (uint64_t)INT64_MAX + 1U
+                     ? INT64_MIN
+                     : -(int64_t)value;
+  } else {
+    *value_out = (int64_t)value;
+  }
+  return 1;
+}
+
 int telegram_get_bot_username(const char *token, char *username_out,
                               size_t capacity) {
   if (!token || !username_out || capacity == 0)
@@ -1539,56 +1591,42 @@ int telegram_download_file(const char *token, const char *file_id,
   return res;
 }
 
-int telegram_poll_updates_callback(const char *token, int64_t *offset,
-                                   int timeout_seconds,
-                                   telegram_update_callback_t callback,
-                                   void *user_data) {
-  if (!token)
+int telegram_parse_updates_response(const char *response,
+                                    size_t response_length, int64_t *offset,
+                                    telegram_update_callback_t callback,
+                                    void *user_data) {
+  if (!response)
     return -1;
-
-  int temp_http = 0;
-  if (!initialized) {
-    if (!telegram_http_init())
-      return -1;
-    temp_http = 1;
-  }
-
-  char query[128];
-  if (offset && *offset > 0) {
-    snprintf(query, sizeof(query), "getUpdates?offset=%lld&timeout=%d",
-             (long long)*offset, timeout_seconds);
-  } else {
-    snprintf(query, sizeof(query), "getUpdates?timeout=%d", timeout_seconds);
-  }
-
-  char response[32768] = {};
-  int res = telegram_http_get(token, query, response, sizeof(response));
-  if (temp_http && !initialized) {
-    telegram_http_cleanup();
-  }
-
-  if (!res || !strstr(response, "\"ok\":true")) {
+  const char *response_end = response + response_length;
+  if (!find_in_range(response, response_end, "\"ok\":true", 9U)) {
     return -1;
   }
 
-  const char *result_pos = strstr(response, "\"result\"");
+  const char *result_pos =
+      find_in_range(response, response_end, "\"result\"", 8U);
   if (!result_pos)
     return 0;
 
   int updates_found = 0;
   int64_t max_update_id = -1;
-  const char *curr = strstr(result_pos, "\"update_id\"");
+  const char *curr =
+      find_in_range(result_pos, response_end, "\"update_id\"", 11U);
 
   while (curr) {
     const char *id_ptr = curr + 11;
-    while (*id_ptr == ' ' || *id_ptr == ':')
+    while (id_ptr < response_end && (*id_ptr == ' ' || *id_ptr == ':'))
       id_ptr++;
-    int64_t uid = strtoll(id_ptr, nullptr, 10);
+    if (id_ptr == response_end)
+      break;
+    int64_t uid = 0;
+    if (!parse_json_int64_value(id_ptr, response_end, &uid))
+      return -1;
     if (uid > max_update_id)
       max_update_id = uid;
 
-    const char *next = strstr(curr + 11, "\"update_id\"");
-    const char *block_end = next ? next : (response + strlen(response));
+    const char *next =
+        find_in_range(curr + 11, response_end, "\"update_id\"", 11U);
+    const char *block_end = next ? next : response_end;
 
     char item_chat_id[128] = {};
     char item_username[128] = {};
@@ -1609,8 +1647,9 @@ int telegram_poll_updates_callback(const char *token, int64_t *offset,
                               sizeof(item_caption));
 
     /* Check for attachments: document, photo, video, audio, voice, animation */
-    const char *doc_pos = strstr(curr, "\"document\"");
-    if (doc_pos && doc_pos < block_end) {
+    const char *doc_pos =
+        find_in_range(curr, block_end, "\"document\"", 10U);
+    if (doc_pos) {
       parse_json_field_in_range(doc_pos, block_end, "file_id", item_file_id,
                                 sizeof(item_file_id));
       parse_json_field_in_range(doc_pos, block_end, "file_name", item_file_name,
@@ -1620,8 +1659,9 @@ int telegram_poll_updates_callback(const char *token, int64_t *offset,
       parse_json_number_in_range(doc_pos, block_end, "file_size",
                                  &item_file_size);
     } else {
-      const char *photo_pos = strstr(curr, "\"photo\"");
-      if (photo_pos && photo_pos < block_end) {
+      const char *photo_pos =
+          find_in_range(curr, block_end, "\"photo\"", 7U);
+      if (photo_pos) {
         const char *pcurr = photo_pos;
         while (pcurr && pcurr < block_end) {
           char temp_fid[256] = {};
@@ -1630,7 +1670,8 @@ int telegram_poll_updates_callback(const char *token, int64_t *offset,
             snprintf(item_file_id, sizeof(item_file_id), "%s", temp_fid);
             parse_json_number_in_range(pcurr, block_end, "file_size",
                                        &item_file_size);
-            pcurr = strstr(pcurr + 10, "\"file_id\"");
+            pcurr =
+                find_in_range(pcurr + 9, block_end, "\"file_id\"", 9U);
           } else {
             break;
           }
@@ -1639,8 +1680,9 @@ int telegram_poll_updates_callback(const char *token, int64_t *offset,
                  (long long)time(nullptr));
         snprintf(item_mime_type, sizeof(item_mime_type), "image/jpeg");
       } else {
-        const char *vid_pos = strstr(curr, "\"video\"");
-        if (vid_pos && vid_pos < block_end) {
+        const char *vid_pos =
+            find_in_range(curr, block_end, "\"video\"", 7U);
+        if (vid_pos) {
           parse_json_field_in_range(vid_pos, block_end, "file_id", item_file_id,
                                     sizeof(item_file_id));
           parse_json_field_in_range(vid_pos, block_end, "file_name",
@@ -1653,8 +1695,9 @@ int telegram_poll_updates_callback(const char *token, int64_t *offset,
           parse_json_number_in_range(vid_pos, block_end, "file_size",
                                      &item_file_size);
         } else {
-          const char *aud_pos = strstr(curr, "\"audio\"");
-          if (aud_pos && aud_pos < block_end) {
+          const char *aud_pos =
+              find_in_range(curr, block_end, "\"audio\"", 7U);
+          if (aud_pos) {
             parse_json_field_in_range(aud_pos, block_end, "file_id",
                                       item_file_id, sizeof(item_file_id));
             parse_json_field_in_range(aud_pos, block_end, "file_name",
@@ -1667,8 +1710,9 @@ int telegram_poll_updates_callback(const char *token, int64_t *offset,
             parse_json_number_in_range(aud_pos, block_end, "file_size",
                                        &item_file_size);
           } else {
-            const char *voice_pos = strstr(curr, "\"voice\"");
-            if (voice_pos && voice_pos < block_end) {
+            const char *voice_pos =
+                find_in_range(curr, block_end, "\"voice\"", 7U);
+            if (voice_pos) {
               parse_json_field_in_range(voice_pos, block_end, "file_id",
                                         item_file_id, sizeof(item_file_id));
               snprintf(item_file_name, sizeof(item_file_name), "voice_%lld.ogg",
@@ -1705,6 +1749,42 @@ int telegram_poll_updates_callback(const char *token, int64_t *offset,
   }
 
   return updates_found;
+}
+
+int telegram_poll_updates_callback(const char *token, int64_t *offset,
+                                   int timeout_seconds,
+                                   telegram_update_callback_t callback,
+                                   void *user_data) {
+  if (!token)
+    return -1;
+
+  int temp_http = 0;
+  if (!initialized) {
+    if (!telegram_http_init())
+      return -1;
+    temp_http = 1;
+  }
+
+  char query[128];
+  if (offset && *offset > 0) {
+    snprintf(query, sizeof(query), "getUpdates?offset=%lld&timeout=%d",
+             (long long)*offset, timeout_seconds);
+  } else {
+    snprintf(query, sizeof(query), "getUpdates?timeout=%d", timeout_seconds);
+  }
+
+  char response[32768] = {};
+  int result = telegram_http_get(token, query, response, sizeof(response));
+  if (temp_http && !initialized)
+    telegram_http_cleanup();
+  if (!result)
+    return -1;
+
+  const char *terminator = memchr(response, '\0', sizeof(response));
+  size_t response_length = terminator ? (size_t)(terminator - response)
+                                      : sizeof(response);
+  return telegram_parse_updates_response(response, response_length, offset,
+                                         callback, user_data);
 }
 
 typedef struct {

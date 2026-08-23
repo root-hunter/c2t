@@ -25,6 +25,7 @@
 #include "../telegram/telegram_platform.h"
 
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -156,7 +157,7 @@ static size_t delivery_attempts;
 static size_t retry_delay_ms;
 static int stopping;
 static int worker_started;
-static volatile int clipboard_paused;
+static atomic_int clipboard_paused;
 static uint64_t total_clipboard_bytes;
 static uint64_t total_clipboard_events;
 static c2t_arena_t clipboard_arena;
@@ -344,22 +345,20 @@ static void *delivery_worker([[maybe_unused]] void *context)
 
     deliver_event(event);
 
+    size_t allocation_size = event->allocation_size;
+    int arena_owned = c2t_arena_contains(&clipboard_arena, event);
     queue_lock();
-    queue_bytes -= event->allocation_size;
+    queue_bytes -= allocation_size;
     --queue_items;
-    if (queue_items == 0) {
+    if (arena_owned && queue_items == 0) {
       c2t_arena_reset(&clipboard_arena);
+    } else {
+      c2t_secure_zero(event, allocation_size);
     }
     queue_unlock();
 
-    if ((unsigned char *)event >= clipboard_arena.buffer &&
-        (unsigned char *)event <
-            clipboard_arena.buffer + clipboard_arena.capacity) {
-      c2t_secure_zero(event, event->allocation_size);
-    } else {
-      c2t_secure_zero(event, event->allocation_size);
+    if (!arena_owned)
       free(event);
-    }
   }
   telegram_http_thread_cleanup();
 #ifdef _WIN32
@@ -382,7 +381,7 @@ int clipboard_output_init(void) {
   delivery_attempts = c2t_config_get()->delivery_attempts;
   retry_delay_ms = c2t_config_get()->retry_delay_ms;
   stopping = 0;
-  clipboard_paused = 0;
+  clipboard_set_paused(0);
 #ifdef _WIN32
   InitializeCriticalSection(&queue_mutex);
   InitializeConditionVariable(&queue_condition);
@@ -411,13 +410,19 @@ static size_t last_duplicate_length;
 static uint64_t last_duplicate_time_ms;
 static int has_duplicate_previous;
 
-int clipboard_is_paused(void) { return clipboard_paused; }
+int clipboard_is_paused(void) {
+  return atomic_load_explicit(&clipboard_paused, memory_order_relaxed);
+}
 
-void clipboard_set_paused(int paused) { clipboard_paused = paused ? 1 : 0; }
+void clipboard_set_paused(int paused) {
+  atomic_store_explicit(&clipboard_paused, paused ? 1 : 0,
+                        memory_order_relaxed);
+}
 
 int clipboard_toggle_paused(void) {
-  clipboard_paused = !clipboard_paused;
-  return clipboard_paused;
+  return atomic_fetch_xor_explicit(&clipboard_paused, 1,
+                                   memory_order_relaxed) ^
+         1;
 }
 
 void clipboard_output_flush(void) {
@@ -506,7 +511,7 @@ uint64_t clipboard_get_total_events(void) {
 
 void clipboard_output(const void *data, size_t length, const char *mime_type,
                       const c2t_clipboard_source_t *source) {
-  if (clipboard_paused) {
+  if (clipboard_is_paused()) {
     c2t_log_debug("clipboard", "Ignoring clipboard event: monitoring paused");
     return;
   }
@@ -587,9 +592,7 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
   if (!c2t_crypto_get_random_bytes(event->nonce, C2T_CRYPTO_NONCE_SIZE)) {
     queue_unlock();
     c2t_secure_zero(event, allocation_size);
-    if ((unsigned char *)event < clipboard_arena.buffer ||
-        (unsigned char *)event >=
-            clipboard_arena.buffer + clipboard_arena.capacity) {
+    if (!c2t_arena_contains(&clipboard_arena, event)) {
       free(event);
     }
     c2t_log_error("clipboard",
@@ -600,9 +603,7 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
       !c2t_crypto_encrypt(data, length, event->nonce, event->encrypted_data)) {
     queue_unlock();
     c2t_secure_zero(event, allocation_size);
-    if ((unsigned char *)event < clipboard_arena.buffer ||
-        (unsigned char *)event >=
-            clipboard_arena.buffer + clipboard_arena.capacity) {
+    if (!c2t_arena_contains(&clipboard_arena, event)) {
       free(event);
     }
     c2t_log_error("clipboard", "Failed to encrypt clipboard data in RAM");
@@ -651,9 +652,7 @@ void clipboard_output_cleanup(void) {
   while (current) {
     clipboard_event_t *next = current->next;
     c2t_secure_zero(current, current->allocation_size);
-    if ((unsigned char *)current < clipboard_arena.buffer ||
-        (unsigned char *)current >=
-            clipboard_arena.buffer + clipboard_arena.capacity) {
+    if (!c2t_arena_contains(&clipboard_arena, current)) {
       free(current);
     }
     current = next;

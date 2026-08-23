@@ -19,6 +19,7 @@
 
 #include "clipboard/clipboard_output.h"
 #include "config/config.h"
+#include "crypto/arena.h"
 #include "crypto/crypto.h"
 #include "files/files.h"
 #include "keyboard/keyboard.h"
@@ -45,6 +46,32 @@ static int http_post_result = 1;
 static int fail(const char *message) {
   fprintf(stderr, "FAIL: %s\n", message);
   return 1;
+}
+
+static int test_arena(void) {
+  c2t_arena_t arena = {};
+  if (!c2t_arena_init(&arena, 128))
+    return fail("arena initialization");
+
+  void *first = c2t_arena_alloc(&arena, 1);
+  void *second = c2t_arena_alloc(&arena, sizeof(max_align_t));
+  int external = 0;
+  if (!first || !second || !c2t_arena_contains(&arena, first) ||
+      !c2t_arena_contains(&arena, second) ||
+      c2t_arena_contains(&arena, &external) ||
+      (uintptr_t)second % _Alignof(max_align_t) != 0 ||
+      c2t_arena_alloc(&arena, SIZE_MAX) != nullptr) {
+    c2t_arena_destroy(&arena);
+    return fail("arena bounds and alignment");
+  }
+
+  c2t_arena_reset(&arena);
+  if (c2t_arena_alloc(&arena, 1) != first) {
+    c2t_arena_destroy(&arena);
+    return fail("arena reset reuse");
+  }
+  c2t_arena_destroy(&arena);
+  return 0;
 }
 
 static int body_contains(const void *value, size_t length) {
@@ -153,6 +180,25 @@ static char test_last_cmd[64] = {};
 static char test_last_file_id[64] = {};
 static char test_last_caption[64] = {};
 
+typedef struct {
+  int count;
+  int attachment_leaked_between_updates;
+  char final_file_id[64];
+} parser_test_context_t;
+
+static void parser_test_callback(const telegram_incoming_update_t *update,
+                                 void *user_data) {
+  parser_test_context_t *context = (parser_test_context_t *)user_data;
+  if (!context || !update)
+    return;
+  ++context->count;
+  if (update->update_id == 1 && update->file_id && *update->file_id)
+    context->attachment_leaked_between_updates = 1;
+  if (update->update_id == 2 && update->file_id)
+    snprintf(context->final_file_id, sizeof(context->final_file_id), "%s",
+             update->file_id);
+}
+
 static void test_callback(const telegram_incoming_update_t *update,
                           [[maybe_unused]] void *user_data) {
   if (!update)
@@ -169,6 +215,9 @@ static void test_callback(const telegram_incoming_update_t *update,
 }
 
 int main(void) {
+  if (test_arena() != 0)
+    return 1;
+
   if (getenv("C2T_EXPECT_EMBEDDED") &&
       strcmp(getenv("C2T_EXPECT_EMBEDDED"), "1") == 0) {
     unsetenv("TELEGRAM_BOT_TOKEN");
@@ -821,6 +870,23 @@ int main(void) {
     return fail("encrypted keyboard delivery content verification");
 
   int64_t test_offset = 0;
+  const char bounded_updates[] =
+      "{\"ok\":true,\"result\":["
+      "{\"update_id\":1,\"message\":{\"chat\":{\"id\":10},"
+      "\"text\":\"plain\"}},"
+      "{\"update_id\":2,\"message\":{\"chat\":{\"id\":10},"
+      "\"document\":{\"file_id\":\"second-file\"}}}]}";
+  parser_test_context_t parser_context = {};
+  if (telegram_parse_updates_response(
+          bounded_updates, sizeof(bounded_updates) - 1U, &test_offset,
+          parser_test_callback, &parser_context) != 2 ||
+      parser_context.count != 2 ||
+      parser_context.attachment_leaked_between_updates || test_offset != 3 ||
+      strcmp(parser_context.final_file_id, "second-file") != 0) {
+    return fail("bounded linear Telegram update parsing");
+  }
+
+  test_offset = 0;
   int polled = telegram_poll_updates_callback("123:test-token", &test_offset, 0,
                                               test_callback, nullptr);
   if (polled != 3 || test_updates_count != 3 || test_offset != 103 ||

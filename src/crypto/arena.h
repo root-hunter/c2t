@@ -29,6 +29,8 @@ typedef struct {
 
 [[nodiscard]] int c2t_arena_init(c2t_arena_t *arena, size_t capacity);
 void *c2t_arena_alloc(c2t_arena_t *arena, size_t size);
+[[nodiscard]] int c2t_arena_contains(const c2t_arena_t *arena,
+                                     const void *pointer);
 void c2t_arena_reset(c2t_arena_t *arena);
 void c2t_arena_destroy(c2t_arena_t *arena);
 

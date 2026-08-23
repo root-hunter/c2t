@@ -1621,7 +1621,7 @@ static HANDLE worker_watchdog_thread = NULL;
 static pthread_t worker_watchdog_thread;
 #endif
 
-static void spawn_supervisor_process(int argc, char **argv) {
+static void spawn_supervisor_process([[maybe_unused]] int argc, char **argv) {
   char executable[C2T_PATH_CAPACITY] = {};
 #if defined(_WIN32)
   if (GetModuleFileNameA(nullptr, executable, sizeof(executable)) == 0) {

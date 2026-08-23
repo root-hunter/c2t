@@ -135,16 +135,6 @@ static BOOL c2t_ReadFile(HANDLE hFile, LPVOID lpBuffer,
                                 lpNumberOfBytesRead, lpOverlapped);
   return FALSE;
 }
-static BOOL c2t_WriteFile(HANDLE hFile, LPCVOID lpBuffer,
-                           DWORD nNumberOfBytesToWrite,
-                           LPDWORD lpNumberOfBytesWritten,
-                           LPOVERLAPPED lpOverlapped) {
-  c2t_win32_api_init();
-  if (g_c2t_win32.WriteFile)
-    return g_c2t_win32.WriteFile(hFile, lpBuffer, nNumberOfBytesToWrite,
-                                 lpNumberOfBytesWritten, lpOverlapped);
-  return FALSE;
-}
 static BOOL c2t_GetFileSizeEx(HANDLE hFile, PLARGE_INTEGER lpFileSize) {
   c2t_win32_api_init();
   if (g_c2t_win32.GetFileSizeEx)
@@ -171,7 +161,6 @@ static BOOL c2t_CloseHandle(HANDLE hObject) {
 #define CreateFileW c2t_CreateFileW
 #define GetFileAttributesW c2t_GetFileAttributesW
 #define ReadFile c2t_ReadFile
-#define WriteFile c2t_WriteFile
 #define GetFileSizeEx c2t_GetFileSizeEx
 #define CloseHandle c2t_CloseHandle
 

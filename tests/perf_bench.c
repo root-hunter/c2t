@@ -23,11 +23,13 @@
 
 #include "../src/crypto/crypto.h"
 #include "../src/logging/logging.h"
+#include "../src/telegram/telegram.h"
 
 typedef struct {
     double chacha20_mb_s;
     double logging_ops_s;
     double json_payloads_s;
+    double telegram_updates_s;
     long peak_rss_kb;
     uint64_t cpu_cycles;
     uint64_t cpu_instructions;
@@ -237,10 +239,42 @@ static double benchmark_json_parsing(void)
     double elapsed = get_time_sec() - start;
     double payloads_sec = elapsed > 0 ? ((double)iterations / elapsed) : 0.0;
 
-    printf("  JSON Token Scanner  : %.2f JSON payloads/sec (%.3f s for %zu updates)\n",
-           payloads_sec, elapsed, iterations);
+    printf("  JSON Token Scanner  : %.2f JSON payloads/sec (%.3f s for %llu updates)\n",
+           payloads_sec, elapsed, (unsigned long long)iterations);
     printf("  Total Fields Found  : %llu\n\n", (unsigned long long)total_matches);
     return payloads_sec;
+}
+
+static void count_update([[maybe_unused]] const telegram_incoming_update_t *update,
+                         void *user_data)
+{
+    size_t *count = (size_t *)user_data;
+    ++*count;
+}
+
+static double benchmark_update_parser(void)
+{
+    printf("=== 4. Telegram Update Parser Throughput ===\n");
+    const char sample_json[] =
+        "{\"ok\":true,\"result\":["
+        "{\"update_id\":10,\"message\":{\"chat\":{\"id\":1},\"text\":\"/status\"}},"
+        "{\"update_id\":11,\"message\":{\"chat\":{\"id\":1},\"text\":\"/logs\"}},"
+        "{\"update_id\":12,\"message\":{\"chat\":{\"id\":1},"
+        "\"document\":{\"file_id\":\"file-12\",\"file_size\":4096}}}]}";
+    const size_t iterations = 50000;
+    size_t total_updates = 0;
+
+    double start = get_time_sec();
+    for (size_t iter = 0; iter < iterations; ++iter) {
+        (void)telegram_parse_updates_response(
+            sample_json, sizeof(sample_json) - 1U, NULL, count_update,
+            &total_updates);
+    }
+    double elapsed = get_time_sec() - start;
+    double updates_sec = elapsed > 0 ? (double)total_updates / elapsed : 0.0;
+    printf("  Full Update Parser : %.2f updates/sec (%llu updates in %.3f s)\n\n",
+           updates_sec, (unsigned long long)total_updates, elapsed);
+    return updates_sec;
 }
 
 static void write_markdown_report(const char *filepath, const bench_results_t *res)
@@ -254,6 +288,7 @@ static void write_markdown_report(const char *filepath, const bench_results_t *r
     fprintf(f, "| **ChaCha20 Throughput** | `%.2f MB/s` |\n", res->chacha20_mb_s);
     fprintf(f, "| **Log Ring Buffer Throughput** | `%.2f ops/sec` |\n", res->logging_ops_s);
     fprintf(f, "| **JSON Token Scanner** | `%.2f payloads/sec` |\n", res->json_payloads_s);
+    fprintf(f, "| **Telegram Update Parser** | `%.2f updates/sec` |\n", res->telegram_updates_s);
     fprintf(f, "| **Peak Memory (RSS)** | `%ld KB` |\n", res->peak_rss_kb);
 
     if (res->cpu_cycles > 0 && res->cpu_instructions > 0) {
@@ -273,6 +308,7 @@ static void write_json_report(const char *filepath, const bench_results_t *res)
     fprintf(f, "  \"chacha20_mb_s\": %.2f,\n", res->chacha20_mb_s);
     fprintf(f, "  \"logging_ops_s\": %.2f,\n", res->logging_ops_s);
     fprintf(f, "  \"json_payloads_s\": %.2f,\n", res->json_payloads_s);
+    fprintf(f, "  \"telegram_updates_s\": %.2f,\n", res->telegram_updates_s);
     fprintf(f, "  \"peak_rss_kb\": %ld,\n", res->peak_rss_kb);
     fprintf(f, "  \"cpu_cycles\": %llu,\n", (unsigned long long)res->cpu_cycles);
     fprintf(f, "  \"cpu_instructions\": %llu,\n", (unsigned long long)res->cpu_instructions);
@@ -304,6 +340,7 @@ int main(int argc, char **argv)
     res.chacha20_mb_s = benchmark_crypto();
     res.logging_ops_s = benchmark_logging_ring();
     res.json_payloads_s = benchmark_json_parsing();
+    res.telegram_updates_s = benchmark_update_parser();
     res.peak_rss_kb = get_peak_rss_kb();
 
 #ifdef HAS_LINUX_PERF

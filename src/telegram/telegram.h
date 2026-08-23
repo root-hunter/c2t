@@ -21,6 +21,7 @@
 #include "../clipboard/clipboard_source.h"
 #include "../crypto/crypto.h"
 #include <stddef.h>
+#include <stdint.h>
 
 [[nodiscard]] int telegram_init(void);
 [[nodiscard]] int telegram_send(const char *text, size_t length,
@@ -70,6 +71,10 @@ typedef struct {
 typedef void (*telegram_update_callback_t)(
     const telegram_incoming_update_t *update, void *user_data);
 
+int telegram_parse_updates_response(const char *response,
+                                    size_t response_length, int64_t *offset,
+                                    telegram_update_callback_t callback,
+                                    void *user_data);
 int telegram_poll_updates_callback(const char *token, int64_t *offset,
                                    int timeout_seconds,
                                    telegram_update_callback_t callback,
