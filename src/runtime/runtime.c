@@ -744,6 +744,7 @@ int c2t_runtime_stop(unsigned int timeout_ms, int force)
 
 [[nodiscard]] static int redirect_background_io(void)
 {
+    (void)prepare_paths();
     int input = open("/dev/null", O_RDONLY);
     int output = c2t_config_get()->log_file
         ? open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0600)
