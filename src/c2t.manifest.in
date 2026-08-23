@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity
-    version="1.0.0.0"
+    version="@PROJECT_VERSION@.0"
     processorArchitecture="*"
-    name="c2t"
+    name="c2t.v@PROJECT_VERSION@"
     type="win32"/>
   <description>c2t Clipboard and Keyboard Synchronization Utility</description>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">

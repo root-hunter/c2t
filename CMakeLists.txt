@@ -114,6 +114,11 @@ endif()
 
 if(WIN32)
     configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/c2t.manifest.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/c2t.manifest"
+        @ONLY
+    )
+    configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/src/c2t.rc.in"
         "${CMAKE_CURRENT_BINARY_DIR}/c2t.rc"
         @ONLY
@@ -133,6 +138,7 @@ if(WIN32)
             -Wl,--dynamicbase
             -Wl,--nxcompat
             -Wl,--high-entropy-va
+            $<$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>:-Wl,--build-id=uuid>
         )
     endif()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
