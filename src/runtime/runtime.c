@@ -32,6 +32,204 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include "../win32/win32_api.h"
+
+static VOID c2t_Sleep(DWORD dwMilliseconds) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.Sleep)
+    g_c2t_win32.Sleep(dwMilliseconds);
+}
+static HANDLE c2t_OpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle,
+                              DWORD dwProcessId) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.OpenProcess)
+    return g_c2t_win32.OpenProcess(dwDesiredAccess, bInheritHandle,
+                                   dwProcessId);
+  return NULL;
+}
+static BOOL c2t_QueryFullProcessImageNameA(HANDLE hProcess, DWORD dwFlags,
+                                           LPSTR lpExeName, PDWORD pdwSize) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.QueryFullProcessImageNameA)
+    return g_c2t_win32.QueryFullProcessImageNameA(hProcess, dwFlags, lpExeName,
+                                                  pdwSize);
+  return FALSE;
+}
+static BOOL c2t_CloseHandle(HANDLE hObject) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CloseHandle)
+    return g_c2t_win32.CloseHandle(hObject);
+  return FALSE;
+}
+static BOOL c2t_DeleteFileA(LPCSTR lpFileName) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.DeleteFileA)
+    return g_c2t_win32.DeleteFileA(lpFileName);
+  return FALSE;
+}
+static BOOL c2t_MoveFileExA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName,
+                            DWORD dwFlags) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.MoveFileExA)
+    return g_c2t_win32.MoveFileExA(lpExistingFileName, lpNewFileName, dwFlags);
+  return FALSE;
+}
+static BOOL c2t_CreateDirectoryA(LPCSTR lpPathName,
+                                LPSECURITY_ATTRIBUTES lpSecurityAttributes) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateDirectoryA)
+    return g_c2t_win32.CreateDirectoryA(lpPathName, lpSecurityAttributes);
+  return FALSE;
+}
+static BOOL c2t_ProcessIdToSessionId(DWORD dwProcessId, DWORD *pSessionId) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.ProcessIdToSessionId)
+    return g_c2t_win32.ProcessIdToSessionId(dwProcessId, pSessionId);
+  return FALSE;
+}
+static DWORD c2t_GetCurrentProcessId(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetCurrentProcessId)
+    return g_c2t_win32.GetCurrentProcessId();
+  return 0;
+}
+static BOOL c2t_SetEvent(HANDLE hEvent) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.SetEvent)
+    return g_c2t_win32.SetEvent(hEvent);
+  return FALSE;
+}
+static HANDLE c2t_CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes,
+                               BOOL bInitialOwner, LPCSTR lpName) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateMutexA)
+    return g_c2t_win32.CreateMutexA(lpMutexAttributes, bInitialOwner, lpName);
+  return NULL;
+}
+static DWORD c2t_WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WaitForSingleObject)
+    return g_c2t_win32.WaitForSingleObject(hHandle, dwMilliseconds);
+  return (DWORD)0xFFFFFFFF;
+}
+static HANDLE c2t_CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes,
+                               BOOL bManualReset, BOOL bInitialState,
+                               LPCSTR lpName) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateEventA)
+    return g_c2t_win32.CreateEventA(lpEventAttributes, bManualReset,
+                                   bInitialState, lpName);
+  return NULL;
+}
+static BOOL c2t_ResetEvent(HANDLE hEvent) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.ResetEvent)
+    return g_c2t_win32.ResetEvent(hEvent);
+  return FALSE;
+}
+static BOOL c2t_SetConsoleCtrlHandler(PHANDLER_ROUTINE HandlerRoutine,
+                                       BOOL Add) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.SetConsoleCtrlHandler)
+    return g_c2t_win32.SetConsoleCtrlHandler(HandlerRoutine, Add);
+  return FALSE;
+}
+static BOOL c2t_CreateProcessA(
+    LPCSTR lpApplicationName, LPSTR lpCommandLine,
+    LPSECURITY_ATTRIBUTES lpProcessAttributes,
+    LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles,
+    DWORD dwCreationFlags, LPVOID lpEnvironment, LPCSTR lpCurrentDirectory,
+    LPSTARTUPINFOA lpStartupInfo, LPPROCESS_INFORMATION lpProcessInformation) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateProcessA)
+    return g_c2t_win32.CreateProcessA(
+        lpApplicationName, lpCommandLine, lpProcessAttributes,
+        lpThreadAttributes, bInheritHandles, dwCreationFlags, lpEnvironment,
+        lpCurrentDirectory, lpStartupInfo, lpProcessInformation);
+  return FALSE;
+}
+static HANDLE c2t_CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess,
+                              DWORD dwShareMode,
+                              LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+                              DWORD dwCreationDisposition,
+                              DWORD dwFlagsAndAttributes,
+                              HANDLE hTemplateFile) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateFileA)
+    return g_c2t_win32.CreateFileA(
+        lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes,
+        dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+  return INVALID_HANDLE_VALUE;
+}
+static HWND c2t_GetConsoleWindow(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetConsoleWindow)
+    return g_c2t_win32.GetConsoleWindow();
+  return NULL;
+}
+static BOOL c2t_FreeConsole(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.FreeConsole)
+    return g_c2t_win32.FreeConsole();
+  return FALSE;
+}
+static BOOL c2t_SetConsoleTitleA(LPCSTR lpConsoleTitle) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.SetConsoleTitleA)
+    return g_c2t_win32.SetConsoleTitleA(lpConsoleTitle);
+  return FALSE;
+}
+static BOOL c2t_GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetExitCodeProcess)
+    return g_c2t_win32.GetExitCodeProcess(hProcess, lpExitCode);
+  return FALSE;
+}
+static BOOL c2t_TerminateProcess(HANDLE hProcess, UINT uExitCode) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.TerminateProcess)
+    return g_c2t_win32.TerminateProcess(hProcess, uExitCode);
+  return FALSE;
+}
+static DWORD c2t_GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename,
+                                      DWORD nSize) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetModuleFileNameA)
+    return g_c2t_win32.GetModuleFileNameA(hModule, lpFilename, nSize);
+  return 0;
+}
+static HRESULT c2t_SHGetFolderPathW(HWND hwnd, int csidl, HANDLE hToken,
+                                     DWORD dwFlags, LPWSTR pszPath) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.SHGetFolderPathW)
+    return g_c2t_win32.SHGetFolderPathW(hwnd, csidl, hToken, dwFlags, pszPath);
+  return (HRESULT)0x80004005L; /* E_FAIL */
+}
+
+#define Sleep c2t_Sleep
+#define OpenProcess c2t_OpenProcess
+#define QueryFullProcessImageNameA c2t_QueryFullProcessImageNameA
+#define CloseHandle c2t_CloseHandle
+#define DeleteFileA c2t_DeleteFileA
+#define MoveFileExA c2t_MoveFileExA
+#define CreateDirectoryA c2t_CreateDirectoryA
+#define ProcessIdToSessionId c2t_ProcessIdToSessionId
+#define GetCurrentProcessId c2t_GetCurrentProcessId
+#define SetEvent c2t_SetEvent
+#define CreateMutexA c2t_CreateMutexA
+#define WaitForSingleObject c2t_WaitForSingleObject
+#define CreateEventA c2t_CreateEventA
+#define ResetEvent c2t_ResetEvent
+#define SetConsoleCtrlHandler c2t_SetConsoleCtrlHandler
+#define CreateProcessA c2t_CreateProcessA
+#define CreateFileA c2t_CreateFileA
+#define GetConsoleWindow c2t_GetConsoleWindow
+#define FreeConsole c2t_FreeConsole
+#define SetConsoleTitleA c2t_SetConsoleTitleA
+#define GetExitCodeProcess c2t_GetExitCodeProcess
+#define TerminateProcess c2t_TerminateProcess
+#define GetModuleFileNameA c2t_GetModuleFileNameA
+#define SHGetFolderPathW c2t_SHGetFolderPathW
 #else
 #include <fcntl.h>
 #include <pthread.h>

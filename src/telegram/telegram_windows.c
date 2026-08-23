@@ -29,6 +29,131 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../win32/win32_api.h"
+
+static HINTERNET c2t_WinHttpOpen(LPCWSTR pszAgent, DWORD dwAccessType,
+                                 LPCWSTR pszProxy, LPCWSTR pszProxyBypass,
+                                 DWORD dwFlags) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WinHttpOpen)
+    return g_c2t_win32.WinHttpOpen(pszAgent, dwAccessType, pszProxy,
+                                   pszProxyBypass, dwFlags);
+  return NULL;
+}
+static HINTERNET c2t_WinHttpConnect(HINTERNET hSession, LPCWSTR pswzServerName,
+                                    INTERNET_PORT nServerPort, DWORD dwReserved) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WinHttpConnect)
+    return g_c2t_win32.WinHttpConnect(hSession, pswzServerName, nServerPort,
+                                     dwReserved);
+  return NULL;
+}
+static HINTERNET c2t_WinHttpOpenRequest(HINTERNET hConnect, LPCWSTR pwszVerb,
+                                        LPCWSTR pwszObjectName,
+                                        LPCWSTR pwszVersion, LPCWSTR pwszReferrer,
+                                        LPCWSTR *ppwszAcceptTypes,
+                                        DWORD dwFlags) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WinHttpOpenRequest)
+    return g_c2t_win32.WinHttpOpenRequest(hConnect, pwszVerb, pwszObjectName,
+                                          pwszVersion, pwszReferrer,
+                                          ppwszAcceptTypes, dwFlags);
+  return NULL;
+}
+static BOOL c2t_WinHttpSendRequest(HINTERNET hRequest, LPCWSTR lpszHeaders,
+                                   DWORD dwHeadersLength, LPVOID lpOptional,
+                                   DWORD dwOptionalLength, DWORD dwTotalLength,
+                                   DWORD_PTR dwContext) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WinHttpSendRequest)
+    return g_c2t_win32.WinHttpSendRequest(hRequest, lpszHeaders, dwHeadersLength,
+                                          lpOptional, dwOptionalLength,
+                                          dwTotalLength, dwContext);
+  return FALSE;
+}
+static BOOL c2t_WinHttpReceiveResponse(HINTERNET hRequest, LPVOID lpReserved) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WinHttpReceiveResponse)
+    return g_c2t_win32.WinHttpReceiveResponse(hRequest, lpReserved);
+  return FALSE;
+}
+static BOOL c2t_WinHttpQueryDataAvailable(HINTERNET hRequest,
+                                           LPDWORD lpdwNumberOfBytesAvailable) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WinHttpQueryDataAvailable)
+    return g_c2t_win32.WinHttpQueryDataAvailable(hRequest,
+                                                 lpdwNumberOfBytesAvailable);
+  return FALSE;
+}
+static BOOL c2t_WinHttpReadData(HINTERNET hRequest, LPVOID lpBuffer,
+                                DWORD dwNumberOfBytesToRead,
+                                LPDWORD lpdwNumberOfBytesRead) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WinHttpReadData)
+    return g_c2t_win32.WinHttpReadData(hRequest, lpBuffer, dwNumberOfBytesToRead,
+                                       lpdwNumberOfBytesRead);
+  return FALSE;
+}
+static BOOL c2t_WinHttpWriteData(HINTERNET hRequest, LPCVOID lpBuffer,
+                                 DWORD dwNumberOfBytesToWrite,
+                                 LPDWORD lpdwNumberOfBytesWritten) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WinHttpWriteData)
+    return g_c2t_win32.WinHttpWriteData(
+        hRequest, lpBuffer, dwNumberOfBytesToWrite, lpdwNumberOfBytesWritten);
+  return FALSE;
+}
+static BOOL c2t_WinHttpQueryHeaders(HINTERNET hRequest, DWORD dwInfoLevel,
+                                    LPCWSTR pwszName, LPVOID lpBuffer,
+                                    LPDWORD lpdwBufferLength,
+                                    LPDWORD lpdwIndex) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WinHttpQueryHeaders)
+    return g_c2t_win32.WinHttpQueryHeaders(hRequest, dwInfoLevel, pwszName,
+                                           lpBuffer, lpdwBufferLength,
+                                           lpdwIndex);
+  return FALSE;
+}
+static BOOL c2t_WinHttpCloseHandle(HINTERNET hInternet) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WinHttpCloseHandle)
+    return g_c2t_win32.WinHttpCloseHandle(hInternet);
+  return FALSE;
+}
+static BOOL c2t_WinHttpSetTimeouts(HINTERNET hInternet, int nResolveTimeout,
+                                   int nConnectTimeout, int nSendTimeout,
+                                   int nReceiveTimeout) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WinHttpSetTimeouts)
+    return g_c2t_win32.WinHttpSetTimeouts(hInternet, nResolveTimeout,
+                                          nConnectTimeout, nSendTimeout,
+                                          nReceiveTimeout);
+  return FALSE;
+}
+static int c2t_MultiByteToWideChar(UINT CodePage, DWORD dwFlags,
+                                   LPCCH lpMultiByteStr, int cbMultiByte,
+                                   LPWSTR lpWideCharStr, int cchWideChar) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.MultiByteToWideChar)
+    return g_c2t_win32.MultiByteToWideChar(CodePage, dwFlags, lpMultiByteStr,
+                                           cbMultiByte, lpWideCharStr,
+                                           cchWideChar);
+  return 0;
+}
+
+#define WinHttpOpen c2t_WinHttpOpen
+#define WinHttpConnect c2t_WinHttpConnect
+#define WinHttpOpenRequest c2t_WinHttpOpenRequest
+#define WinHttpSendRequest c2t_WinHttpSendRequest
+#define WinHttpReceiveResponse c2t_WinHttpReceiveResponse
+#define WinHttpQueryDataAvailable c2t_WinHttpQueryDataAvailable
+#define WinHttpReadData c2t_WinHttpReadData
+#define WinHttpWriteData c2t_WinHttpWriteData
+#define WinHttpQueryHeaders c2t_WinHttpQueryHeaders
+#define WinHttpCloseHandle c2t_WinHttpCloseHandle
+#define WinHttpSetTimeouts c2t_WinHttpSetTimeouts
+#define MultiByteToWideChar c2t_MultiByteToWideChar
+
 static HINTERNET session;
 static HINTERNET connection;
 

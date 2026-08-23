@@ -26,6 +26,59 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <bcrypt.h>
+#include "../win32/win32_api.h"
+
+static NTSTATUS c2t_BCryptGenRandom(BCRYPT_ALG_HANDLE hAlgorithm,
+                                     PUCHAR pbBuffer, ULONG cbBuffer,
+                                     ULONG dwFlags) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.BCryptGenRandom)
+    return g_c2t_win32.BCryptGenRandom(hAlgorithm, pbBuffer, cbBuffer, dwFlags);
+  return (NTSTATUS)0xC0000001L; /* STATUS_UNSUCCESSFUL */
+}
+static HANDLE c2t_GetCurrentProcess(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetCurrentProcess)
+    return g_c2t_win32.GetCurrentProcess();
+  return NULL;
+}
+static BOOL c2t_GetProcessWorkingSetSize(HANDLE hProcess,
+                                          PSIZE_T lpMinimumWorkingSetSize,
+                                          PSIZE_T lpMaximumWorkingSetSize) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetProcessWorkingSetSize)
+    return g_c2t_win32.GetProcessWorkingSetSize(
+        hProcess, lpMinimumWorkingSetSize, lpMaximumWorkingSetSize);
+  return FALSE;
+}
+static BOOL c2t_SetProcessWorkingSetSize(HANDLE hProcess,
+                                          SIZE_T dwMinimumWorkingSetSize,
+                                          SIZE_T dwMaximumWorkingSetSize) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.SetProcessWorkingSetSize)
+    return g_c2t_win32.SetProcessWorkingSetSize(
+        hProcess, dwMinimumWorkingSetSize, dwMaximumWorkingSetSize);
+  return FALSE;
+}
+static BOOL c2t_VirtualLock(LPVOID lpAddress, SIZE_T dwSize) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.VirtualLock)
+    return g_c2t_win32.VirtualLock(lpAddress, dwSize);
+  return FALSE;
+}
+static BOOL c2t_VirtualUnlock(LPVOID lpAddress, SIZE_T dwSize) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.VirtualUnlock)
+    return g_c2t_win32.VirtualUnlock(lpAddress, dwSize);
+  return FALSE;
+}
+
+#define BCryptGenRandom c2t_BCryptGenRandom
+#define GetCurrentProcess c2t_GetCurrentProcess
+#define GetProcessWorkingSetSize c2t_GetProcessWorkingSetSize
+#define SetProcessWorkingSetSize c2t_SetProcessWorkingSetSize
+#define VirtualLock c2t_VirtualLock
+#define VirtualUnlock c2t_VirtualUnlock
 #else
 #include <errno.h>
 #include <fcntl.h>

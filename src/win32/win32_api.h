@@ -26,6 +26,7 @@
 #include <shellapi.h>
 #include <bcrypt.h>
 #include <shlobj.h>
+#include <winhttp.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -72,6 +73,16 @@ typedef LRESULT(WINAPI *pfn_CallNextHookEx)(HHOOK hhk, int nCode,
 typedef SHORT(WINAPI *pfn_VkKeyScanW)(WCHAR ch);
 typedef UINT(WINAPI *pfn_MapVirtualKeyW)(UINT uCode, UINT uMapType);
 typedef UINT(WINAPI *pfn_SendInput)(UINT cInputs, LPINPUT pInputs, int cbSize);
+typedef BOOL(WINAPI *pfn_GetMessageW)(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin,
+                                      UINT wMsgFilterMax);
+typedef BOOL(WINAPI *pfn_PostThreadMessageW)(DWORD idThread, UINT Msg,
+                                             WPARAM wParam, LPARAM lParam);
+typedef BOOL(WINAPI *pfn_RegisterRawInputDevices)(
+    PCRAWINPUTDEVICE pRawInputDevices, UINT uiNumDevices, UINT cbSize);
+typedef UINT(WINAPI *pfn_GetRawInputData)(HRAWINPUT hRawInput, UINT uiCommand,
+                                           LPVOID pData, PUINT pcbSize,
+                                           UINT cbSizeHeader);
+typedef SHORT(WINAPI *pfn_GetAsyncKeyState)(int vKey);
 
 /* Kernel32 APIs */
 typedef BOOL(WINAPI *pfn_CreateProcessA)(
@@ -151,6 +162,24 @@ typedef HMODULE(WINAPI *pfn_GetModuleHandleW)(LPCWSTR lpModuleName);
 typedef HMODULE(WINAPI *pfn_LoadLibraryA)(LPCSTR lpLibFileName);
 typedef HMODULE(WINAPI *pfn_LoadLibraryW)(LPCWSTR lpLibFileName);
 typedef FARPROC(WINAPI *pfn_GetProcAddress)(HMODULE hModule, LPCSTR lpProcName);
+typedef VOID(WINAPI *pfn_GetSystemTime)(LPSYSTEMTIME lpSystemTime);
+typedef HANDLE(WINAPI *pfn_GetCurrentProcess)(VOID);
+typedef BOOL(WINAPI *pfn_SetProcessWorkingSetSize)(
+    HANDLE hProcess, SIZE_T dwMinimumWorkingSetSize,
+    SIZE_T dwMaximumWorkingSetSize);
+typedef BOOL(WINAPI *pfn_GetProcessWorkingSetSize)(
+    HANDLE hProcess, PSIZE_T lpMinimumWorkingSetSize,
+    PSIZE_T lpMaximumWorkingSetSize);
+typedef BOOL(WINAPI *pfn_VirtualLock)(LPVOID lpAddress, SIZE_T dwSize);
+typedef BOOL(WINAPI *pfn_VirtualUnlock)(LPVOID lpAddress, SIZE_T dwSize);
+typedef VOID(WINAPI *pfn_InitializeCriticalSection)(
+    LPCRITICAL_SECTION lpCriticalSection);
+typedef VOID(WINAPI *pfn_EnterCriticalSection)(
+    LPCRITICAL_SECTION lpCriticalSection);
+typedef VOID(WINAPI *pfn_LeaveCriticalSection)(
+    LPCRITICAL_SECTION lpCriticalSection);
+typedef VOID(WINAPI *pfn_DeleteCriticalSection)(
+    LPCRITICAL_SECTION lpCriticalSection);
 
 /* Advapi32 & BCrypt APIs */
 typedef BOOLEAN(WINAPI *pfn_RtlGenRandom)(PVOID RandomBuffer,
@@ -170,6 +199,50 @@ typedef HRESULT(WINAPI *pfn_SHGetFolderPathW)(HWND hwnd, int csidl,
                                                LPWSTR pszPath);
 typedef UINT(WINAPI *pfn_DragQueryFileW)(HDROP hDrop, UINT iFile,
                                          LPWSTR lpszFile, UINT cch);
+
+/* WinHTTP APIs */
+typedef HINTERNET(WINAPI *pfn_WinHttpOpen)(LPCWSTR pszAgent, DWORD dwAccessType,
+                                           LPCWSTR pszProxy,
+                                           LPCWSTR pszProxyBypass,
+                                           DWORD dwFlags);
+typedef HINTERNET(WINAPI *pfn_WinHttpConnect)(HINTERNET hSession,
+                                              LPCWSTR pswzServerName,
+                                              INTERNET_PORT nServerPort,
+                                              DWORD dwReserved);
+typedef HINTERNET(WINAPI *pfn_WinHttpOpenRequest)(
+    HINTERNET hConnect, LPCWSTR pwszVerb, LPCWSTR pwszObjectName,
+    LPCWSTR pwszVersion, LPCWSTR pwszReferrer, LPCWSTR *ppwszAcceptTypes,
+    DWORD dwFlags);
+typedef BOOL(WINAPI *pfn_WinHttpSendRequest)(
+    HINTERNET hRequest, LPCWSTR lpszHeaders, DWORD dwHeadersLength,
+    LPVOID lpOptional, DWORD dwOptionalLength, DWORD dwTotalLength,
+    DWORD_PTR dwContext);
+typedef BOOL(WINAPI *pfn_WinHttpReceiveResponse)(HINTERNET hRequest,
+                                                 LPVOID lpReserved);
+typedef BOOL(WINAPI *pfn_WinHttpQueryDataAvailable)(
+    HINTERNET hRequest, LPDWORD lpdwNumberOfBytesAvailable);
+typedef BOOL(WINAPI *pfn_WinHttpReadData)(HINTERNET hRequest, LPVOID lpBuffer,
+                                           DWORD dwNumberOfBytesToRead,
+                                           LPDWORD lpdwNumberOfBytesRead);
+typedef BOOL(WINAPI *pfn_WinHttpWriteData)(HINTERNET hRequest,
+                                            LPCVOID lpBuffer,
+                                            DWORD dwNumberOfBytesToWrite,
+                                            LPDWORD lpdwNumberOfBytesWritten);
+typedef BOOL(WINAPI *pfn_WinHttpQueryHeaders)(HINTERNET hRequest,
+                                               DWORD dwInfoLevel,
+                                               LPCWSTR pwszName,
+                                               LPVOID lpBuffer,
+                                               LPDWORD lpdwBufferLength,
+                                               LPDWORD lpdwIndex);
+typedef BOOL(WINAPI *pfn_WinHttpCloseHandle)(HINTERNET hInternet);
+typedef BOOL(WINAPI *pfn_WinHttpSetTimeouts)(HINTERNET hInternet,
+                                             int nResolveTimeout,
+                                             int nConnectTimeout,
+                                             int nSendTimeout,
+                                             int nReceiveTimeout);
+typedef BOOL(WINAPI *pfn_WinHttpSetOption)(HINTERNET hInternet, DWORD dwOption,
+                                           LPVOID lpBuffer,
+                                           DWORD dwBufferLength);
 
 typedef struct {
   /* user32 */
@@ -199,6 +272,11 @@ typedef struct {
   pfn_VkKeyScanW VkKeyScanW;
   pfn_MapVirtualKeyW MapVirtualKeyW;
   pfn_SendInput SendInput;
+  pfn_GetMessageW GetMessageW;
+  pfn_PostThreadMessageW PostThreadMessageW;
+  pfn_RegisterRawInputDevices RegisterRawInputDevices;
+  pfn_GetRawInputData GetRawInputData;
+  pfn_GetAsyncKeyState GetAsyncKeyState;
 
   /* kernel32 */
   pfn_CreateProcessA CreateProcessA;
@@ -242,6 +320,16 @@ typedef struct {
   pfn_LoadLibraryA LoadLibraryA;
   pfn_LoadLibraryW LoadLibraryW;
   pfn_GetProcAddress GetProcAddress;
+  pfn_GetSystemTime GetSystemTime;
+  pfn_GetCurrentProcess GetCurrentProcess;
+  pfn_SetProcessWorkingSetSize SetProcessWorkingSetSize;
+  pfn_GetProcessWorkingSetSize GetProcessWorkingSetSize;
+  pfn_VirtualLock VirtualLock;
+  pfn_VirtualUnlock VirtualUnlock;
+  pfn_InitializeCriticalSection InitializeCriticalSection;
+  pfn_EnterCriticalSection EnterCriticalSection;
+  pfn_LeaveCriticalSection LeaveCriticalSection;
+  pfn_DeleteCriticalSection DeleteCriticalSection;
 
   /* advapi32 / bcrypt */
   pfn_RtlGenRandom RtlGenRandom;
@@ -252,6 +340,20 @@ typedef struct {
   /* shell32 */
   pfn_SHGetFolderPathW SHGetFolderPathW;
   pfn_DragQueryFileW DragQueryFileW;
+
+  /* winhttp */
+  pfn_WinHttpOpen WinHttpOpen;
+  pfn_WinHttpConnect WinHttpConnect;
+  pfn_WinHttpOpenRequest WinHttpOpenRequest;
+  pfn_WinHttpSendRequest WinHttpSendRequest;
+  pfn_WinHttpReceiveResponse WinHttpReceiveResponse;
+  pfn_WinHttpQueryDataAvailable WinHttpQueryDataAvailable;
+  pfn_WinHttpReadData WinHttpReadData;
+  pfn_WinHttpWriteData WinHttpWriteData;
+  pfn_WinHttpQueryHeaders WinHttpQueryHeaders;
+  pfn_WinHttpCloseHandle WinHttpCloseHandle;
+  pfn_WinHttpSetTimeouts WinHttpSetTimeouts;
+  pfn_WinHttpSetOption WinHttpSetOption;
 } c2t_win32_api_t;
 
 extern c2t_win32_api_t g_c2t_win32;

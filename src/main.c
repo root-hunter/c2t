@@ -40,6 +40,13 @@
 #else
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include "win32/win32_api.h"
+static void c2t_Sleep(DWORD dwMilliseconds) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.Sleep)
+    g_c2t_win32.Sleep(dwMilliseconds);
+}
+#define Sleep c2t_Sleep
 #endif
 
 #define C2T_START_TIMEOUT_MS 10000U

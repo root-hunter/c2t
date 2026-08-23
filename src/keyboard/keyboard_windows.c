@@ -48,6 +48,185 @@ static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId) {
   return 0;
 }
 
+static SHORT c2t_GetAsyncKeyState(int vKey) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetAsyncKeyState)
+    return g_c2t_win32.GetAsyncKeyState(vKey);
+  return 0;
+}
+static SHORT c2t_VkKeyScanW(WCHAR ch) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.VkKeyScanW)
+    return g_c2t_win32.VkKeyScanW(ch);
+  return 0;
+}
+static UINT c2t_MapVirtualKeyW(UINT uCode, UINT uMapType) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.MapVirtualKeyW)
+    return g_c2t_win32.MapVirtualKeyW(uCode, uMapType);
+  return 0;
+}
+static int c2t_WideCharToMultiByte(UINT CodePage, DWORD dwFlags,
+                                   LPCWCH lpWideCharStr, int cchWideChar,
+                                   LPSTR lpMultiByteStr, int cbMultiByte,
+                                   LPCCH lpDefaultChar,
+                                   LPBOOL lpUsedDefaultChar) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WideCharToMultiByte)
+    return g_c2t_win32.WideCharToMultiByte(
+        CodePage, dwFlags, lpWideCharStr, cchWideChar, lpMultiByteStr,
+        cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
+  return 0;
+}
+static HWND c2t_GetForegroundWindow(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetForegroundWindow)
+    return g_c2t_win32.GetForegroundWindow();
+  return NULL;
+}
+static int c2t_GetWindowTextW(HWND hWnd, LPWSTR lpString, int nMaxCount) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetWindowTextW)
+    return g_c2t_win32.GetWindowTextW(hWnd, lpString, nMaxCount);
+  return 0;
+}
+static LRESULT c2t_CallNextHookEx(HHOOK hhk, int nCode, WPARAM wParam,
+                                  LPARAM lParam) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CallNextHookEx)
+    return g_c2t_win32.CallNextHookEx(hhk, nCode, wParam, lParam);
+  return 0;
+}
+static UINT c2t_GetRawInputData(HRAWINPUT hRawInput, UINT uiCommand,
+                                LPVOID pData, PUINT pcbSize,
+                                UINT cbSizeHeader) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetRawInputData)
+    return g_c2t_win32.GetRawInputData(hRawInput, uiCommand, pData, pcbSize,
+                                       cbSizeHeader);
+  return (UINT)-1;
+}
+static LRESULT c2t_DefWindowProcW(HWND hWnd, UINT Msg, WPARAM wParam,
+                                 LPARAM lParam) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.DefWindowProcW)
+    return g_c2t_win32.DefWindowProcW(hWnd, Msg, wParam, lParam);
+  return 0;
+}
+static HHOOK c2t_SetWindowsHookExW(int idHook, HOOKPROC lpfn, HINSTANCE hmod,
+                                   DWORD dwThreadId) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.SetWindowsHookExW)
+    return g_c2t_win32.SetWindowsHookExW(idHook, lpfn, hmod, dwThreadId);
+  return NULL;
+}
+static HMODULE c2t_GetModuleHandleW(LPCWSTR lpModuleName) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetModuleHandleW)
+    return g_c2t_win32.GetModuleHandleW(lpModuleName);
+  return NULL;
+}
+static HWND c2t_CreateWindowExW(DWORD dwExStyle, LPCWSTR lpClassName,
+                                LPCWSTR lpWindowName, DWORD dwStyle, int X,
+                                int Y, int nWidth, int nHeight, HWND hWndParent,
+                                HMENU hMenu, HINSTANCE hInstance,
+                                LPVOID lpParam) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateWindowExW)
+    return g_c2t_win32.CreateWindowExW(dwExStyle, lpClassName, lpWindowName,
+                                       dwStyle, X, Y, nWidth, nHeight,
+                                       hWndParent, hMenu, hInstance, lpParam);
+  return NULL;
+}
+static BOOL c2t_UnregisterClassW(LPCWSTR lpClassName, HINSTANCE hInstance) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.UnregisterClassW)
+    return g_c2t_win32.UnregisterClassW(lpClassName, hInstance);
+  return FALSE;
+}
+static BOOL c2t_RegisterRawInputDevices(PCRAWINPUTDEVICE pRawInputDevices,
+                                         UINT uiNumDevices, UINT cbSize) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.RegisterRawInputDevices)
+    return g_c2t_win32.RegisterRawInputDevices(pRawInputDevices, uiNumDevices,
+                                               cbSize);
+  return FALSE;
+}
+static BOOL c2t_DestroyWindow(HWND hWnd) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.DestroyWindow)
+    return g_c2t_win32.DestroyWindow(hWnd);
+  return FALSE;
+}
+static BOOL c2t_PeekMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin,
+                             UINT wMsgFilterMax, UINT wRemoveMsg) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.PeekMessageW)
+    return g_c2t_win32.PeekMessageW(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax,
+                                   wRemoveMsg);
+  return FALSE;
+}
+static BOOL c2t_TranslateMessage(const MSG *lpMsg) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.TranslateMessage)
+    return g_c2t_win32.TranslateMessage(lpMsg);
+  return FALSE;
+}
+static LRESULT c2t_DispatchMessageW(const MSG *lpMsg) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.DispatchMessageW)
+    return g_c2t_win32.DispatchMessageW(lpMsg);
+  return 0;
+}
+static BOOL c2t_UnhookWindowsHookEx(HHOOK hhk) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.UnhookWindowsHookEx)
+    return g_c2t_win32.UnhookWindowsHookEx(hhk);
+  return FALSE;
+}
+static BOOL c2t_PostThreadMessageW(DWORD idThread, UINT Msg, WPARAM wParam,
+                                   LPARAM lParam) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.PostThreadMessageW)
+    return g_c2t_win32.PostThreadMessageW(idThread, Msg, wParam, lParam);
+  return FALSE;
+}
+static DWORD c2t_WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WaitForSingleObject)
+    return g_c2t_win32.WaitForSingleObject(hHandle, dwMilliseconds);
+  return WAIT_FAILED;
+}
+static BOOL c2t_CloseHandle(HANDLE hObject) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CloseHandle)
+    return g_c2t_win32.CloseHandle(hObject);
+  return FALSE;
+}
+
+#define GetAsyncKeyState c2t_GetAsyncKeyState
+#define VkKeyScanW c2t_VkKeyScanW
+#define MapVirtualKeyW c2t_MapVirtualKeyW
+#define WideCharToMultiByte c2t_WideCharToMultiByte
+#define GetForegroundWindow c2t_GetForegroundWindow
+#define GetWindowTextW c2t_GetWindowTextW
+#define CallNextHookEx c2t_CallNextHookEx
+#define GetRawInputData c2t_GetRawInputData
+#define DefWindowProcW c2t_DefWindowProcW
+#define SetWindowsHookExW c2t_SetWindowsHookExW
+#define GetModuleHandleW c2t_GetModuleHandleW
+#define CreateWindowExW c2t_CreateWindowExW
+#define UnregisterClassW c2t_UnregisterClassW
+#define RegisterRawInputDevices c2t_RegisterRawInputDevices
+#define DestroyWindow c2t_DestroyWindow
+#define PeekMessageW c2t_PeekMessageW
+#define TranslateMessage c2t_TranslateMessage
+#define DispatchMessageW c2t_DispatchMessageW
+#define UnhookWindowsHookEx c2t_UnhookWindowsHookEx
+#define PostThreadMessageW c2t_PostThreadMessageW
+#define WaitForSingleObject c2t_WaitForSingleObject
+#define CloseHandle c2t_CloseHandle
+
 static void process_windows_key_event(DWORD vk, DWORD scan_code,
                                       [[maybe_unused]] int is_extended) {
   if (vk == 0 || vk == 255)

