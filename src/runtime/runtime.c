@@ -406,16 +406,30 @@ typedef struct {
     return 0;
   return (strstr(path, "c2t") != NULL || strstr(path, "C2T") != NULL);
 #elif defined(__linux__)
+  char exe_path[64];
+  snprintf(exe_path, sizeof(exe_path), "/proc/%lu/exe", pid);
+  char target[512] = {};
+  ssize_t len = readlink(exe_path, target, sizeof(target) - 1);
+  if (len > 0) {
+    target[len] = '\0';
+    if (strstr(target, "c2t") != NULL || strstr(target, "t2c") != NULL)
+      return 1;
+  }
   char path[64];
   snprintf(path, sizeof(path), "/proc/%lu/cmdline", pid);
   FILE *f = fopen(path, "r");
   if (!f)
     return 0;
-  char cmd[256] = {};
+  char cmd[512] = {};
   size_t n = fread(cmd, 1, sizeof(cmd) - 1, f);
   fclose(f);
   if (n == 0)
     return 0;
+  for (size_t i = 0; i < n; ++i) {
+    if (cmd[i] == '\0')
+      cmd[i] = ' ';
+  }
+  cmd[n] = '\0';
   return (strstr(cmd, "c2t") != NULL || strstr(cmd, "t2c") != NULL);
 #else
   return kill((pid_t)pid, 0) == 0;
