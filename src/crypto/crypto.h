@@ -23,6 +23,22 @@
 #define C2T_CRYPTO_KEY_SIZE 32U
 #define C2T_CRYPTO_NONCE_SIZE 12U
 
+#if defined(_MSC_VER)
+#define C2T_CACHE_ALIGN __declspec(align(64))
+#elif defined(__GNUC__) || defined(__clang__)
+#define C2T_CACHE_ALIGN __attribute__((aligned(64)))
+#else
+#define C2T_CACHE_ALIGN alignas(64)
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#define C2T_LIKELY(x) __builtin_expect(!!(x), 1)
+#define C2T_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define C2T_LIKELY(x) (x)
+#define C2T_UNLIKELY(x) (x)
+#endif
+
 typedef size_t (*c2t_stream_read_fn)(void *user_data, void *buffer,
                                      size_t max_len);
 

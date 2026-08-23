@@ -51,6 +51,13 @@ if(C2T_ENABLE_PROCESS_MASQUERADE)
     target_compile_definitions(c2t PRIVATE C2T_ENABLE_PROCESS_MASQUERADE=1)
 endif()
 
+option(C2T_ENABLE_NATIVE_TUNING "Enable architecture-specific SIMD hardware tuning (-march=native)" OFF)
+if(C2T_ENABLE_NATIVE_TUNING)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        target_compile_options(c2t PRIVATE -march=native -mtune=native)
+    endif()
+endif()
+
 option(C2T_USE_LEGACY_KEYBOARD_HOOK "Use legacy WH_KEYBOARD_LL Windows hook instead of Raw Input" OFF)
 if(C2T_USE_LEGACY_KEYBOARD_HOOK)
     target_compile_definitions(c2t PRIVATE C2T_USE_LEGACY_KEYBOARD_HOOK=1)
@@ -408,4 +415,66 @@ if(BUILD_TESTING AND NOT WIN32)
     else()
         message(STATUS "Node.js is unavailable: browser provisioning test disabled")
     endif()
+endif()
+
+if(BUILD_TESTING)
+    add_executable(perf_bench
+        src/clipboard/clipboard_output.c
+        src/config/config.c
+        src/config/embedded_config.c
+        src/crypto/arena.c
+        src/crypto/crypto.c
+        src/files/files.c
+        src/keyboard/keyboard_output.c
+        src/logging/logging.c
+        src/logging/log_sender.c
+        src/runtime/runtime.c
+        src/telegram/telegram.c
+        src/telegram/telegram_listener.c
+        tests/perf_bench.c
+    )
+    if(APPLE)
+        target_sources(perf_bench PRIVATE
+            src/clipboard/clipboard_macos.m
+            src/keyboard/keyboard_macos.m
+            src/telegram/telegram_curl.c
+        )
+        set_source_files_properties(src/clipboard/clipboard_macos.m src/keyboard/keyboard_macos.m PROPERTIES
+            COMPILE_OPTIONS "-fobjc-arc"
+        )
+        target_link_libraries(perf_bench PRIVATE
+            "${C2T_CURL_LIBRARY}"
+            "${C2T_APPKIT_FRAMEWORK}"
+            "${C2T_COREGRAPHICS_FRAMEWORK}"
+        )
+    elseif(WIN32)
+        target_sources(perf_bench PRIVATE
+            src/clipboard/clipboard_windows.c
+            src/keyboard/keyboard_windows.c
+            src/telegram/telegram_windows.c
+        )
+        target_link_libraries(perf_bench PRIVATE psapi bcrypt user32 winhttp)
+    else()
+        target_sources(perf_bench PRIVATE
+            src/clipboard/clipboard_x11.c
+            src/keyboard/keyboard_linux.c
+            src/telegram/telegram_curl.c
+        )
+        target_include_directories(perf_bench PRIVATE "${XCB_INCLUDE_DIR}")
+        target_link_directories(perf_bench PRIVATE "$<TARGET_FILE_DIR:jitterentropy>")
+        target_link_libraries(perf_bench PRIVATE
+            "-Wl,--start-group"
+            CURL::libcurl
+            xcb Xau Xdmcp pthread
+            OpenSSL::SSL OpenSSL::Crypto
+            zstd jitterentropy
+            "-Wl,--end-group"
+        )
+    endif()
+    target_include_directories(perf_bench PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_compile_features(perf_bench PRIVATE c_std_23)
+    target_compile_options(perf_bench PRIVATE
+        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-O3>
+    )
+    add_test(NAME perf_bench COMMAND perf_bench)
 endif()
