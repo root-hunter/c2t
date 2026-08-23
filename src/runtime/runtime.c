@@ -173,7 +173,7 @@ static BOOL c2t_FreeConsole(VOID) {
     return g_c2t_win32.FreeConsole();
   return FALSE;
 }
-static BOOL c2t_SetConsoleTitleA(LPCSTR lpConsoleTitle) {
+[[maybe_unused]] static BOOL c2t_SetConsoleTitleA(LPCSTR lpConsoleTitle) {
   c2t_win32_api_init();
   if (g_c2t_win32.SetConsoleTitleA)
     return g_c2t_win32.SetConsoleTitleA(lpConsoleTitle);
@@ -198,8 +198,10 @@ static DWORD c2t_GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename,
     return g_c2t_win32.GetModuleFileNameA(hModule, lpFilename, nSize);
   return 0;
 }
-static HRESULT c2t_SHGetFolderPathW(HWND hwnd, int csidl, HANDLE hToken,
-                                     DWORD dwFlags, LPWSTR pszPath) {
+[[maybe_unused]] static HRESULT c2t_SHGetFolderPathW(HWND hwnd, int csidl,
+                                                     HANDLE hToken,
+                                                     DWORD dwFlags,
+                                                     LPWSTR pszPath) {
   c2t_win32_api_init();
   if (g_c2t_win32.SHGetFolderPathW)
     return g_c2t_win32.SHGetFolderPathW(hwnd, csidl, hToken, dwFlags, pszPath);

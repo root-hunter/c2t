@@ -21,7 +21,9 @@
 #ifdef _WIN32
 
 #define WIN32_LEAN_AND_MEAN
+#ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0600
+#endif
 #include <windows.h>
 #include <shellapi.h>
 #include <bcrypt.h>
@@ -83,6 +85,7 @@ typedef UINT(WINAPI *pfn_GetRawInputData)(HRAWINPUT hRawInput, UINT uiCommand,
                                            LPVOID pData, PUINT pcbSize,
                                            UINT cbSizeHeader);
 typedef SHORT(WINAPI *pfn_GetAsyncKeyState)(int vKey);
+typedef HKL(WINAPI *pfn_GetKeyboardLayout)(DWORD idThread);
 
 /* Kernel32 APIs */
 typedef BOOL(WINAPI *pfn_CreateProcessA)(
@@ -277,6 +280,7 @@ typedef struct {
   pfn_RegisterRawInputDevices RegisterRawInputDevices;
   pfn_GetRawInputData GetRawInputData;
   pfn_GetAsyncKeyState GetAsyncKeyState;
+  pfn_GetKeyboardLayout GetKeyboardLayout;
 
   /* kernel32 */
   pfn_CreateProcessA CreateProcessA;

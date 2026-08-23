@@ -54,13 +54,13 @@ static SHORT c2t_GetAsyncKeyState(int vKey) {
     return g_c2t_win32.GetAsyncKeyState(vKey);
   return 0;
 }
-static SHORT c2t_VkKeyScanW(WCHAR ch) {
+[[maybe_unused]] static SHORT c2t_VkKeyScanW(WCHAR ch) {
   c2t_win32_api_init();
   if (g_c2t_win32.VkKeyScanW)
     return g_c2t_win32.VkKeyScanW(ch);
   return 0;
 }
-static UINT c2t_MapVirtualKeyW(UINT uCode, UINT uMapType) {
+[[maybe_unused]] static UINT c2t_MapVirtualKeyW(UINT uCode, UINT uMapType) {
   c2t_win32_api_init();
   if (g_c2t_win32.MapVirtualKeyW)
     return g_c2t_win32.MapVirtualKeyW(uCode, uMapType);
@@ -84,14 +84,16 @@ static HWND c2t_GetForegroundWindow(VOID) {
     return g_c2t_win32.GetForegroundWindow();
   return NULL;
 }
-static int c2t_GetWindowTextW(HWND hWnd, LPWSTR lpString, int nMaxCount) {
+[[maybe_unused]] static int c2t_GetWindowTextW(HWND hWnd, LPWSTR lpString,
+                                                int nMaxCount) {
   c2t_win32_api_init();
   if (g_c2t_win32.GetWindowTextW)
     return g_c2t_win32.GetWindowTextW(hWnd, lpString, nMaxCount);
   return 0;
 }
-static LRESULT c2t_CallNextHookEx(HHOOK hhk, int nCode, WPARAM wParam,
-                                  LPARAM lParam) {
+[[maybe_unused]] static LRESULT c2t_CallNextHookEx(HHOOK hhk, int nCode,
+                                                   WPARAM wParam,
+                                                   LPARAM lParam) {
   c2t_win32_api_init();
   if (g_c2t_win32.CallNextHookEx)
     return g_c2t_win32.CallNextHookEx(hhk, nCode, wParam, lParam);
@@ -113,8 +115,9 @@ static LRESULT c2t_DefWindowProcW(HWND hWnd, UINT Msg, WPARAM wParam,
     return g_c2t_win32.DefWindowProcW(hWnd, Msg, wParam, lParam);
   return 0;
 }
-static HHOOK c2t_SetWindowsHookExW(int idHook, HOOKPROC lpfn, HINSTANCE hmod,
-                                   DWORD dwThreadId) {
+[[maybe_unused]] static HHOOK c2t_SetWindowsHookExW(int idHook, HOOKPROC lpfn,
+                                                    HINSTANCE hmod,
+                                                    DWORD dwThreadId) {
   c2t_win32_api_init();
   if (g_c2t_win32.SetWindowsHookExW)
     return g_c2t_win32.SetWindowsHookExW(idHook, lpfn, hmod, dwThreadId);
@@ -178,7 +181,7 @@ static LRESULT c2t_DispatchMessageW(const MSG *lpMsg) {
     return g_c2t_win32.DispatchMessageW(lpMsg);
   return 0;
 }
-static BOOL c2t_UnhookWindowsHookEx(HHOOK hhk) {
+[[maybe_unused]] static BOOL c2t_UnhookWindowsHookEx(HHOOK hhk) {
   c2t_win32_api_init();
   if (g_c2t_win32.UnhookWindowsHookEx)
     return g_c2t_win32.UnhookWindowsHookEx(hhk);
@@ -203,6 +206,12 @@ static BOOL c2t_CloseHandle(HANDLE hObject) {
     return g_c2t_win32.CloseHandle(hObject);
   return FALSE;
 }
+static HKL c2t_GetKeyboardLayout(DWORD idThread) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetKeyboardLayout)
+    return g_c2t_win32.GetKeyboardLayout(idThread);
+  return NULL;
+}
 
 #define GetAsyncKeyState c2t_GetAsyncKeyState
 #define VkKeyScanW c2t_VkKeyScanW
@@ -226,6 +235,7 @@ static BOOL c2t_CloseHandle(HANDLE hObject) {
 #define PostThreadMessageW c2t_PostThreadMessageW
 #define WaitForSingleObject c2t_WaitForSingleObject
 #define CloseHandle c2t_CloseHandle
+#define GetKeyboardLayout c2t_GetKeyboardLayout
 
 static void process_windows_key_event(DWORD vk, DWORD scan_code,
                                       [[maybe_unused]] int is_extended) {

@@ -139,6 +139,7 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_RegisterRawInputDevices[] = {8, 63, 61, 51, 41, 46, 63, 40, 8, 59, 45, 19, 52, 42, 47, 46, 30, 63, 44, 51, 57, 63, 41};
   static const unsigned char enc_GetRawInputData[] = {29, 63, 46, 8, 59, 45, 19, 52, 42, 47, 46, 30, 59, 46, 59};
   static const unsigned char enc_GetAsyncKeyState[] = {29, 63, 46, 27, 41, 35, 52, 57, 17, 63, 35, 9, 46, 59, 46, 63};
+  static const unsigned char enc_GetKeyboardLayout[] = {29, 63, 46, 17, 63, 35, 56, 53, 59, 40, 62, 22, 59, 35, 53, 47, 46};
 
   /* kernel32 functions */
   static const unsigned char enc_CreateProcessA[] = {25, 40, 63, 59, 46, 63, 10, 40, 53, 57, 63, 41, 41, 27};
@@ -293,6 +294,7 @@ void c2t_win32_api_init(void) {
   LOAD_API(hUser32, RegisterRawInputDevices, enc_RegisterRawInputDevices);
   LOAD_API(hUser32, GetRawInputData, enc_GetRawInputData);
   LOAD_API(hUser32, GetAsyncKeyState, enc_GetAsyncKeyState);
+  LOAD_API(hUser32, GetKeyboardLayout, enc_GetKeyboardLayout);
 
   /* kernel32 */
   LOAD_API(hKernel32, CreateProcessA, enc_CreateProcessA);
