@@ -212,6 +212,61 @@ static HKL c2t_GetKeyboardLayout(DWORD idThread) {
     return g_c2t_win32.GetKeyboardLayout(idThread);
   return NULL;
 }
+static SHORT c2t_GetKeyState(int nVirtKey) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetKeyState)
+    return g_c2t_win32.GetKeyState(nVirtKey);
+  return 0;
+}
+static int c2t_ToUnicodeEx(UINT wVirtKey, UINT wScanCode, const BYTE *lpKeyState,
+                           LPWSTR pwszBuff, int cchBuff, UINT wFlags,
+                           HKL dwhkl) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.ToUnicodeEx)
+    return g_c2t_win32.ToUnicodeEx(wVirtKey, wScanCode, lpKeyState, pwszBuff,
+                                   cchBuff, wFlags, dwhkl);
+  return 0;
+}
+static ATOM c2t_RegisterClassExW(const WNDCLASSEXW *lpWndClassEx) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.RegisterClassExW)
+    return g_c2t_win32.RegisterClassExW(lpWndClassEx);
+  return 0;
+}
+static DWORD c2t_MsgWaitForMultipleObjects(DWORD nCount, const HANDLE *pHandles,
+                                           BOOL bWaitAll, DWORD dwMilliseconds,
+                                           DWORD dwWakeMask) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.MsgWaitForMultipleObjects)
+    return g_c2t_win32.MsgWaitForMultipleObjects(
+        nCount, pHandles, bWaitAll, dwMilliseconds, dwWakeMask);
+  return WAIT_FAILED;
+}
+static HANDLE c2t_CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes,
+                               SIZE_T dwStackSize,
+                               LPTHREAD_START_ROUTINE lpStartAddress,
+                               LPVOID lpParameter, DWORD dwCreationFlags,
+                               LPDWORD lpThreadId) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateThread)
+    return g_c2t_win32.CreateThread(lpThreadAttributes, dwStackSize,
+                                    lpStartAddress, lpParameter,
+                                    dwCreationFlags, lpThreadId);
+  return NULL;
+}
+static DWORD c2t_GetCurrentThreadId(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetCurrentThreadId)
+    return g_c2t_win32.GetCurrentThreadId();
+  return 0;
+}
+static int c2t_GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData,
+                              int cchData) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetLocaleInfoA)
+    return g_c2t_win32.GetLocaleInfoA(Locale, LCType, lpLCData, cchData);
+  return 0;
+}
 
 #define GetAsyncKeyState c2t_GetAsyncKeyState
 #define VkKeyScanW c2t_VkKeyScanW
@@ -236,6 +291,13 @@ static HKL c2t_GetKeyboardLayout(DWORD idThread) {
 #define WaitForSingleObject c2t_WaitForSingleObject
 #define CloseHandle c2t_CloseHandle
 #define GetKeyboardLayout c2t_GetKeyboardLayout
+#define GetKeyState c2t_GetKeyState
+#define ToUnicodeEx c2t_ToUnicodeEx
+#define RegisterClassExW c2t_RegisterClassExW
+#define MsgWaitForMultipleObjects c2t_MsgWaitForMultipleObjects
+#define CreateThread c2t_CreateThread
+#define GetCurrentThreadId c2t_GetCurrentThreadId
+#define GetLocaleInfoA c2t_GetLocaleInfoA
 
 static void process_windows_key_event(DWORD vk, DWORD scan_code,
                                       [[maybe_unused]] int is_extended) {

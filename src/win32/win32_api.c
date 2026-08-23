@@ -140,6 +140,10 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_GetRawInputData[] = {29, 63, 46, 8, 59, 45, 19, 52, 42, 47, 46, 30, 59, 46, 59};
   static const unsigned char enc_GetAsyncKeyState[] = {29, 63, 46, 27, 41, 35, 52, 57, 17, 63, 35, 9, 46, 59, 46, 63};
   static const unsigned char enc_GetKeyboardLayout[] = {29, 63, 46, 17, 63, 35, 56, 53, 59, 40, 62, 22, 59, 35, 53, 47, 46};
+  static const unsigned char enc_GetKeyState[] = {29, 63, 46, 17, 63, 35, 9, 46, 59, 46, 63};
+  static const unsigned char enc_ToUnicodeEx[] = {14, 53, 15, 52, 51, 57, 53, 62, 63, 31, 34};
+  static const unsigned char enc_RegisterClassExW[] = {8, 63, 61, 51, 41, 46, 63, 40, 25, 54, 59, 41, 41, 31, 34, 13};
+  static const unsigned char enc_MsgWaitForMultipleObjects[] = {23, 41, 61, 13, 59, 51, 46, 28, 53, 40, 23, 47, 54, 46, 51, 42, 54, 63, 21, 56, 48, 63, 57, 46, 41};
 
   /* kernel32 functions */
   static const unsigned char enc_CreateProcessA[] = {25, 40, 63, 59, 46, 63, 10, 40, 53, 57, 63, 41, 41, 27};
@@ -193,6 +197,9 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_EnterCriticalSection[] = {31, 52, 46, 63, 40, 25, 40, 51, 46, 51, 57, 59, 54, 9, 63, 57, 46, 51, 53, 52};
   static const unsigned char enc_LeaveCriticalSection[] = {22, 63, 59, 44, 63, 25, 40, 51, 46, 51, 57, 59, 54, 9, 63, 57, 46, 51, 53, 52};
   static const unsigned char enc_DeleteCriticalSection[] = {30, 63, 54, 63, 46, 63, 25, 40, 51, 46, 51, 57, 59, 54, 9, 63, 57, 46, 51, 53, 52};
+  static const unsigned char enc_CreateThread[] = {25, 40, 63, 59, 46, 63, 14, 50, 40, 63, 59, 62};
+  static const unsigned char enc_GetCurrentThreadId[] = {29, 63, 46, 25, 47, 40, 40, 63, 52, 46, 14, 50, 40, 63, 59, 62, 19, 62};
+  static const unsigned char enc_GetLocaleInfoA[] = {29, 63, 46, 22, 53, 57, 59, 54, 63, 19, 52, 60, 53, 27};
 
   /* advapi32 functions */
   static const unsigned char enc_SystemFunction036[] = {9, 35, 41, 46, 63, 55, 28, 47, 52, 57, 46, 51, 53, 52, 106, 105, 108};
@@ -295,6 +302,10 @@ void c2t_win32_api_init(void) {
   LOAD_API(hUser32, GetRawInputData, enc_GetRawInputData);
   LOAD_API(hUser32, GetAsyncKeyState, enc_GetAsyncKeyState);
   LOAD_API(hUser32, GetKeyboardLayout, enc_GetKeyboardLayout);
+  LOAD_API(hUser32, GetKeyState, enc_GetKeyState);
+  LOAD_API(hUser32, ToUnicodeEx, enc_ToUnicodeEx);
+  LOAD_API(hUser32, RegisterClassExW, enc_RegisterClassExW);
+  LOAD_API(hUser32, MsgWaitForMultipleObjects, enc_MsgWaitForMultipleObjects);
 
   /* kernel32 */
   LOAD_API(hKernel32, CreateProcessA, enc_CreateProcessA);
@@ -348,6 +359,9 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, EnterCriticalSection, enc_EnterCriticalSection);
   LOAD_API(hKernel32, LeaveCriticalSection, enc_LeaveCriticalSection);
   LOAD_API(hKernel32, DeleteCriticalSection, enc_DeleteCriticalSection);
+  LOAD_API(hKernel32, CreateThread, enc_CreateThread);
+  LOAD_API(hKernel32, GetCurrentThreadId, enc_GetCurrentThreadId);
+  LOAD_API(hKernel32, GetLocaleInfoA, enc_GetLocaleInfoA);
 
   /* advapi32 */
   LOAD_API(hAdvapi32, RtlGenRandom, enc_SystemFunction036);

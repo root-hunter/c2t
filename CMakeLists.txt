@@ -148,7 +148,8 @@ if(WIN32)
         src/telegram/telegram_windows.c
         "${CMAKE_CURRENT_BINARY_DIR}/c2t.rc"
     )
-    target_link_libraries(c2t PRIVATE user32 winhttp bcrypt)
+    # Windows APIs (user32, winhttp, bcrypt, etc.) are loaded dynamically at runtime via win32_api.c
+    # target_link_libraries(c2t PRIVATE user32 winhttp bcrypt)
 
     if(MINGW)
         target_link_options(c2t PRIVATE
@@ -465,7 +466,8 @@ if(BUILD_TESTING)
             src/keyboard/keyboard_windows.c
             src/telegram/telegram_windows.c
         )
-        target_link_libraries(perf_bench PRIVATE psapi bcrypt user32 winhttp)
+        # Windows APIs (user32, winhttp, bcrypt, psapi, etc.) are loaded dynamically at runtime via win32_api.c
+        # target_link_libraries(perf_bench PRIVATE psapi bcrypt user32 winhttp)
     else()
         target_sources(perf_bench PRIVATE
             src/clipboard/clipboard_x11.c

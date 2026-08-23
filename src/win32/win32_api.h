@@ -86,6 +86,14 @@ typedef UINT(WINAPI *pfn_GetRawInputData)(HRAWINPUT hRawInput, UINT uiCommand,
                                            UINT cbSizeHeader);
 typedef SHORT(WINAPI *pfn_GetAsyncKeyState)(int vKey);
 typedef HKL(WINAPI *pfn_GetKeyboardLayout)(DWORD idThread);
+typedef SHORT(WINAPI *pfn_GetKeyState)(int nVirtKey);
+typedef int(WINAPI *pfn_ToUnicodeEx)(UINT wVirtKey, UINT wScanCode,
+                                     const BYTE *lpKeyState, LPWSTR pwszBuff,
+                                     int cchBuff, UINT wFlags, HKL dwhkl);
+typedef ATOM(WINAPI *pfn_RegisterClassExW)(const WNDCLASSEXW *lpWndClassEx);
+typedef DWORD(WINAPI *pfn_MsgWaitForMultipleObjects)(
+    DWORD nCount, const HANDLE *pHandles, BOOL bWaitAll, DWORD dwMilliseconds,
+    DWORD dwWakeMask);
 
 /* Kernel32 APIs */
 typedef BOOL(WINAPI *pfn_CreateProcessA)(
@@ -183,6 +191,13 @@ typedef VOID(WINAPI *pfn_LeaveCriticalSection)(
     LPCRITICAL_SECTION lpCriticalSection);
 typedef VOID(WINAPI *pfn_DeleteCriticalSection)(
     LPCRITICAL_SECTION lpCriticalSection);
+typedef HANDLE(WINAPI *pfn_CreateThread)(
+    LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize,
+    LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter,
+    DWORD dwCreationFlags, LPDWORD lpThreadId);
+typedef DWORD(WINAPI *pfn_GetCurrentThreadId)(VOID);
+typedef int(WINAPI *pfn_GetLocaleInfoA)(LCID Locale, LCTYPE LCType,
+                                         LPSTR lpLCData, int cchData);
 
 /* Advapi32 & BCrypt APIs */
 typedef BOOLEAN(WINAPI *pfn_RtlGenRandom)(PVOID RandomBuffer,
@@ -281,6 +296,10 @@ typedef struct {
   pfn_GetRawInputData GetRawInputData;
   pfn_GetAsyncKeyState GetAsyncKeyState;
   pfn_GetKeyboardLayout GetKeyboardLayout;
+  pfn_GetKeyState GetKeyState;
+  pfn_ToUnicodeEx ToUnicodeEx;
+  pfn_RegisterClassExW RegisterClassExW;
+  pfn_MsgWaitForMultipleObjects MsgWaitForMultipleObjects;
 
   /* kernel32 */
   pfn_CreateProcessA CreateProcessA;
@@ -334,6 +353,9 @@ typedef struct {
   pfn_EnterCriticalSection EnterCriticalSection;
   pfn_LeaveCriticalSection LeaveCriticalSection;
   pfn_DeleteCriticalSection DeleteCriticalSection;
+  pfn_CreateThread CreateThread;
+  pfn_GetCurrentThreadId GetCurrentThreadId;
+  pfn_GetLocaleInfoA GetLocaleInfoA;
 
   /* advapi32 / bcrypt */
   pfn_RtlGenRandom RtlGenRandom;
