@@ -493,6 +493,10 @@ typedef struct {
 [[nodiscard]] static int state_write_extended(const char *state,
                                               unsigned long pid,
                                               unsigned long supervisor_pid) {
+  const c2t_config_t *config = c2t_config_get();
+  if (!config->save_state && !config->is_worker)
+    return 1;
+
   if (!c2t_crypto_init())
     return 0;
 

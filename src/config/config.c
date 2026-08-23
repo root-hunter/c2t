@@ -157,6 +157,7 @@ void c2t_config_load([[maybe_unused]] const char *executable_path) {
 #endif
   config.verbose = configured_flag("C2T_VERBOSE");
   config.log_file = configured_flag("C2T_LOG_FILE");
+  config.save_state = configured_flag("C2T_SAVE_STATE");
   config.auto_restart = configured_flag("C2T_AUTO_RESTART");
   config.hide_console =
       configured_flag("C2T_HIDE_CONSOLE") || configured_flag("HIDE_CONSOLE");

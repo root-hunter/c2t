@@ -23,6 +23,7 @@
 typedef struct {
   int verbose;
   int log_file;
+  int save_state;
   int auto_restart;
   int hide_console;
   int is_worker;

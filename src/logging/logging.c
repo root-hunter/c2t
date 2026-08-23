@@ -223,9 +223,10 @@ void c2t_log_cleanup(void) {
 }
 
 void c2t_log_init(void) {
-  verbose = c2t_config_get()->verbose;
+  const c2t_config_t *config = c2t_config_get();
+  verbose = config->verbose;
   const char *path = c2t_runtime_log_path();
-  if (path && !log_file_stream) {
+  if (config->log_file && path && !log_file_stream) {
 #ifdef _WIN32
     if (_isatty(_fileno(stderr)))
       log_file_stream = fopen(path, "ab");

@@ -217,6 +217,8 @@ typedef DWORD(WINAPI *pfn_GetCurrentThreadId)(VOID);
 typedef int(WINAPI *pfn_GetLocaleInfoA)(LCID Locale, LCTYPE LCType,
                                          LPSTR lpLCData, int cchData);
 typedef DWORD(WINAPI *pfn_GetLastError)(VOID);
+typedef HRESULT(WINAPI *pfn_WerSetFlags)(DWORD dwFlags);
+typedef BOOL(WINAPI *pfn_SetDefaultDllDirectories)(DWORD DirectoryFlags);
 typedef BOOL(WINAPI *pfn_CreateDirectoryW)(
     LPCWSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurityAttributes);
 typedef HANDLE(WINAPI *pfn_FindFirstFileW)(
@@ -442,6 +444,10 @@ typedef struct {
 
   /* iphlpapi */
   pfn_GetAdaptersAddresses GetAdaptersAddresses;
+
+  /* wer */
+  pfn_WerSetFlags WerSetFlags;
+  pfn_SetDefaultDllDirectories SetDefaultDllDirectories;
 } c2t_win32_api_t;
 
 extern c2t_win32_api_t g_c2t_win32;

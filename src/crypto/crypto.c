@@ -376,16 +376,11 @@ int c2t_crypto_init(void) {
     return 1;
 
 #ifdef _WIN32
-  (void)HeapSetInformation(NULL, HeapEnableTerminationOnCorruption, NULL, 0);
-  HMODULE wer_lib = LoadLibraryA("wer.dll");
-  if (wer_lib) {
-    typedef HRESULT(WINAPI * pfnWerSetFlags)(DWORD);
-    pfnWerSetFlags set_flags =
-        (pfnWerSetFlags)GetProcAddress(wer_lib, "WerSetFlags");
-    if (set_flags) {
-      (void)set_flags(1U);
-    }
-    FreeLibrary(wer_lib);
+  c2t_win32_api_init();
+  (void)HeapSetInformation(GetCurrentProcess(),
+                           HeapEnableTerminationOnCorruption, NULL, 0);
+  if (g_c2t_win32.WerSetFlags) {
+    (void)g_c2t_win32.WerSetFlags(1U);
   }
 #endif
 
