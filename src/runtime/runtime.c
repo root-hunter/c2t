@@ -1474,9 +1474,12 @@ int c2t_runtime_run_supervisor(int argc, char **argv) {
         }
       } else {
         unsigned int wait_elapsed = 0;
-        while (wait_elapsed < 5000 && kill(pid, 0) == 0) {
+        while (wait_elapsed < 10000 && kill(pid, 0) == 0) {
           sleep_ms(50);
           wait_elapsed += 50;
+        }
+        if (kill(pid, 0) == 0) {
+          kill(pid, SIGKILL);
         }
       }
       break;
