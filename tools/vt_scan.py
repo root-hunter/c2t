@@ -316,6 +316,10 @@ def main():
         default=300,
         help="Max seconds to wait for analysis completion (default: 300)",
     )
+    parser.add_argument(
+        "--output-markdown",
+        help="Path to write the markdown summary report to a file",
+    )
 
     args = parser.parse_args()
 
@@ -366,6 +370,15 @@ def main():
     md_summary = format_markdown_table(results)
     print("\n" + md_summary)
 
+    if args.output_markdown:
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(args.output_markdown)), exist_ok=True)
+            with open(args.output_markdown, "w", encoding="utf-8") as f:
+                f.write(md_summary + "\n")
+            print(f"[+] Wrote markdown report to {args.output_markdown}")
+        except Exception as e:
+            print(f"[!] Failed to write to {args.output_markdown}: {e}", file=sys.stderr)
+
     github_summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
     if github_summary_file:
         try:
@@ -381,6 +394,7 @@ def main():
     else:
         print("\n✅ VirusTotal scan completed successfully.", file=sys.stderr)
         sys.exit(0)
+
 
 
 if __name__ == "__main__":
