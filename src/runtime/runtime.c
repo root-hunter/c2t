@@ -873,6 +873,7 @@ int c2t_runtime_run_supervisor(int argc, char **argv)
         }
         if (pid == 0) {
             execv(executable, worker_argv);
+            free(worker_argv);
             _exit(1);
         }
 

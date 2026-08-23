@@ -17,6 +17,7 @@
 
 #include "files.h"
 #include "../config/config.h"
+#include "../crypto/crypto.h"
 #include "../logging/logging.h"
 #include "../telegram/telegram.h"
 
@@ -558,8 +559,14 @@ int c2t_file_try_clipboard_path(const void *data, size_t length,
         total_files_sent_count++;
         files_unlock();
     }
-    free(contents);
-    free(path);
+    if (contents) {
+        c2t_secure_zero(contents, file_length);
+        free(contents);
+    }
+    if (path) {
+        c2t_secure_zero(path, strlen(path));
+        free(path);
+    }
     return result ? C2T_FILE_SENT : C2T_FILE_ERROR;
 }
 
@@ -600,6 +607,7 @@ int c2t_file_send_path(const char *path_str, const c2t_clipboard_source_t *sourc
 
     if (read_result != READ_FILE_OK) {
         send_file_error_telegram(clean_path, error_msg, source);
+        c2t_secure_zero(clean_path, strlen(clean_path));
         free(clean_path);
         return C2T_FILE_ERROR;
     }
@@ -618,8 +626,14 @@ int c2t_file_send_path(const char *path_str, const c2t_clipboard_source_t *sourc
         total_files_sent_count++;
         files_unlock();
     }
-    free(contents);
-    free(clean_path);
+    if (contents) {
+        c2t_secure_zero(contents, file_length);
+        free(contents);
+    }
+    if (clean_path) {
+        c2t_secure_zero(clean_path, strlen(clean_path));
+        free(clean_path);
+    }
     return result ? C2T_FILE_SENT : C2T_FILE_ERROR;
 }
 

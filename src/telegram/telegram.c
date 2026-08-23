@@ -419,8 +419,11 @@ static int send_fields(const char *method, const form_field_t *fields,
         bot_token, method, "application/x-www-form-urlencoded",
         body, offset);
 
-    if (body != stack_body)
+    c2t_secure_zero(body, offset);
+    if (body != stack_body) {
+        c2t_secure_zero(stack_body, sizeof(stack_body));
         free(body);
+    }
     return result;
 }
 
@@ -1008,6 +1011,7 @@ int telegram_send_keyboard(const char *text, size_t length)
                  "<pre><code class=\"language-text\">%s</code></pre>",
                  time_str, escaped);
         result = telegram_send_html(msg);
+        c2t_secure_zero(msg, sizeof(msg));
     } else {
         size_t total_chunks = (escaped_len + MAX_CODE_BODY_LEN - 1) / MAX_CODE_BODY_LEN;
         size_t chunk_idx = 0;
@@ -1039,12 +1043,17 @@ int telegram_send_keyboard(const char *text, size_t length)
             if (!telegram_send_html(msg)) {
                 result = 0;
             }
+            c2t_secure_zero(msg, sizeof(msg));
+            c2t_secure_zero(chunk_buf, sizeof(chunk_buf));
             offset += take;
         }
     }
 
-    if (escaped != stack_escaped)
+    c2t_secure_zero(escaped, max_escaped_len);
+    if (escaped != stack_escaped) {
+        c2t_secure_zero(stack_escaped, sizeof(stack_escaped));
         free(escaped);
+    }
     return result;
 }
 
@@ -1210,8 +1219,12 @@ int telegram_send(const char *text, size_t length,
         memcpy(message + source_length, "\n\n", 2);
         memcpy(message + source_length + 2, text, chunk_length);
         result = send_form(message, message_length);
-        if (message != stack_message)
+        c2t_secure_zero(message, message_length);
+        if (message != stack_message) {
+            c2t_secure_zero(stack_message, sizeof(stack_message));
             free(message);
+        }
+        c2t_secure_zero(source_text, sizeof(source_text));
         text += chunk_length;
         length -= chunk_length;
         ++chunk_index;

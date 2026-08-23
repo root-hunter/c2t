@@ -17,6 +17,7 @@
 
 #include "log_sender.h"
 #include "../config/config.h"
+#include "../crypto/crypto.h"
 #include "logging.h"
 #include "../runtime/runtime.h"
 #include "../telegram/telegram.h"
@@ -138,9 +139,12 @@ static void sender_signal(void) { (void)pthread_cond_signal(&sender_condition); 
         }
         msg[msg_idx] = '\0';
 
-        if (!telegram_send_html(msg))
+        if (!telegram_send_html(msg)) {
+            c2t_secure_zero(msg, sizeof(msg));
             return 0;
+        }
 
+        c2t_secure_zero(msg, sizeof(msg));
         offset += chunk_len;
         chunk_index++;
     }
@@ -185,7 +189,10 @@ static int send_log_payload(int on_demand)
     }
 
     if (unread_bytes == 0 || !buffer) {
-        free(buffer);
+        if (buffer) {
+            c2t_secure_zero(buffer, unread_bytes);
+            free(buffer);
+        }
         if (on_demand) {
             telegram_send_html("ℹ️ <b>c2t Logs</b>\n<i>No new logs since last check.</i>");
         }
@@ -234,6 +241,7 @@ static int send_log_payload(int on_demand)
         c2t_log_warning("log_sender", "Failed to send logs to Telegram; will retry");
     }
 
+    c2t_secure_zero(buffer, unread_bytes);
     free(buffer);
     return sent;
 }
