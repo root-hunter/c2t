@@ -106,6 +106,57 @@ static DWORD c2t_GetLastError(VOID) {
     return g_c2t_win32.GetLastError();
   return 0;
 }
+static HANDLE c2t_CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess,
+                              DWORD dwShareMode,
+                              LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+                              DWORD dwCreationDisposition,
+                              DWORD dwFlagsAndAttributes,
+                              HANDLE hTemplateFile) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateFileW)
+    return g_c2t_win32.CreateFileW(
+        lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes,
+        dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+  return INVALID_HANDLE_VALUE;
+}
+static DWORD c2t_GetFileAttributesW(LPCWSTR lpFileName) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetFileAttributesW)
+    return g_c2t_win32.GetFileAttributesW(lpFileName);
+  return INVALID_FILE_ATTRIBUTES;
+}
+static BOOL c2t_ReadFile(HANDLE hFile, LPVOID lpBuffer,
+                          DWORD nNumberOfBytesToRead,
+                          LPDWORD lpNumberOfBytesRead,
+                          LPOVERLAPPED lpOverlapped) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.ReadFile)
+    return g_c2t_win32.ReadFile(hFile, lpBuffer, nNumberOfBytesToRead,
+                                lpNumberOfBytesRead, lpOverlapped);
+  return FALSE;
+}
+static BOOL c2t_WriteFile(HANDLE hFile, LPCVOID lpBuffer,
+                           DWORD nNumberOfBytesToWrite,
+                           LPDWORD lpNumberOfBytesWritten,
+                           LPOVERLAPPED lpOverlapped) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WriteFile)
+    return g_c2t_win32.WriteFile(hFile, lpBuffer, nNumberOfBytesToWrite,
+                                 lpNumberOfBytesWritten, lpOverlapped);
+  return FALSE;
+}
+static BOOL c2t_GetFileSizeEx(HANDLE hFile, PLARGE_INTEGER lpFileSize) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetFileSizeEx)
+    return g_c2t_win32.GetFileSizeEx(hFile, lpFileSize);
+  return FALSE;
+}
+static BOOL c2t_CloseHandle(HANDLE hObject) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CloseHandle)
+    return g_c2t_win32.CloseHandle(hObject);
+  return FALSE;
+}
 
 #define InitializeCriticalSection c2t_InitializeCriticalSection
 #define EnterCriticalSection c2t_EnterCriticalSection
@@ -117,6 +168,12 @@ static DWORD c2t_GetLastError(VOID) {
 #define FindNextFileW c2t_FindNextFileW
 #define FindClose c2t_FindClose
 #define GetLastError c2t_GetLastError
+#define CreateFileW c2t_CreateFileW
+#define GetFileAttributesW c2t_GetFileAttributesW
+#define ReadFile c2t_ReadFile
+#define WriteFile c2t_WriteFile
+#define GetFileSizeEx c2t_GetFileSizeEx
+#define CloseHandle c2t_CloseHandle
 
 typedef struct _stat64 c2t_stat_t;
 static CRITICAL_SECTION files_metrics_mutex;
@@ -472,8 +529,6 @@ enum {
 [[nodiscard]] static int read_file(const char *path, const c2t_config_t *config,
                                    unsigned char **data, size_t *length,
                                    char *error_out, size_t error_capacity) {
-  c2t_stat_t status;
-  FILE *file;
 #ifdef _WIN32
   wchar_t *wide = utf8_path(path);
   if (!wide) {
@@ -481,31 +536,82 @@ enum {
       snprintf(error_out, error_capacity, "Invalid UTF-8 file path");
     return READ_FILE_NOT_FOUND;
   }
-  int stat_result = _wstat64(wide, &status);
-  int saved_errno = errno;
-  file = stat_result == 0 ? _wfopen(wide, L"rb") : nullptr;
-  int open_errno = errno;
-  free(wide);
-  if (stat_result != 0) {
+  DWORD attr = GetFileAttributesW(wide);
+  if (attr == INVALID_FILE_ATTRIBUTES) {
+    free(wide);
     if (error_out && error_capacity > 0)
       snprintf(error_out, error_capacity,
-               "File does not exist or cannot be accessed: %s",
-               strerror(saved_errno));
+               "File does not exist or cannot be accessed");
     return READ_FILE_NOT_FOUND;
   }
-  if ((status.st_mode & _S_IFMT) != _S_IFREG) {
-    if (file)
-      fclose(file);
-    if (error_out && error_capacity > 0) {
-      if ((status.st_mode & _S_IFMT) == _S_IFDIR)
-        snprintf(error_out, error_capacity,
-                 "Path is a directory, not a regular file");
-      else
-        snprintf(error_out, error_capacity, "Path is not a regular file");
-    }
+  if (attr & FILE_ATTRIBUTE_DIRECTORY) {
+    free(wide);
+    if (error_out && error_capacity > 0)
+      snprintf(error_out, error_capacity,
+               "Path is a directory, not a regular file");
     return READ_FILE_NOT_REGULAR;
   }
+  HANDLE hFile = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                             NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  free(wide);
+  if (hFile == INVALID_HANDLE_VALUE) {
+    if (error_out && error_capacity > 0)
+      snprintf(error_out, error_capacity, "Cannot open file for reading");
+    return READ_FILE_ERROR;
+  }
+  LARGE_INTEGER fsz;
+  if (!GetFileSizeEx(hFile, &fsz) || fsz.QuadPart < 0) {
+    CloseHandle(hFile);
+    if (error_out && error_capacity > 0)
+      snprintf(error_out, error_capacity, "Cannot get file size");
+    return READ_FILE_ERROR;
+  }
+  uint64_t file_bytes = (uint64_t)fsz.QuadPart;
+  if ((uintmax_t)file_bytes > (uintmax_t)config->telegram_max_file_bytes) {
+    CloseHandle(hFile);
+    c2t_log_error(
+        "files",
+        "File '%s' exceeds configured limit of %llu bytes (size: %llu bytes)",
+        path, (unsigned long long)config->telegram_max_file_bytes,
+        (unsigned long long)file_bytes);
+    if (error_out && error_capacity > 0) {
+      snprintf(error_out, error_capacity,
+               "File size (%.2f MB / %llu bytes) exceeds configured limit "
+               "(%.2f MB / %llu bytes)",
+               (double)file_bytes / (1024.0 * 1024.0),
+               (unsigned long long)file_bytes,
+               (double)config->telegram_max_file_bytes / (1024.0 * 1024.0),
+               (unsigned long long)config->telegram_max_file_bytes);
+    }
+    return READ_FILE_ERROR;
+  }
+  *length = (size_t)file_bytes;
+  *data = malloc(*length ? *length : 1);
+  if (!*data) {
+    CloseHandle(hFile);
+    c2t_log_error("files", "Not enough memory to read file '%s'", path);
+    if (error_out && error_capacity > 0)
+      snprintf(error_out, error_capacity,
+               "Memory allocation failed while reading file");
+    return READ_FILE_ERROR;
+  }
+  DWORD bytes_read = 0;
+  DWORD to_read = (DWORD)*length;
+  if (to_read > 0 && !ReadFile(hFile, *data, to_read, &bytes_read, NULL)) {
+    free(*data);
+    *data = nullptr;
+    CloseHandle(hFile);
+    c2t_log_error("files", "Unable to read complete file '%s'", path);
+    if (error_out && error_capacity > 0)
+      snprintf(error_out, error_capacity,
+               "Failed to read complete file content");
+    return READ_FILE_ERROR;
+  }
+  CloseHandle(hFile);
+  return READ_FILE_OK;
 #else
+  c2t_stat_t status;
+  FILE *file;
   int stat_result = stat(path, &status);
   int saved_errno = errno;
   file = stat_result == 0 ? fopen(path, "rb") : nullptr;
@@ -529,7 +635,6 @@ enum {
     }
     return READ_FILE_NOT_REGULAR;
   }
-#endif
   if (status.st_size < 0 ||
       (uintmax_t)status.st_size > (uintmax_t)config->telegram_max_file_bytes) {
     if (file)
@@ -586,6 +691,7 @@ enum {
     return READ_FILE_ERROR;
   }
   return READ_FILE_OK;
+#endif
 }
 
 int c2t_file_try_clipboard_path(const void *data, size_t length,
@@ -1066,8 +1172,6 @@ int c2t_file_read_text_preview(const char *path_str, char *output,
     return 0;
   }
 
-  c2t_stat_t st;
-  FILE *f = nullptr;
 #ifdef _WIN32
   wchar_t *wide = utf8_path(clean_path);
   if (!wide) {
@@ -1075,17 +1179,53 @@ int c2t_file_read_text_preview(const char *path_str, char *output,
     snprintf(output, capacity, "⚠️ <b>Invalid UTF-8 file path</b>");
     return 0;
   }
-  int stat_res = _wstat64(wide, &st);
-  int saved_errno = errno;
-  if (stat_res == 0)
-    f = _wfopen(wide, L"rb");
+  DWORD attr = GetFileAttributesW(wide);
+  if (attr == INVALID_FILE_ATTRIBUTES) {
+    free(wide);
+    snprintf(output, capacity,
+             "⚠️ <b>Cannot access file:</b> <code>%s</code>", clean_path);
+    free(clean_path);
+    return 0;
+  }
+  if (attr & FILE_ATTRIBUTE_DIRECTORY) {
+    free(wide);
+    snprintf(output, capacity,
+             "⚠️ <code>%s</code> <b>is not a regular file.</b>", clean_path);
+    free(clean_path);
+    return 0;
+  }
+  HANDLE hFile = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                             NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   free(wide);
+  if (hFile == INVALID_HANDLE_VALUE) {
+    snprintf(output, capacity,
+             "⚠️ <b>Cannot access file:</b> <code>%s</code>", clean_path);
+    free(clean_path);
+    return 0;
+  }
+  LARGE_INTEGER fsz;
+  uint64_t file_size_val = 0;
+  if (GetFileSizeEx(hFile, &fsz) && fsz.QuadPart > 0)
+    file_size_val = (uint64_t)fsz.QuadPart;
+
+  size_t limit = max_bytes > 0 && max_bytes < 3200 ? max_bytes : 3000;
+  unsigned char buf[3500];
+  DWORD bytes_read = 0;
+  BOOL read_ok = ReadFile(hFile, buf, (DWORD)limit, &bytes_read, NULL);
+  CloseHandle(hFile);
+  if (!read_ok) {
+    snprintf(output, capacity,
+             "⚠️ <b>Error reading file:</b> <code>%s</code>", clean_path);
+    free(clean_path);
+    return 0;
+  }
 #else
+  c2t_stat_t st;
+  FILE *f = nullptr;
   int stat_res = stat(clean_path, &st);
   int saved_errno = errno;
   if (stat_res == 0)
     f = fopen(clean_path, "rb");
-#endif
 
   if (stat_res != 0 || !f) {
     if (f)
@@ -1097,11 +1237,7 @@ int c2t_file_read_text_preview(const char *path_str, char *output,
     return 0;
   }
 
-#ifdef _WIN32
-  if ((st.st_mode & _S_IFMT) != _S_IFREG) {
-#else
   if (!S_ISREG(st.st_mode)) {
-#endif
     fclose(f);
     snprintf(output, capacity,
              "⚠️ <code>%s</code> <b>is not a regular file.</b>", clean_path);
@@ -1113,6 +1249,8 @@ int c2t_file_read_text_preview(const char *path_str, char *output,
   unsigned char buf[3500];
   size_t bytes_read = fread(buf, 1, limit, f);
   fclose(f);
+  uint64_t file_size_val = (uint64_t)st.st_size;
+#endif
 
   /* Check for binary content */
   for (size_t i = 0; i < bytes_read; ++i) {
@@ -1121,7 +1259,7 @@ int c2t_file_read_text_preview(const char *path_str, char *output,
                "⚠️ <b>Binary File:</b> <code>%s</code> (size: %llu bytes)\n"
                "<i>File contains binary data and cannot be displayed as text.\n"
                "Use <code>/getfile %s</code> to download it.</i>",
-               clean_path, (unsigned long long)st.st_size, clean_path);
+               clean_path, (unsigned long long)file_size_val, clean_path);
       free(clean_path);
       return 1;
     }
@@ -1136,7 +1274,7 @@ int c2t_file_read_text_preview(const char *path_str, char *output,
   char size_note[64];
   snprintf(size_note, sizeof(size_note),
            "</code> (<i>%llu bytes</i>)\n<pre><code>",
-           (unsigned long long)st.st_size);
+           (unsigned long long)file_size_val);
   size_t sn_len = strlen(size_note);
   if (offset + sn_len < capacity) {
     memcpy(output + offset, size_note, sn_len);
@@ -1157,7 +1295,7 @@ int c2t_file_read_text_preview(const char *path_str, char *output,
     offset += sizeof(sfx) - 1;
   }
 
-  if ((uint64_t)bytes_read < (uint64_t)st.st_size) {
+  if ((uint64_t)bytes_read < file_size_val) {
     static const char trunc_msg[] =
         "\n<i>[Truncated. Use /getfile to download the complete file]</i>";
     if (offset + sizeof(trunc_msg) - 1 < capacity) {

@@ -147,6 +147,41 @@ static DWORD c2t_GetLastError(VOID) {
     return g_c2t_win32.GetLastError();
   return 0;
 }
+static HANDLE c2t_CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess,
+                              DWORD dwShareMode,
+                              LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+                              DWORD dwCreationDisposition,
+                              DWORD dwFlagsAndAttributes,
+                              HANDLE hTemplateFile) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateFileW)
+    return g_c2t_win32.CreateFileW(
+        lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes,
+        dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+  return INVALID_HANDLE_VALUE;
+}
+static BOOL c2t_WriteFile(HANDLE hFile, LPCVOID lpBuffer,
+                           DWORD nNumberOfBytesToWrite,
+                           LPDWORD lpNumberOfBytesWritten,
+                           LPOVERLAPPED lpOverlapped) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WriteFile)
+    return g_c2t_win32.WriteFile(hFile, lpBuffer, nNumberOfBytesToWrite,
+                                 lpNumberOfBytesWritten, lpOverlapped);
+  return FALSE;
+}
+static BOOL c2t_DeleteFileA(LPCSTR lpFileName) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.DeleteFileA)
+    return g_c2t_win32.DeleteFileA(lpFileName);
+  return FALSE;
+}
+static BOOL c2t_CloseHandle(HANDLE hObject) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CloseHandle)
+    return g_c2t_win32.CloseHandle(hObject);
+  return FALSE;
+}
 
 #define WinHttpOpen c2t_WinHttpOpen
 #define WinHttpConnect c2t_WinHttpConnect
@@ -161,6 +196,10 @@ static DWORD c2t_GetLastError(VOID) {
 #define WinHttpSetTimeouts c2t_WinHttpSetTimeouts
 #define MultiByteToWideChar c2t_MultiByteToWideChar
 #define GetLastError c2t_GetLastError
+#define CreateFileW c2t_CreateFileW
+#define WriteFile c2t_WriteFile
+#define DeleteFileA c2t_DeleteFileA
+#define CloseHandle c2t_CloseHandle
 
 static HINTERNET session;
 static HINTERNET connection;
@@ -509,18 +548,21 @@ int telegram_http_download_file(const char *token,
     return 0;
   MultiByteToWideChar(CP_UTF8, 0, dest_path, -1, wide_dest, dest_wlen);
 
-  FILE *fp = _wfopen(wide_dest, L"wb");
-  if (!fp) {
-    c2t_log_error("https", "Cannot open destination file '%s' for writing: %s",
-                  dest_path, strerror(errno));
+  HANDLE hFile = CreateFileW(wide_dest, GENERIC_WRITE, 0, NULL,
+                             CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (hFile == INVALID_HANDLE_VALUE) {
+    c2t_log_error("https", "Cannot open destination file '%s' for writing: %lu",
+                  dest_path, (unsigned long)GetLastError());
     free(wide_dest);
     return 0;
   }
 
   int token_length = MultiByteToWideChar(CP_UTF8, 0, token, -1, NULL, 0);
   if (token_length <= 0 || token_length > 257) {
-    fclose(fp);
-    _wremove(wide_dest);
+    CloseHandle(hFile);
+    char dest_ansi[512] = {};
+    WideCharToMultiByte(CP_ACP, 0, wide_dest, -1, dest_ansi, sizeof(dest_ansi), NULL, NULL);
+    DeleteFileA(dest_ansi);
     free(wide_dest);
     return 0;
   }
@@ -531,8 +573,10 @@ int telegram_http_download_file(const char *token,
   wchar_t *position = path + (sizeof(prefix) / sizeof(wchar_t) - 1);
   if (!MultiByteToWideChar(CP_UTF8, 0, token, -1, position,
                            (int)(600 - (position - path)))) {
-    fclose(fp);
-    _wremove(wide_dest);
+    CloseHandle(hFile);
+    char dest_ansi[512] = {};
+    WideCharToMultiByte(CP_ACP, 0, wide_dest, -1, dest_ansi, sizeof(dest_ansi), NULL, NULL);
+    DeleteFileA(dest_ansi);
     free(wide_dest);
     return 0;
   }
@@ -542,8 +586,10 @@ int telegram_http_download_file(const char *token,
       MultiByteToWideChar(CP_UTF8, 0, telegram_file_path, -1, position,
                           (int)(600 - (position - path)));
   if (file_path_len <= 0) {
-    fclose(fp);
-    _wremove(wide_dest);
+    CloseHandle(hFile);
+    char dest_ansi[512] = {};
+    WideCharToMultiByte(CP_ACP, 0, wide_dest, -1, dest_ansi, sizeof(dest_ansi), NULL, NULL);
+    DeleteFileA(dest_ansi);
     free(wide_dest);
     return 0;
   }
@@ -552,8 +598,10 @@ int telegram_http_download_file(const char *token,
       WinHttpOpenRequest(connection, L"GET", path, NULL, WINHTTP_NO_REFERER,
                          WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
   if (!request) {
-    fclose(fp);
-    _wremove(wide_dest);
+    CloseHandle(hFile);
+    char dest_ansi[512] = {};
+    WideCharToMultiByte(CP_ACP, 0, wide_dest, -1, dest_ansi, sizeof(dest_ansi), NULL, NULL);
+    DeleteFileA(dest_ansi);
     free(wide_dest);
     return 0;
   }
@@ -575,8 +623,10 @@ int telegram_http_download_file(const char *token,
 
   if (!success || status < 200 || status >= 300) {
     WinHttpCloseHandle(request);
-    fclose(fp);
-    _wremove(wide_dest);
+    CloseHandle(hFile);
+    char dest_ansi[512] = {};
+    WideCharToMultiByte(CP_ACP, 0, wide_dest, -1, dest_ansi, sizeof(dest_ansi), NULL, NULL);
+    DeleteFileA(dest_ansi);
     free(wide_dest);
     return 0;
   }
@@ -596,21 +646,23 @@ int telegram_http_download_file(const char *token,
       limit_exceeded = 1;
       break;
     }
-    size_t written = fwrite(buffer, 1, read, fp);
-    total_written += written;
-    if (written != read)
+    DWORD written = 0;
+    if (!WriteFile(hFile, buffer, read, &written, NULL) || written != read)
       break;
+    total_written += written;
   }
 
   WinHttpCloseHandle(request);
-  fclose(fp);
+  CloseHandle(hFile);
 
   if (limit_exceeded) {
     c2t_log_error("https",
                   "Telegram download aborted: file exceeds maximum allowed "
                   "limit of %llu bytes",
                   (unsigned long long)max_bytes);
-    _wremove(wide_dest);
+    char dest_ansi[512] = {};
+    WideCharToMultiByte(CP_ACP, 0, wide_dest, -1, dest_ansi, sizeof(dest_ansi), NULL, NULL);
+    DeleteFileA(dest_ansi);
     free(wide_dest);
     return 0;
   }

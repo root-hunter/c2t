@@ -137,6 +137,21 @@ typedef HANDLE(WINAPI *pfn_CreateFileA)(
     LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
     LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
     DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+typedef HANDLE(WINAPI *pfn_CreateFileW)(
+    LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
+    LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
+    DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+typedef DWORD(WINAPI *pfn_GetFileAttributesW)(LPCWSTR lpFileName);
+typedef BOOL(WINAPI *pfn_ReadFile)(HANDLE hFile, LPVOID lpBuffer,
+                                    DWORD nNumberOfBytesToRead,
+                                    LPDWORD lpNumberOfBytesRead,
+                                    LPOVERLAPPED lpOverlapped);
+typedef BOOL(WINAPI *pfn_WriteFile)(HANDLE hFile, LPCVOID lpBuffer,
+                                     DWORD nNumberOfBytesToWrite,
+                                     LPDWORD lpNumberOfBytesWritten,
+                                     LPOVERLAPPED lpOverlapped);
+typedef BOOL(WINAPI *pfn_GetFileSizeEx)(HANDLE hFile,
+                                         PLARGE_INTEGER lpFileSize);
 typedef BOOL(WINAPI *pfn_DeleteFileA)(LPCSTR lpFileName);
 typedef BOOL(WINAPI *pfn_MoveFileExA)(LPCSTR lpExistingFileName,
                                        LPCSTR lpNewFileName, DWORD dwFlags);
@@ -349,6 +364,11 @@ typedef struct {
   pfn_ProcessIdToSessionId ProcessIdToSessionId;
   pfn_CreateDirectoryA CreateDirectoryA;
   pfn_CreateFileA CreateFileA;
+  pfn_CreateFileW CreateFileW;
+  pfn_GetFileAttributesW GetFileAttributesW;
+  pfn_ReadFile ReadFile;
+  pfn_WriteFile WriteFile;
+  pfn_GetFileSizeEx GetFileSizeEx;
   pfn_DeleteFileA DeleteFileA;
   pfn_MoveFileExA MoveFileExA;
   pfn_GetConsoleWindow GetConsoleWindow;
