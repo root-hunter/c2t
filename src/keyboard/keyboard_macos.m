@@ -90,13 +90,15 @@ static const char *get_macos_special_key_label(int64_t keycode) {
   case 0x6F:
     return "F12";
   default:
-    return nullptr;
+    return NULL;
   }
 }
 
-static CGEventRef event_callback([[maybe_unused]] CGEventTapProxy proxy,
+static CGEventRef event_callback(CGEventTapProxy proxy,
                                  CGEventType type, CGEventRef event,
-                                 [[maybe_unused]] void *refcon) {
+                                 void *refcon) {
+  (void)proxy;
+  (void)refcon;
   if (type == kCGEventKeyDown) {
     CGEventFlags flags = CGEventGetFlags(event);
     int cmd_down = (flags & kCGEventFlagMaskCommand) != 0;
@@ -191,20 +193,21 @@ static CGEventRef event_callback([[maybe_unused]] CGEventTapProxy proxy,
   return event;
 }
 
-static void *listener_worker([[maybe_unused]] void *context) {
+static void *listener_worker(void *context) {
+  (void)context;
   @autoreleasepool {
     run_loop_ref = CFRunLoopGetCurrent();
 
     CGEventMask mask = CGEventMaskBit(kCGEventKeyDown);
     CFMachPortRef event_tap = CGEventTapCreate(
         kCGSessionEventTap, kCGHeadInsertEventTap, kCGEventTapOptionListenOnly,
-        mask, event_callback, nullptr);
+        mask, event_callback, NULL);
 
     if (!event_tap) {
       c2t_log_warning("keyboard", "Unable to create macOS CGEventTap (check "
                                   "Accessibility permissions)");
-      run_loop_ref = nullptr;
-      return nullptr;
+      run_loop_ref = NULL;
+      return NULL;
     }
 
     global_event_tap = event_tap;
@@ -226,16 +229,16 @@ static void *listener_worker([[maybe_unused]] void *context) {
     CFRunLoopRemoveSource(run_loop_ref, run_loop_source, kCFRunLoopCommonModes);
     CFRelease(run_loop_source);
     CFRelease(event_tap);
-    global_event_tap = nullptr;
-    run_loop_ref = nullptr;
+    global_event_tap = NULL;
+    run_loop_ref = NULL;
 
     keyboard_output_flush();
   }
-  return nullptr;
+  return NULL;
 }
 
 int keyboard_listen(void) {
-  listener_worker(nullptr);
+  listener_worker(NULL);
   return 0;
 }
 
@@ -244,8 +247,8 @@ int keyboard_listener_init(void) {
     return 1;
 
   stopping = 0;
-  listener_started = (pthread_create(&listener_thread, nullptr, listener_worker,
-                                     nullptr) == 0);
+  listener_started = (pthread_create(&listener_thread, NULL, listener_worker,
+                                     NULL) == 0);
 
   if (!listener_started) {
     c2t_log_error("keyboard", "Unable to start macOS keyboard listener thread");
@@ -261,9 +264,9 @@ void keyboard_listener_cleanup(void) {
   if (run_loop_ref) {
     CFRunLoopStop(run_loop_ref);
   }
-  (void)pthread_join(listener_thread, nullptr);
+  (void)pthread_join(listener_thread, NULL);
   listener_started = 0;
-  run_loop_ref = nullptr;
+  run_loop_ref = NULL;
 }
 
 static char macos_selected_target[128] = "all";
@@ -299,7 +302,8 @@ void keyboard_get_selected_target(char *buffer, size_t max_len) {
 
 int keyboard_get_device_count(void) { return 1; }
 
-int keyboard_set_layout([[maybe_unused]] const char *layout_name) {
+int keyboard_set_layout(const char *layout_name) {
+  (void)layout_name;
   /* On macOS, layout is tracked automatically via
    * CGEventKeyboardGetUnicodeString */
   return 1;
