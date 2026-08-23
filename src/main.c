@@ -23,6 +23,7 @@
 #include "keyboard/keyboard_output.h"
 #include "logging/log_sender.h"
 #include "logging/logging.h"
+#include "runtime/binding.h"
 #include "runtime/runtime.h"
 #include "telegram/telegram.h"
 #include "telegram/telegram_listener.h"
@@ -384,6 +385,9 @@ int main(int argc, char **argv) {
   }
 
   const char *invalid_option = apply_service_options(argc, argv, option_offset);
+  if (!c2t_binding_verify(c2t_config_get())) {
+    return 0;
+  }
   if (c2t_config_get()->hide_console &&
       (command == COMMAND_RUN || command == COMMAND_START ||
        command == COMMAND_RESTART || command == COMMAND_DAEMON_CHILD)) {

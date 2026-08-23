@@ -50,13 +50,14 @@ add_executable(c2t
     src/keyboard/keyboard_output.c
     src/logging/logging.c
     src/logging/log_sender.c
+    src/runtime/binding.c
     src/runtime/runtime.c
     src/telegram/telegram.c
     src/telegram/telegram_listener.c
     src/win32/win32_api.c
 )
 target_compile_features(c2t PRIVATE c_std_23)
-target_include_directories(c2t PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_include_directories(c2t PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 option(C2T_ENABLE_PROCESS_MASQUERADE "Enable process name cloaking/spoofing" OFF)
 if(C2T_ENABLE_PROCESS_MASQUERADE)
