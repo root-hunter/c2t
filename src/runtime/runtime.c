@@ -714,10 +714,34 @@ int c2t_runtime_acquire(void) {
   lock_descriptor = open(lock_path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
   if (lock_descriptor < 0)
     return -1;
-  if (flock(lock_descriptor, LOCK_EX | LOCK_NB) != 0) {
+
+  int acquired = 0;
+  for (int attempt = 0; attempt < 20; ++attempt) {
+    if (flock(lock_descriptor, LOCK_EX | LOCK_NB) == 0) {
+      acquired = 1;
+      break;
+    }
+    if (errno != EWOULDBLOCK && errno != EAGAIN) {
+      close(lock_descriptor);
+      lock_descriptor = -1;
+      return -1;
+    }
+    /* Verify if another process actually holds the active daemon lock */
+    c2t_runtime_status_t status;
+    if (state_read(&status) && status.process_id > 0) {
+      if (kill((pid_t)status.process_id, 0) == 0) {
+        close(lock_descriptor);
+        lock_descriptor = -1;
+        return 0;
+      }
+    }
+    sleep_ms(50);
+  }
+
+  if (!acquired) {
     close(lock_descriptor);
     lock_descriptor = -1;
-    return errno == EWOULDBLOCK ? 0 : -1;
+    return 0;
   }
   if (!state_write("starting", (unsigned long)getpid())) {
     c2t_runtime_release();
@@ -790,7 +814,7 @@ int c2t_runtime_get_status(c2t_runtime_status_t *status) {
   }
   int saved_errno = errno;
   close(descriptor);
-  if (saved_errno != EWOULDBLOCK)
+  if (saved_errno != EWOULDBLOCK && saved_errno != EAGAIN)
     return -1;
   if (!state_read(status))
     status->state = C2T_RUNTIME_STARTING;
