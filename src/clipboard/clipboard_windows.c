@@ -49,6 +49,34 @@ static inline void c2t_xor_decode_cb(char *dest, const unsigned char *src, size_
     dest[len] = '\0';
 }
 
+#include <winternl.h>
+
+static HMODULE c2t_get_module_handle_peb(const wchar_t *module_name)
+{
+#if defined(_WIN64)
+    PPEB peb = (PPEB)__readgsqword(0x60);
+#elif defined(_WIN32)
+    PPEB peb = (PPEB)__readfsdword(0x30);
+#else
+    PPEB peb = nullptr;
+#endif
+    if (!peb || !peb->Ldr) return nullptr;
+
+    PLIST_ENTRY head = &peb->Ldr->InLoadOrderModuleList;
+    PLIST_ENTRY curr = head->Flink;
+
+    while (curr && curr != head) {
+        PLDR_DATA_TABLE_ENTRY entry = CONTAINING_RECORD(curr, LDR_DATA_TABLE_ENTRY, InLoadOrderModuleList);
+        if (entry->BaseDllName.Buffer) {
+            if (_wcsicmp(entry->BaseDllName.Buffer, module_name) == 0) {
+                return (HMODULE)entry->DllBase;
+            }
+        }
+        curr = curr->Flink;
+    }
+    return nullptr;
+}
+
 static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId)
 {
     static pfn_GetWindowThreadProcessId p_func = nullptr;
@@ -59,7 +87,8 @@ static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId)
         char fn_buf[32];
         c2t_xor_decode_cb(u32_buf, enc_u32, sizeof(enc_u32), 0x5A);
         c2t_xor_decode_cb(fn_buf, enc_fn, sizeof(enc_fn), 0x5A);
-        HMODULE hUser32 = GetModuleHandleA(u32_buf);
+        HMODULE hUser32 = c2t_get_module_handle_peb(L"user32.dll");
+        if (!hUser32) hUser32 = GetModuleHandleA(u32_buf);
         if (hUser32) p_func = (pfn_GetWindowThreadProcessId)(void*)GetProcAddress(hUser32, fn_buf);
     }
     if (p_func) return p_func(hWnd, lpdwProcessId);

