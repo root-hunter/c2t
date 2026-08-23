@@ -17,6 +17,7 @@
 
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 import tempfile
@@ -29,8 +30,58 @@ def invoke(executable, *arguments, environment):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
 
 
+def get_parent_pid(pid: int) -> int:
+    if sys.platform.startswith("linux"):
+        try:
+            with open(f"/proc/{pid}/status", "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("PPid:"):
+                        return int(line.split(":")[1].strip())
+        except (FileNotFoundError, ValueError, IndexError):
+            pass
+    return 0
+
+
+def get_child_pids(parent_pid: int) -> list:
+    children = []
+    if sys.platform.startswith("linux"):
+        for proc in pathlib.Path("/proc").glob("[0-9]*"):
+            try:
+                status_path = proc / "status"
+                if status_path.is_file():
+                    with open(status_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            if line.startswith("PPid:"):
+                                ppid = int(line.split(":")[1].strip())
+                                if ppid == parent_pid:
+                                    children.append(int(proc.name))
+                                break
+            except (FileNotFoundError, ValueError, PermissionError):
+                pass
+    return children
+
+
+def safe_kill(pid: int, sig: int):
+    if pid <= 1:
+        raise ValueError(f"Refusing to kill PID {pid}")
+    if sys.platform.startswith("linux"):
+        try:
+            with open(f"/proc/{pid}/comm", "r", encoding="utf-8") as f:
+                comm = f.read().strip()
+                if comm in ("systemd", "init", "wsl-init", "systemd-exec", "gnome-session", "bash", "zsh"):
+                    raise ValueError(f"Refusing to kill system process '{comm}' (PID {pid})")
+        except FileNotFoundError:
+            pass
+    os.kill(pid, sig)
+
+
 def main():
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <c2t-executable>", file=sys.stderr)
+        sys.exit(1)
+
     executable = sys.argv[1]
+
     with tempfile.TemporaryDirectory(prefix="c2t-runtime-") as runtime_dir, \
             tempfile.TemporaryDirectory(prefix="c2t-state-") as state_dir:
         environment = os.environ.copy()
@@ -83,22 +134,23 @@ def main():
             final = invoke(executable, "status", environment=environment)
             assert final.returncode == 3, final
 
+            # Verify foreground execution
             foreground = subprocess.Popen(
                 [executable, "run", "--verbose", "--log-file"], env=environment,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            for _ in range(150):
-                foreground_status = invoke(
-                    executable, "status", environment=environment)
-                if foreground_status.returncode == 0 and \
-                        "running" in foreground_status.stdout:
-                    break
-                time.sleep(0.1)
-            else:
-                raise AssertionError("foreground process did not become ready")
-            foreground_stop = invoke(
-                executable, "stop", environment=environment)
-            assert foreground_stop.returncode == 0, foreground_stop
-            assert foreground.wait(timeout=20) == 0
+            try:
+                for _ in range(150):
+                    foreground_status = invoke(
+                        executable, "status", environment=environment)
+                    if foreground_status.returncode == 0 and \
+                            "running" in foreground_status.stdout:
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise AssertionError("foreground process did not become ready")
+            finally:
+                invoke(executable, "stop", environment=environment)
+                foreground.wait(timeout=20)
 
             # Test auto-restart feature when daemon worker is killed
             auto_restart_start = invoke(
@@ -111,9 +163,8 @@ def main():
             assert auto_status_1.returncode == 0 and "running" in auto_status_1.stdout
             worker_pid_1 = int(auto_status_1.stdout.split("PID ")[1].split(")")[0])
 
-            # 1. Kill with standard SIGTERM (like 'kill <PID>')
-            import signal
-            os.kill(worker_pid_1, signal.SIGTERM)
+            # 1. Kill worker with standard SIGTERM
+            safe_kill(worker_pid_1, signal.SIGTERM)
 
             for _ in range(150):
                 time.sleep(0.1)
@@ -125,8 +176,8 @@ def main():
             else:
                 raise AssertionError(f"worker was not respawned after SIGTERM: {auto_status_2.stdout}")
 
-            # 2. Kill with SIGKILL (like 'kill -9 <PID>')
-            os.kill(worker_pid_2, signal.SIGKILL)
+            # 2. Kill worker with SIGKILL (kill -9)
+            safe_kill(worker_pid_2, signal.SIGKILL)
 
             for _ in range(150):
                 time.sleep(0.1)
@@ -138,27 +189,76 @@ def main():
             else:
                 raise AssertionError(f"worker was not respawned after SIGKILL: {auto_status_3.stdout}")
 
-            # 3. Kill supervisor with SIGKILL and verify worker restores supervisor
-            with open(f"/proc/{worker_pid_3}/stat", "r", encoding="utf-8") as f:
-                sup_pid_1 = int(f.read().split()[3])
+            # 3. Test mutual resilience: Kill supervisor process with SIGKILL and verify worker daemon restores supervisor
+            sup_pid_1 = get_parent_pid(worker_pid_3)
+            assert sup_pid_1 > 1, f"invalid supervisor PID: {sup_pid_1}"
 
-            os.kill(sup_pid_1, signal.SIGKILL)
+            # Verify supervisor is alive
+            safe_kill(sup_pid_1, 0)
 
-            for _ in range(150):
+            # Kill supervisor with SIGKILL
+            safe_kill(sup_pid_1, signal.SIGKILL)
+
+            # Verify supervisor process was killed
+            for _ in range(50):
+                time.sleep(0.1)
+                try:
+                    safe_kill(sup_pid_1, 0)
+                except ProcessLookupError:
+                    break
+            else:
+                raise AssertionError(f"supervisor (PID {sup_pid_1}) did not terminate after SIGKILL")
+
+            # Wait for worker daemon to restore supervisor
+            sup_pid_2 = 0
+            for _ in range(200):
                 time.sleep(0.1)
                 auto_status_4 = invoke(executable, "status", environment=environment)
                 if auto_status_4.returncode == 0 and "running" in auto_status_4.stdout:
-                    try:
-                        with open(f"/proc/{worker_pid_3}/stat", "r", encoding="utf-8") as f:
-                            sup_pid_2 = int(f.read().split()[3])
-                        if sup_pid_2 != sup_pid_1:
-                            break
-                    except FileNotFoundError:
-                        pass
+                    children = get_child_pids(worker_pid_3)
+                    for sup_candidate in children:
+                        if sup_candidate > 1 and sup_candidate != sup_pid_1:
+                            try:
+                                safe_kill(sup_candidate, 0)
+                                sup_pid_2 = sup_candidate
+                                break
+                            except ProcessLookupError:
+                                pass
+                    if sup_pid_2:
+                        break
             else:
-                raise AssertionError(f"supervisor was not restored after SIGKILL: {auto_status_4.stdout}")
+                raise AssertionError("supervisor process was not restored by worker daemon after SIGKILL")
 
-            # 4. Clean stop with 'c2t stop'
+            assert sup_pid_2 > 1 and sup_pid_2 != sup_pid_1
+
+            # 4. Test SECOND supervisor kill cycle to verify permanent mutual resilience
+            safe_kill(sup_pid_2, signal.SIGKILL)
+
+            sup_pid_3 = 0
+            for i in range(200):
+                time.sleep(0.1)
+                auto_status_5 = invoke(executable, "status", environment=environment)
+                if auto_status_5.returncode == 0 and "running" in auto_status_5.stdout:
+                    children = get_child_pids(worker_pid_3)
+                    for sup_candidate in children:
+                        if sup_candidate > 1 and sup_candidate != sup_pid_2:
+                            try:
+                                safe_kill(sup_candidate, 0)
+                                sup_pid_3 = sup_candidate
+                                break
+                            except ProcessLookupError:
+                                pass
+                    if sup_pid_3:
+                        break
+            else:
+                raise AssertionError("supervisor process was not restored on second SIGKILL cycle")
+
+            assert sup_pid_3 > 1 and sup_pid_3 != sup_pid_2
+
+            # Verify worker daemon worker_pid_3 remained alive throughout both supervisor kills
+            safe_kill(worker_pid_3, 0)
+
+            # 5. Clean stop with 'c2t stop'
             auto_stop = invoke(executable, "stop", environment=environment)
             assert auto_stop.returncode == 0, auto_stop
 

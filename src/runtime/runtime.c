@@ -1287,8 +1287,32 @@ static void *worker_watchdog_func(void *arg) {
         CloseHandle(hProc);
       }
 #else
-      if (kill((pid_t)last_supervisor_pid, 0) == 0 || errno != ESRCH) {
+      pid_t wait_res = waitpid((pid_t)last_supervisor_pid, NULL, WNOHANG);
+      if (wait_res > 0) {
+        supervisor_alive = 0;
+      } else if (wait_res == 0) {
         supervisor_alive = 1;
+      } else if (kill((pid_t)last_supervisor_pid, 0) == 0) {
+        supervisor_alive = 1;
+#if defined(__linux__)
+        char proc_path[64];
+        snprintf(proc_path, sizeof(proc_path), "/proc/%lu/status",
+                 last_supervisor_pid);
+        FILE *sf = fopen(proc_path, "r");
+        if (sf) {
+          char line[128];
+          while (fgets(line, sizeof(line), sf)) {
+            if (strncmp(line, "State:", 6) == 0) {
+              if (strstr(line, "Z (zombie)") != NULL ||
+                  strstr(line, "zombie") != NULL) {
+                supervisor_alive = 0;
+              }
+              break;
+            }
+          }
+          fclose(sf);
+        }
+#endif
       }
 #endif
 
