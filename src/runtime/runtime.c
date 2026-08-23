@@ -1106,7 +1106,7 @@ int c2t_runtime_acquire(void) {
     if (state_read(&status) && status.process_id > 0) {
       if (status.state == C2T_RUNTIME_RUNNING &&
           c2t_runtime_is_c2t_process(status.process_id)) {
-        if (attempt >= 5) {
+        if (attempt >= 40) {
           close(lock_descriptor);
           lock_descriptor = -1;
           return 0;

@@ -424,6 +424,11 @@ int main(int argc, char **argv) {
   if (command == COMMAND_RESTART) {
     if (stop_service(0, 1) != 0)
       return 1;
+#ifndef _WIN32
+    usleep(100000);
+#else
+    Sleep(100);
+#endif
     command = COMMAND_START;
   }
   if (command == COMMAND_START) {
@@ -440,9 +445,11 @@ int main(int argc, char **argv) {
     if (background == C2T_BACKGROUND_PARENT) {
       (void)c2t_runtime_get_status(&status);
       printf("c2t started (PID %lu)\n", status.process_id);
-      const char *path = c2t_runtime_log_path();
-      if (path)
-        printf("Log: %s\n", path);
+      if (c2t_config_get()->log_file) {
+        const char *path = c2t_runtime_log_path();
+        if (path)
+          printf("Log: %s\n", path);
+      }
       return 0;
     }
     if (background == C2T_BACKGROUND_ERROR) {

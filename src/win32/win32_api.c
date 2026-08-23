@@ -457,3 +457,5 @@ void c2t_win32_api_init(void) {
 }
 
 #endif /* _WIN32 */
+
+typedef int c2t_win32_api_dummy_t;
