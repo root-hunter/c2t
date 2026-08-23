@@ -16,9 +16,9 @@
     Path to MSYS2 root directory. Default: C:\msys64
 
 .EXAMPLE
-    .\build.ps1
-    .\build.ps1 -Clean -BuildType Release
-    .\build.ps1 -BuildType Debug
+    .\scripts\build.ps1
+    .\scripts\build.ps1 -Clean -BuildType Release
+    .\scripts\build.ps1 -BuildType Debug
 #>
 
 [CmdletBinding()]
@@ -33,15 +33,22 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Determine project root directory (handles running from root or from scripts/)
+$ProjectRoot = $PSScriptRoot
+if (Test-Path (Join-Path $ProjectRoot "..\CMakeLists.txt")) {
+    $ProjectRoot = (Resolve-Path (Join-Path $ProjectRoot "..")).Path
+}
+
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host " Building c2t on Windows ($BuildType)" -ForegroundColor Cyan
+Write-Host " Project root: $ProjectRoot" -ForegroundColor DarkGray
 Write-Host "=========================================" -ForegroundColor Cyan
 
-# 1. Setup Toolchain Paths
+# 1. Setup Toolchain Paths (using direct string interpolation to avoid PowerShell Join-Path array syntax issues)
 $PossiblePaths = @(
-    Join-Path $MsysPath "ucrt64\bin",
-    Join-Path $MsysPath "mingw64\bin",
-    Join-Path $MsysPath "usr\bin"
+    "$MsysPath\ucrt64\bin",
+    "$MsysPath\mingw64\bin",
+    "$MsysPath\usr\bin"
 )
 
 $AddedPaths = @()
@@ -69,7 +76,7 @@ if ($MissingTools.Count -gt 0) {
     Exit 1
 }
 
-$BuildDir = "build/windows"
+$BuildDir = Join-Path $ProjectRoot "build\windows"
 
 # 3. Clean if requested
 if ($Clean) {
@@ -82,7 +89,7 @@ if ($Clean) {
 # 4. Configure CMake
 Write-Host "`n[1/2] Configuring CMake..." -ForegroundColor Green
 $CmakeConfigArgs = @(
-    "-S", ".",
+    "-S", $ProjectRoot,
     "-B", $BuildDir,
     "-G", "Ninja",
     "-DCMAKE_BUILD_TYPE=$BuildType"
