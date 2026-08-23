@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,10 +21,10 @@
 #include <stddef.h>
 
 typedef struct {
-    unsigned char *buffer;
-    size_t capacity;
-    size_t offset;
-    int is_locked;
+  unsigned char *buffer;
+  size_t capacity;
+  size_t offset;
+  int is_locked;
 } c2t_arena_t;
 
 [[nodiscard]] int c2t_arena_init(c2t_arena_t *arena, size_t capacity);

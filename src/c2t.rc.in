@@ -25,7 +25,7 @@ BEGIN
             VALUE "FileDescription",  "c2t Clipboard & Keyboard Synchronization Utility\0"
             VALUE "FileVersion",      VER_FILEVERSION_STR
             VALUE "InternalName",     "c2t\0"
-            VALUE "LegalCopyright",   "Copyright (C) 2026 Antonio Ricciardi\0"
+            VALUE "LegalCopyright",   "Copyright (C) 2026 roothunter\0"
             VALUE "OriginalFilename", "c2t.exe\0"
             VALUE "ProductName",      "c2t\0"
             VALUE "ProductVersion",   VER_PRODUCTVERSION_STR

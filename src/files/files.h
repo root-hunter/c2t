@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,21 +18,18 @@
 #ifndef C2T_FILES_H
 #define C2T_FILES_H
 
-#include <stddef.h>
 #include "../clipboard/clipboard_source.h"
+#include <stddef.h>
 
-enum {
-    C2T_FILE_NOT_HANDLED = 0,
-    C2T_FILE_SENT = 1,
-    C2T_FILE_ERROR = -1
-};
+enum { C2T_FILE_NOT_HANDLED = 0, C2T_FILE_SENT = 1, C2T_FILE_ERROR = -1 };
 
-[[nodiscard]] int c2t_file_try_clipboard_path(const void *data, size_t length,
-                                const char *mime_type,
-                                const c2t_clipboard_source_t *source);
+[[nodiscard]] int
+c2t_file_try_clipboard_path(const void *data, size_t length,
+                            const char *mime_type,
+                            const c2t_clipboard_source_t *source);
 
 [[nodiscard]] int c2t_file_send_path(const char *path,
-                                    const c2t_clipboard_source_t *source);
+                                     const c2t_clipboard_source_t *source);
 
 [[nodiscard]] int c2t_file_list_directory(const char *path, char *output,
                                           size_t capacity);
@@ -43,7 +40,8 @@ enum {
 [[nodiscard]] int c2t_file_get_info(const char *path, char *output,
                                     size_t capacity);
 
-[[nodiscard]] int c2t_file_save_uploaded(const char *file_id, const char *file_name,
+[[nodiscard]] int c2t_file_save_uploaded(const char *file_id,
+                                         const char *file_name,
                                          const char *caption);
 
 [[nodiscard]] uint64_t c2t_files_get_total_bytes(void);

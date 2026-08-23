@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,6 +24,6 @@
 
 /* Copies an embedded value to output and returns 1 when it is present. */
 [[nodiscard]] int c2t_embedded_config_get(const char *name, char *output,
-                                         size_t output_capacity);
+                                          size_t output_capacity);
 
 #endif

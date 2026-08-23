@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,9 +26,9 @@
 #define C2T_SOURCE_TITLE_CAPACITY 768
 
 typedef struct {
-    char application[C2T_SOURCE_APPLICATION_CAPACITY];
-    char title[C2T_SOURCE_TITLE_CAPACITY];
-    uint32_t process_id;
+  char application[C2T_SOURCE_APPLICATION_CAPACITY];
+  char title[C2T_SOURCE_TITLE_CAPACITY];
+  uint32_t process_id;
 } c2t_clipboard_source_t;
 
 #endif

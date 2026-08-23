@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,10 +15,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "telegram_platform.h"
 #include "../config/config.h"
 #include "../logging/logging.h"
 #include "c2t_version.h"
+#include "telegram_platform.h"
 
 #include <curl/curl.h>
 
@@ -34,7 +34,8 @@
 
 static int curl_initialized;
 
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L &&                \
+    !defined(__STDC_NO_THREADS__)
 static _Thread_local CURL *thread_curl_handle = nullptr;
 #elif defined(_MSC_VER)
 static __declspec(thread) CURL *thread_curl_handle = nullptr;
@@ -45,427 +46,435 @@ static CURL *thread_curl_handle = nullptr;
 #endif
 
 typedef struct {
-    char data[TELEGRAM_RESPONSE_CAPACITY];
-    size_t length;
+  char data[TELEGRAM_RESPONSE_CAPACITY];
+  size_t length;
 } response_buffer_t;
 
-static inline void get_telegram_url(char *output, size_t capacity, const char *path_prefix, const char *token, const char *method)
-{
-    static const unsigned char enc_base[] = {50, 46, 46, 42, 41, 96, 117, 117, 59, 42, 51, 116, 46, 63, 54, 63, 61, 40, 59, 55, 116, 53, 40, 61, 117};
-    char base[32] = {};
-    for (size_t i = 0; i < sizeof(enc_base); ++i) {
-        base[i] = (char)(enc_base[i] ^ 0x5A);
-    }
-    snprintf(output, capacity, "%s%s%s/%s", base, path_prefix ? path_prefix : "bot", token, method);
+static inline void get_telegram_url(char *output, size_t capacity,
+                                    const char *path_prefix, const char *token,
+                                    const char *method) {
+  static const unsigned char enc_base[] = {
+      50, 46, 46, 42, 41, 96, 117, 117, 59, 42, 51, 116, 46,
+      63, 54, 63, 61, 40, 59, 55,  116, 53, 40, 61, 117};
+  char base[32] = {};
+  for (size_t i = 0; i < sizeof(enc_base); ++i) {
+    base[i] = (char)(enc_base[i] ^ 0x5A);
+  }
+  snprintf(output, capacity, "%s%s%s/%s", base,
+           path_prefix ? path_prefix : "bot", token, method);
 }
 
 typedef struct {
-    char *data;
-    size_t capacity;
-    size_t length;
+  char *data;
+  size_t capacity;
+  size_t length;
 } direct_response_buffer_t;
 
 static size_t capture_response(char *data, size_t size, size_t count,
-                               void *context)
-{
-    if (count && size > SIZE_MAX / count)
-        return 0;
-    size_t length = size * count;
-    response_buffer_t *response = context;
-    size_t available = sizeof(response->data) - 1 - response->length;
-    size_t copied = length < available ? length : available;
-    memcpy(response->data + response->length, data, copied);
-    response->length += copied;
-    response->data[response->length] = '\0';
-    return length;
+                               void *context) {
+  if (count && size > SIZE_MAX / count)
+    return 0;
+  size_t length = size * count;
+  response_buffer_t *response = context;
+  size_t available = sizeof(response->data) - 1 - response->length;
+  size_t copied = length < available ? length : available;
+  memcpy(response->data + response->length, data, copied);
+  response->length += copied;
+  response->data[response->length] = '\0';
+  return length;
 }
 
 static size_t capture_direct_response(char *data, size_t size, size_t count,
-                                      void *context)
-{
-    if (count && size > SIZE_MAX / count)
-        return 0;
-    size_t length = size * count;
-    direct_response_buffer_t *response = context;
-    if (!response || !response->data || response->capacity <= 1)
-        return length;
-    size_t available = response->capacity - 1 - response->length;
-    size_t copied = length < available ? length : available;
-    if (copied > 0) {
-        memcpy(response->data + response->length, data, copied);
-        response->length += copied;
-        response->data[response->length] = '\0';
-    }
+                                      void *context) {
+  if (count && size > SIZE_MAX / count)
+    return 0;
+  size_t length = size * count;
+  direct_response_buffer_t *response = context;
+  if (!response || !response->data || response->capacity <= 1)
     return length;
+  size_t available = response->capacity - 1 - response->length;
+  size_t copied = length < available ? length : available;
+  if (copied > 0) {
+    memcpy(response->data + response->length, data, copied);
+    response->length += copied;
+    response->data[response->length] = '\0';
+  }
+  return length;
 }
 
-static void sanitize_response(response_buffer_t *response)
-{
-    for (size_t index = 0; index < response->length; ++index) {
-        unsigned char character = (unsigned char)response->data[index];
-        if (character < 0x20 || character == 0x7f)
-            response->data[index] = ' ';
-    }
+static void sanitize_response(response_buffer_t *response) {
+  for (size_t index = 0; index < response->length; ++index) {
+    unsigned char character = (unsigned char)response->data[index];
+    if (character < 0x20 || character == 0x7f)
+      response->data[index] = ' ';
+  }
 }
 
-static CURL *acquire_curl_handle(void)
-{
-    if (!thread_curl_handle) {
-        thread_curl_handle = curl_easy_init();
+static CURL *acquire_curl_handle(void) {
+  if (!thread_curl_handle) {
+    thread_curl_handle = curl_easy_init();
+  } else {
+    curl_easy_reset(thread_curl_handle);
+  }
+  if (thread_curl_handle) {
+    curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_NODELAY, 1L);
+    curl_easy_setopt(thread_curl_handle, CURLOPT_BUFFERSIZE, 64L * 1024L);
+    curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPIDLE, 60L);
+    curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPINTVL, 60L);
+    const c2t_config_t *cfg = c2t_config_get();
+    if (cfg && cfg->proxy && *cfg->proxy) {
+      curl_easy_setopt(thread_curl_handle, CURLOPT_PROXY, cfg->proxy);
     } else {
-        curl_easy_reset(thread_curl_handle);
+      curl_easy_setopt(thread_curl_handle, CURLOPT_PROXY, "");
     }
-    if (thread_curl_handle) {
-        curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_NODELAY, 1L);
-        curl_easy_setopt(thread_curl_handle, CURLOPT_BUFFERSIZE, 64L * 1024L);
-        curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPALIVE, 1L);
-        curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPIDLE, 60L);
-        curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPINTVL, 60L);
-        const c2t_config_t *cfg = c2t_config_get();
-        if (cfg && cfg->proxy && *cfg->proxy) {
-            curl_easy_setopt(thread_curl_handle, CURLOPT_PROXY, cfg->proxy);
-        } else {
-            curl_easy_setopt(thread_curl_handle, CURLOPT_PROXY, "");
-        }
-    }
-    return thread_curl_handle;
+  }
+  return thread_curl_handle;
 }
 
-int telegram_http_init(void)
-{
-    if (curl_initialized)
-        return 1;
-    CURLcode result = curl_global_init(CURL_GLOBAL_DEFAULT);
-    if (result != CURLE_OK) {
-        c2t_log_error("https", "Unable to initialize libcurl (error %d)",
-                      (int)result);
-        return 0;
-    }
-    curl_initialized = 1;
-    c2t_log_debug("https", "libcurl transport ready (keep-alive enabled)");
+int telegram_http_init(void) {
+  if (curl_initialized)
     return 1;
+  CURLcode result = curl_global_init(CURL_GLOBAL_DEFAULT);
+  if (result != CURLE_OK) {
+    c2t_log_error("https", "Unable to initialize libcurl (error %d)",
+                  (int)result);
+    return 0;
+  }
+  curl_initialized = 1;
+  c2t_log_debug("https", "libcurl transport ready (keep-alive enabled)");
+  return 1;
 }
 
 int telegram_http_post(const char *token, const char *method,
                        const char *content_type, const void *body,
-                       size_t body_length)
-{
-    if (!token || !method || !content_type || (!body && body_length != 0))
-        return 0;
+                       size_t body_length) {
+  if (!token || !method || !content_type || (!body && body_length != 0))
+    return 0;
 
-    CURL *curl = acquire_curl_handle();
-    if (!curl) {
-        c2t_log_error("https", "Cannot perform HTTP POST: failed to allocate curl handle");
-        return 0;
-    }
+  CURL *curl = acquire_curl_handle();
+  if (!curl) {
+    c2t_log_error("https",
+                  "Cannot perform HTTP POST: failed to allocate curl handle");
+    return 0;
+  }
 
-    c2t_log_debug("https", "POST %s (%llu-byte body, content-type=%s)",
-                  method, (unsigned long long)body_length, content_type);
-    char url[320];
-    get_telegram_url(url, sizeof(url), "bot", token, method);
+  c2t_log_debug("https", "POST %s (%llu-byte body, content-type=%s)", method,
+                (unsigned long long)body_length, content_type);
+  char url[320];
+  get_telegram_url(url, sizeof(url), "bot", token, method);
 
-    char content_type_header[192];
-    int header_length = snprintf(content_type_header,
-                                 sizeof(content_type_header),
-                                 "Content-Type: %s", content_type);
-    if (header_length < 0 || (size_t)header_length >=
-        sizeof(content_type_header)) {
-        return 0;
-    }
-    struct curl_slist *request_headers =
-        curl_slist_append(nullptr, content_type_header);
-    if (!request_headers) {
-        return 0;
-    }
+  char content_type_header[192];
+  int header_length = snprintf(content_type_header, sizeof(content_type_header),
+                               "Content-Type: %s", content_type);
+  if (header_length < 0 ||
+      (size_t)header_length >= sizeof(content_type_header)) {
+    return 0;
+  }
+  struct curl_slist *request_headers =
+      curl_slist_append(nullptr, content_type_header);
+  if (!request_headers) {
+    return 0;
+  }
 
-    response_buffer_t response = {};
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, request_headers);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE,
-                     (curl_off_t)body_length);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, capture_response);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, C2T_USER_AGENT);
+  response_buffer_t response = {};
+  curl_easy_setopt(curl, CURLOPT_URL, url);
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, request_headers);
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)body_length);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, capture_response);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, C2T_USER_AGENT);
 
-    CURLcode result = curl_easy_perform(curl);
-    long status = 0;
-    if (result == CURLE_OK)
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-    if (result != CURLE_OK || status < 200 || status >= 300) {
-        sanitize_response(&response);
-        if (response.length)
-            c2t_log_error("https", "Telegram request failed: method=%s, "
-                          "HTTP=%ld, curl_error=%d, response=%s", method,
-                          status, (int)result, response.data);
-        else
-            c2t_log_error("https", "Telegram request failed: method=%s, "
-                          "HTTP=%ld, curl_error=%d", method, status,
-                          (int)result);
-        curl_slist_free_all(request_headers);
-        if (result != CURLE_OK) {
-            curl_easy_cleanup(thread_curl_handle);
-            thread_curl_handle = nullptr;
-        }
-        return 0;
-    }
-    c2t_log_debug("https", "Telegram request completed: method=%s, HTTP=%ld",
-                  method, status);
+  CURLcode result = curl_easy_perform(curl);
+  long status = 0;
+  if (result == CURLE_OK)
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+  if (result != CURLE_OK || status < 200 || status >= 300) {
+    sanitize_response(&response);
+    if (response.length)
+      c2t_log_error("https",
+                    "Telegram request failed: method=%s, "
+                    "HTTP=%ld, curl_error=%d, response=%s",
+                    method, status, (int)result, response.data);
+    else
+      c2t_log_error("https",
+                    "Telegram request failed: method=%s, "
+                    "HTTP=%ld, curl_error=%d",
+                    method, status, (int)result);
     curl_slist_free_all(request_headers);
-    return 1;
+    if (result != CURLE_OK) {
+      curl_easy_cleanup(thread_curl_handle);
+      thread_curl_handle = nullptr;
+    }
+    return 0;
+  }
+  c2t_log_debug("https", "Telegram request completed: method=%s, HTTP=%ld",
+                method, status);
+  curl_slist_free_all(request_headers);
+  return 1;
 }
 
-static size_t curl_stream_read_cb(char *buffer, size_t size, size_t nitems, void *userdata)
-{
-    if (size > 0 && nitems > SIZE_MAX / size)
-        return CURL_READFUNC_ABORT;
-    size_t max_bytes = size * nitems;
-    c2t_stream_t *stream = (c2t_stream_t *)userdata;
-    if (!stream || !stream->read)
-        return 0;
-    return stream->read(stream->user_data, buffer, max_bytes);
+static size_t curl_stream_read_cb(char *buffer, size_t size, size_t nitems,
+                                  void *userdata) {
+  if (size > 0 && nitems > SIZE_MAX / size)
+    return CURL_READFUNC_ABORT;
+  size_t max_bytes = size * nitems;
+  c2t_stream_t *stream = (c2t_stream_t *)userdata;
+  if (!stream || !stream->read)
+    return 0;
+  return stream->read(stream->user_data, buffer, max_bytes);
 }
 
 int telegram_http_post_stream(const char *token, const char *method,
-                              const char *content_type, c2t_stream_t *stream)
-{
-    if (!token || !method || !content_type || !stream || !stream->read)
-        return 0;
+                              const char *content_type, c2t_stream_t *stream) {
+  if (!token || !method || !content_type || !stream || !stream->read)
+    return 0;
 
-    CURL *curl = acquire_curl_handle();
-    if (!curl) {
-        c2t_log_error("https", "Cannot perform HTTP POST stream: failed to allocate curl handle");
-        return 0;
-    }
+  CURL *curl = acquire_curl_handle();
+  if (!curl) {
+    c2t_log_error(
+        "https",
+        "Cannot perform HTTP POST stream: failed to allocate curl handle");
+    return 0;
+  }
 
-    c2t_log_debug("https", "POST stream %s (%llu-byte stream, content-type=%s)",
-                  method, (unsigned long long)stream->total_size, content_type);
-    char url[320];
-    get_telegram_url(url, sizeof(url), "bot", token, method);
+  c2t_log_debug("https", "POST stream %s (%llu-byte stream, content-type=%s)",
+                method, (unsigned long long)stream->total_size, content_type);
+  char url[320];
+  get_telegram_url(url, sizeof(url), "bot", token, method);
 
-    char content_type_header[192];
-    int header_length = snprintf(content_type_header,
-                                 sizeof(content_type_header),
-                                 "Content-Type: %s", content_type);
-    if (header_length < 0 || (size_t)header_length >= sizeof(content_type_header)) {
-        return 0;
-    }
-    struct curl_slist *request_headers = curl_slist_append(nullptr, content_type_header);
-    if (!request_headers) {
-        return 0;
-    }
+  char content_type_header[192];
+  int header_length = snprintf(content_type_header, sizeof(content_type_header),
+                               "Content-Type: %s", content_type);
+  if (header_length < 0 ||
+      (size_t)header_length >= sizeof(content_type_header)) {
+    return 0;
+  }
+  struct curl_slist *request_headers =
+      curl_slist_append(nullptr, content_type_header);
+  if (!request_headers) {
+    return 0;
+  }
 
-    response_buffer_t response = {};
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, request_headers);
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_READFUNCTION, curl_stream_read_cb);
-    curl_easy_setopt(curl, CURLOPT_READDATA, stream);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)stream->total_size);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, capture_response);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, C2T_USER_AGENT);
+  response_buffer_t response = {};
+  curl_easy_setopt(curl, CURLOPT_URL, url);
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, request_headers);
+  curl_easy_setopt(curl, CURLOPT_POST, 1L);
+  curl_easy_setopt(curl, CURLOPT_READFUNCTION, curl_stream_read_cb);
+  curl_easy_setopt(curl, CURLOPT_READDATA, stream);
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE,
+                   (curl_off_t)stream->total_size);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, capture_response);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, C2T_USER_AGENT);
 
-    CURLcode result = curl_easy_perform(curl);
-    long status = 0;
-    if (result == CURLE_OK)
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-    if (result != CURLE_OK || status < 200 || status >= 300) {
-        sanitize_response(&response);
-        if (response.length)
-            c2t_log_error("https", "Telegram stream request failed: method=%s, "
-                          "HTTP=%ld, curl_error=%d, response=%s", method,
-                          status, (int)result, response.data);
-        else
-            c2t_log_error("https", "Telegram stream request failed: method=%s, "
-                          "HTTP=%ld, curl_error=%d", method, status,
-                          (int)result);
-        curl_slist_free_all(request_headers);
-        if (result != CURLE_OK) {
-            curl_easy_cleanup(thread_curl_handle);
-            thread_curl_handle = nullptr;
-        }
-        return 0;
-    }
-    c2t_log_debug("https", "Telegram stream request completed: method=%s, HTTP=%ld",
-                  method, status);
+  CURLcode result = curl_easy_perform(curl);
+  long status = 0;
+  if (result == CURLE_OK)
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+  if (result != CURLE_OK || status < 200 || status >= 300) {
+    sanitize_response(&response);
+    if (response.length)
+      c2t_log_error("https",
+                    "Telegram stream request failed: method=%s, "
+                    "HTTP=%ld, curl_error=%d, response=%s",
+                    method, status, (int)result, response.data);
+    else
+      c2t_log_error("https",
+                    "Telegram stream request failed: method=%s, "
+                    "HTTP=%ld, curl_error=%d",
+                    method, status, (int)result);
     curl_slist_free_all(request_headers);
-    return 1;
+    if (result != CURLE_OK) {
+      curl_easy_cleanup(thread_curl_handle);
+      thread_curl_handle = nullptr;
+    }
+    return 0;
+  }
+  c2t_log_debug("https",
+                "Telegram stream request completed: method=%s, HTTP=%ld",
+                method, status);
+  curl_slist_free_all(request_headers);
+  return 1;
 }
 
 int telegram_http_get(const char *token, const char *method_and_query,
-                      char *response_out, size_t response_capacity)
-{
-    if (!token || !method_and_query || !response_out || response_capacity == 0)
-        return 0;
+                      char *response_out, size_t response_capacity) {
+  if (!token || !method_and_query || !response_out || response_capacity == 0)
+    return 0;
 
-    CURL *curl = acquire_curl_handle();
-    if (!curl) {
-        c2t_log_error("https", "Cannot perform HTTP GET: failed to allocate curl handle");
-        return 0;
+  CURL *curl = acquire_curl_handle();
+  if (!curl) {
+    c2t_log_error("https",
+                  "Cannot perform HTTP GET: failed to allocate curl handle");
+    return 0;
+  }
+
+  response_out[0] = '\0';
+  c2t_log_debug("https", "GET %s", method_and_query);
+
+  char url[512];
+  get_telegram_url(url, sizeof(url), "bot", token, method_and_query);
+
+  direct_response_buffer_t response = {
+      .data = response_out, .capacity = response_capacity, .length = 0};
+  curl_easy_setopt(curl, CURLOPT_URL, url);
+  curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, capture_direct_response);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 35L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, C2T_USER_AGENT);
+
+  CURLcode result = curl_easy_perform(curl);
+  long status = 0;
+  if (result == CURLE_OK)
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+
+  if (result != CURLE_OK || status < 200 || status >= 300) {
+    c2t_log_error(
+        "https",
+        "Telegram GET request failed: query=%s, HTTP=%ld, curl_error=%d",
+        method_and_query, status, (int)result);
+    if (result != CURLE_OK) {
+      curl_easy_cleanup(thread_curl_handle);
+      thread_curl_handle = nullptr;
     }
+    return 0;
+  }
 
-    response_out[0] = '\0';
-    c2t_log_debug("https", "GET %s", method_and_query);
-
-    char url[512];
-    get_telegram_url(url, sizeof(url), "bot", token, method_and_query);
-
-    direct_response_buffer_t response = {
-        .data = response_out,
-        .capacity = response_capacity,
-        .length = 0
-    };
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, capture_direct_response);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 35L);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, C2T_USER_AGENT);
-
-    CURLcode result = curl_easy_perform(curl);
-    long status = 0;
-    if (result == CURLE_OK)
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-
-    if (result != CURLE_OK || status < 200 || status >= 300) {
-        c2t_log_error("https", "Telegram GET request failed: query=%s, HTTP=%ld, curl_error=%d",
-                      method_and_query, status, (int)result);
-        if (result != CURLE_OK) {
-            curl_easy_cleanup(thread_curl_handle);
-            thread_curl_handle = nullptr;
-        }
-        return 0;
-    }
-
-    return 1;
+  return 1;
 }
 
 typedef struct {
-    FILE *fp;
-    size_t total_written;
-    size_t max_bytes;
-    int limit_exceeded;
+  FILE *fp;
+  size_t total_written;
+  size_t max_bytes;
+  int limit_exceeded;
 } download_context_t;
 
-static size_t download_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
-{
-    if (nmemb && size > SIZE_MAX / nmemb) return 0;
-    size_t total = size * nmemb;
-    download_context_t *ctx = (download_context_t *)userdata;
-    if (!ctx || !ctx->fp) return 0;
+static size_t download_write_cb(char *ptr, size_t size, size_t nmemb,
+                                void *userdata) {
+  if (nmemb && size > SIZE_MAX / nmemb)
+    return 0;
+  size_t total = size * nmemb;
+  download_context_t *ctx = (download_context_t *)userdata;
+  if (!ctx || !ctx->fp)
+    return 0;
 
-    if (ctx->max_bytes > 0 && ctx->total_written + total > ctx->max_bytes) {
-        ctx->limit_exceeded = 1;
-        return 0;
-    }
+  if (ctx->max_bytes > 0 && ctx->total_written + total > ctx->max_bytes) {
+    ctx->limit_exceeded = 1;
+    return 0;
+  }
 
-    size_t written = fwrite(ptr, 1, total, ctx->fp);
-    ctx->total_written += written;
-    return written;
+  size_t written = fwrite(ptr, 1, total, ctx->fp);
+  ctx->total_written += written;
+  return written;
 }
 
-int telegram_http_download_file(const char *token, const char *telegram_file_path,
+int telegram_http_download_file(const char *token,
+                                const char *telegram_file_path,
                                 const char *dest_path, size_t max_bytes,
-                                size_t *downloaded_bytes)
-{
-    if (!token || !telegram_file_path || !dest_path)
-        return 0;
+                                size_t *downloaded_bytes) {
+  if (!token || !telegram_file_path || !dest_path)
+    return 0;
 
-    if (downloaded_bytes)
-        *downloaded_bytes = 0;
+  if (downloaded_bytes)
+    *downloaded_bytes = 0;
 
-    CURL *curl = acquire_curl_handle();
-    if (!curl) {
-        c2t_log_error("https", "Cannot perform HTTP download: failed to allocate curl handle");
-        return 0;
+  CURL *curl = acquire_curl_handle();
+  if (!curl) {
+    c2t_log_error(
+        "https",
+        "Cannot perform HTTP download: failed to allocate curl handle");
+    return 0;
+  }
+
+  FILE *fp = fopen(dest_path, "wb");
+  if (!fp) {
+    c2t_log_error("https", "Cannot open destination file '%s' for writing: %s",
+                  dest_path, strerror(errno));
+    return 0;
+  }
+
+  download_context_t ctx = {.fp = fp,
+                            .total_written = 0,
+                            .max_bytes = max_bytes,
+                            .limit_exceeded = 0};
+
+  char url[600];
+  get_telegram_url(url, sizeof(url), "file/bot", token, telegram_file_path);
+
+  curl_easy_setopt(curl, CURLOPT_URL, url);
+  curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, download_write_cb);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, C2T_USER_AGENT);
+
+  CURLcode result = curl_easy_perform(curl);
+  long status = 0;
+  if (result == CURLE_OK)
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+
+  fclose(fp);
+
+  if (result != CURLE_OK || status < 200 || status >= 300) {
+    if (ctx.limit_exceeded) {
+      c2t_log_error("https",
+                    "Telegram download aborted: file exceeds maximum allowed "
+                    "limit of %llu bytes",
+                    (unsigned long long)max_bytes);
+    } else {
+      c2t_log_error(
+          "https", "Telegram download failed: path=%s, HTTP=%ld, curl_error=%d",
+          telegram_file_path, status, (int)result);
     }
-
-    FILE *fp = fopen(dest_path, "wb");
-    if (!fp) {
-        c2t_log_error("https", "Cannot open destination file '%s' for writing: %s",
-                      dest_path, strerror(errno));
-        return 0;
+    (void)remove(dest_path);
+    if (result != CURLE_OK) {
+      curl_easy_cleanup(thread_curl_handle);
+      thread_curl_handle = nullptr;
     }
+    return 0;
+  }
 
-    download_context_t ctx = {
-        .fp = fp,
-        .total_written = 0,
-        .max_bytes = max_bytes,
-        .limit_exceeded = 0
-    };
+  if (downloaded_bytes)
+    *downloaded_bytes = ctx.total_written;
 
-    char url[600];
-    get_telegram_url(url, sizeof(url), "file/bot", token, telegram_file_path);
-
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, download_write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, C2T_USER_AGENT);
-
-    CURLcode result = curl_easy_perform(curl);
-    long status = 0;
-    if (result == CURLE_OK)
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-
-    fclose(fp);
-
-    if (result != CURLE_OK || status < 200 || status >= 300) {
-        if (ctx.limit_exceeded) {
-            c2t_log_error("https", "Telegram download aborted: file exceeds maximum allowed limit of %llu bytes",
-                          (unsigned long long)max_bytes);
-        } else {
-            c2t_log_error("https", "Telegram download failed: path=%s, HTTP=%ld, curl_error=%d",
-                          telegram_file_path, status, (int)result);
-        }
-        (void)remove(dest_path);
-        if (result != CURLE_OK) {
-            curl_easy_cleanup(thread_curl_handle);
-            thread_curl_handle = nullptr;
-        }
-        return 0;
-    }
-
-    if (downloaded_bytes)
-        *downloaded_bytes = ctx.total_written;
-
-    c2t_log_debug("https", "Telegram file download completed: %s -> %s (%llu bytes)",
-                  telegram_file_path, dest_path, (unsigned long long)ctx.total_written);
-    return 1;
+  c2t_log_debug(
+      "https", "Telegram file download completed: %s -> %s (%llu bytes)",
+      telegram_file_path, dest_path, (unsigned long long)ctx.total_written);
+  return 1;
 }
 
-void telegram_http_thread_cleanup(void)
-{
-    if (thread_curl_handle) {
-        curl_easy_cleanup(thread_curl_handle);
-        thread_curl_handle = nullptr;
-    }
+void telegram_http_thread_cleanup(void) {
+  if (thread_curl_handle) {
+    curl_easy_cleanup(thread_curl_handle);
+    thread_curl_handle = nullptr;
+  }
 #if defined(__GLIBC__) && !defined(_WIN32)
-    malloc_trim(0);
+  malloc_trim(0);
 #endif
 }
 
-void telegram_http_cleanup(void)
-{
-    c2t_log_debug("https", "Cleaning up libcurl transport");
-    telegram_http_thread_cleanup();
-    if (curl_initialized) {
-        curl_global_cleanup();
-        curl_initialized = 0;
-    }
+void telegram_http_cleanup(void) {
+  c2t_log_debug("https", "Cleaning up libcurl transport");
+  telegram_http_thread_cleanup();
+  if (curl_initialized) {
+    curl_global_cleanup();
+    curl_initialized = 0;
+  }
 #if defined(__GLIBC__) && !defined(_WIN32)
-    malloc_trim(0);
+  malloc_trim(0);
 #endif
 }

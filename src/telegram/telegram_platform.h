@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,8 +18,8 @@
 #ifndef C2T_TELEGRAM_PLATFORM_H
 #define C2T_TELEGRAM_PLATFORM_H
 
-#include <stddef.h>
 #include "../crypto/crypto.h"
+#include <stddef.h>
 
 int telegram_http_init(void);
 int telegram_http_post(const char *token, const char *method,
@@ -29,7 +29,8 @@ int telegram_http_post_stream(const char *token, const char *method,
                               const char *content_type, c2t_stream_t *stream);
 int telegram_http_get(const char *token, const char *method_and_query,
                       char *response_out, size_t response_capacity);
-int telegram_http_download_file(const char *token, const char *telegram_file_path,
+int telegram_http_download_file(const char *token,
+                                const char *telegram_file_path,
                                 const char *dest_path, size_t max_bytes,
                                 size_t *downloaded_bytes);
 void telegram_http_thread_cleanup(void);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,8 +21,8 @@
 #include <stddef.h>
 
 typedef enum {
-    KEYBOARD_MODE_CODE = 0,
-    KEYBOARD_MODE_RAW = 1
+  KEYBOARD_MODE_CODE = 0,
+  KEYBOARD_MODE_RAW = 1
 } keyboard_format_mode_t;
 
 [[nodiscard]] int keyboard_listener_init(void);
@@ -39,4 +39,3 @@ void keyboard_get_layout(char *buffer, size_t max_len);
 void keyboard_get_available_layouts(char *buffer, size_t max_len);
 
 #endif
-

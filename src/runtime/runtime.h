@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,21 +21,21 @@
 #include <stddef.h>
 
 typedef enum {
-    C2T_RUNTIME_STOPPED = 0,
-    C2T_RUNTIME_STARTING,
-    C2T_RUNTIME_RUNNING
+  C2T_RUNTIME_STOPPED = 0,
+  C2T_RUNTIME_STARTING,
+  C2T_RUNTIME_RUNNING
 } c2t_runtime_state_t;
 
 typedef struct {
-    c2t_runtime_state_t state;
-    unsigned long process_id;
-    unsigned long supervisor_pid;
+  c2t_runtime_state_t state;
+  unsigned long process_id;
+  unsigned long supervisor_pid;
 } c2t_runtime_status_t;
 
 enum {
-    C2T_BACKGROUND_ERROR = -1,
-    C2T_BACKGROUND_PARENT = 0,
-    C2T_BACKGROUND_CHILD = 1
+  C2T_BACKGROUND_ERROR = -1,
+  C2T_BACKGROUND_PARENT = 0,
+  C2T_BACKGROUND_CHILD = 1
 };
 
 [[nodiscard]] int c2t_runtime_acquire(void);
@@ -48,7 +48,7 @@ void c2t_runtime_request_stop(void);
 [[nodiscard]] int c2t_runtime_get_status(c2t_runtime_status_t *status);
 [[nodiscard]] int c2t_runtime_stop(unsigned int timeout_ms, int force);
 [[nodiscard]] int c2t_runtime_start_background(int argc, char **argv,
-                                             unsigned int timeout_ms);
+                                               unsigned int timeout_ms);
 [[nodiscard]] int c2t_runtime_run_supervisor(int argc, char **argv);
 void c2t_runtime_hide_console(void);
 void c2t_runtime_set_process_name(const char *name, int argc, char **argv);

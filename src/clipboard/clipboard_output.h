@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,8 +18,8 @@
 #ifndef C2T_CLIPBOARD_OUTPUT_H
 #define C2T_CLIPBOARD_OUTPUT_H
 
-#include <stddef.h>
 #include "clipboard_source.h"
+#include <stddef.h>
 
 [[nodiscard]] int clipboard_output_init(void);
 void clipboard_output(const void *data, size_t length, const char *mime_type,

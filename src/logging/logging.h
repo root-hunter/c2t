@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,8 +24,8 @@ void c2t_log_init(void);
 [[nodiscard]] int c2t_log_is_verbose(void);
 
 #if defined(__GNUC__) || defined(__clang__)
-#define C2T_PRINTF_FORMAT(format_index, arguments_index) \
-    __attribute__((format(printf, format_index, arguments_index)))
+#define C2T_PRINTF_FORMAT(format_index, arguments_index)                       \
+  __attribute__((format(printf, format_index, arguments_index)))
 #else
 #define C2T_PRINTF_FORMAT(format_index, arguments_index)
 #endif

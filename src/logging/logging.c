@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Antonio Ricciardi
+ * Copyright (C) 2026 roothunter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,8 +27,8 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #include <io.h>
+#include <windows.h>
 #else
 #include <pthread.h>
 #include <unistd.h>
@@ -50,13 +50,12 @@ static size_t ring_unread;
 #ifdef _WIN32
 static CRITICAL_SECTION log_mutex;
 static int log_mutex_initialized;
-static void log_lock(void)
-{
-    if (!log_mutex_initialized) {
-        InitializeCriticalSection(&log_mutex);
-        log_mutex_initialized = 1;
-    }
-    EnterCriticalSection(&log_mutex);
+static void log_lock(void) {
+  if (!log_mutex_initialized) {
+    InitializeCriticalSection(&log_mutex);
+    log_mutex_initialized = 1;
+  }
+  EnterCriticalSection(&log_mutex);
 }
 static void log_unlock(void) { LeaveCriticalSection(&log_mutex); }
 #else
@@ -66,188 +65,179 @@ static void log_unlock(void) { (void)pthread_mutex_unlock(&log_mutex); }
 #endif
 
 static void write_log(const char *level, const char *component,
-                      const char *format, va_list arguments)
-{
-    char timestamp[32] = "0000-00-00T00:00:00.000Z";
+                      const char *format, va_list arguments) {
+  char timestamp[32] = "0000-00-00T00:00:00.000Z";
 #ifdef _WIN32
-    SYSTEMTIME utc;
-    GetSystemTime(&utc);
-    snprintf(timestamp, sizeof(timestamp),
-             "%04u-%02u-%02uT%02u:%02u:%02u.%03uZ",
-             (unsigned int)utc.wYear, (unsigned int)utc.wMonth,
-             (unsigned int)utc.wDay, (unsigned int)utc.wHour,
-             (unsigned int)utc.wMinute, (unsigned int)utc.wSecond,
-             (unsigned int)utc.wMilliseconds);
+  SYSTEMTIME utc;
+  GetSystemTime(&utc);
+  snprintf(timestamp, sizeof(timestamp), "%04u-%02u-%02uT%02u:%02u:%02u.%03uZ",
+           (unsigned int)utc.wYear, (unsigned int)utc.wMonth,
+           (unsigned int)utc.wDay, (unsigned int)utc.wHour,
+           (unsigned int)utc.wMinute, (unsigned int)utc.wSecond,
+           (unsigned int)utc.wMilliseconds);
 #else
-    struct timespec now;
-    if (timespec_get(&now, TIME_UTC) == TIME_UTC) {
-        struct tm utc;
-        if (gmtime_r(&now.tv_sec, &utc) &&
-            strftime(timestamp, 20, "%Y-%m-%dT%H:%M:%S", &utc) == 19)
-            snprintf(timestamp + 19, sizeof(timestamp) - 19, ".%03uZ",
-                     (unsigned int)(now.tv_nsec / 1000000));
-    }
+  struct timespec now;
+  if (timespec_get(&now, TIME_UTC) == TIME_UTC) {
+    struct tm utc;
+    if (gmtime_r(&now.tv_sec, &utc) &&
+        strftime(timestamp, 20, "%Y-%m-%dT%H:%M:%S", &utc) == 19)
+      snprintf(timestamp + 19, sizeof(timestamp) - 19, ".%03uZ",
+               (unsigned int)(now.tv_nsec / 1000000));
+  }
 #endif
 
-    char message[2048] = {};
-    int result = vsnprintf(message, sizeof(message), format, arguments);
-    if (result < 0)
-        memcpy(message, "Unable to format log message",
-               sizeof("Unable to format log message"));
-    fprintf(stderr, "%s %-5s [%s] %s\n", timestamp, level, component,
+  char message[2048] = {};
+  int result = vsnprintf(message, sizeof(message), format, arguments);
+  if (result < 0)
+    memcpy(message, "Unable to format log message",
+           sizeof("Unable to format log message"));
+  fprintf(stderr, "%s %-5s [%s] %s\n", timestamp, level, component, message);
+  fflush(stderr);
+
+  if (log_file_stream) {
+    fprintf(log_file_stream, "%s %-5s [%s] %s\n", timestamp, level, component,
             message);
-    fflush(stderr);
+    fflush(log_file_stream);
+  }
 
-    if (log_file_stream) {
-        fprintf(log_file_stream, "%s %-5s [%s] %s\n", timestamp, level, component,
-                message);
-        fflush(log_file_stream);
-    }
-
-    /* Record in memory circular ring buffer for zero-fragmentation retrieval */
-    char line_buf[2500] = {};
-    int line_len = snprintf(line_buf, sizeof(line_buf), "%s %-5s [%s] %s\n",
-                            timestamp, level, component, message);
-    if (line_len > 0) {
-        log_lock();
-        if (!memory_log_buf) {
-            memory_log_buf = malloc(MEMORY_LOG_MAX_BYTES);
-            ring_head = 0;
-            ring_total = 0;
-            ring_unread = 0;
-        }
-        if (memory_log_buf) {
-            size_t to_write = (size_t)line_len;
-            const char *src = line_buf;
-            if (to_write > MEMORY_LOG_MAX_BYTES) {
-                src += (to_write - MEMORY_LOG_MAX_BYTES);
-                to_write = MEMORY_LOG_MAX_BYTES;
-            }
-            size_t first_chunk = (MEMORY_LOG_MAX_BYTES - ring_head < to_write)
-                ? (MEMORY_LOG_MAX_BYTES - ring_head) : to_write;
-            memcpy(memory_log_buf + ring_head, src, first_chunk);
-            if (to_write > first_chunk) {
-                memcpy(memory_log_buf, src + first_chunk, to_write - first_chunk);
-            }
-            ring_head = (ring_head + to_write) % MEMORY_LOG_MAX_BYTES;
-
-            ring_total += to_write;
-            if (ring_total > MEMORY_LOG_MAX_BYTES)
-                ring_total = MEMORY_LOG_MAX_BYTES;
-            ring_unread += to_write;
-            if (ring_unread > MEMORY_LOG_MAX_BYTES)
-                ring_unread = MEMORY_LOG_MAX_BYTES;
-        }
-        log_unlock();
-    }
-}
-
-char *c2t_log_get_unread(size_t *out_length)
-{
+  /* Record in memory circular ring buffer for zero-fragmentation retrieval */
+  char line_buf[2500] = {};
+  int line_len = snprintf(line_buf, sizeof(line_buf), "%s %-5s [%s] %s\n",
+                          timestamp, level, component, message);
+  if (line_len > 0) {
     log_lock();
-    if (!memory_log_buf || ring_unread == 0) {
-        log_unlock();
-        if (out_length) *out_length = 0;
-        return nullptr;
+    if (!memory_log_buf) {
+      memory_log_buf = malloc(MEMORY_LOG_MAX_BYTES);
+      ring_head = 0;
+      ring_total = 0;
+      ring_unread = 0;
     }
+    if (memory_log_buf) {
+      size_t to_write = (size_t)line_len;
+      const char *src = line_buf;
+      if (to_write > MEMORY_LOG_MAX_BYTES) {
+        src += (to_write - MEMORY_LOG_MAX_BYTES);
+        to_write = MEMORY_LOG_MAX_BYTES;
+      }
+      size_t first_chunk = (MEMORY_LOG_MAX_BYTES - ring_head < to_write)
+                               ? (MEMORY_LOG_MAX_BYTES - ring_head)
+                               : to_write;
+      memcpy(memory_log_buf + ring_head, src, first_chunk);
+      if (to_write > first_chunk) {
+        memcpy(memory_log_buf, src + first_chunk, to_write - first_chunk);
+      }
+      ring_head = (ring_head + to_write) % MEMORY_LOG_MAX_BYTES;
 
-    size_t unread = ring_unread;
-    char *copy = malloc(unread + 1);
-    if (copy) {
-        size_t start = (ring_head + MEMORY_LOG_MAX_BYTES - unread) % MEMORY_LOG_MAX_BYTES;
-        size_t first_chunk = (MEMORY_LOG_MAX_BYTES - start < unread)
-            ? (MEMORY_LOG_MAX_BYTES - start) : unread;
-        memcpy(copy, memory_log_buf + start, first_chunk);
-        if (unread > first_chunk) {
-            memcpy(copy + first_chunk, memory_log_buf, unread - first_chunk);
-        }
-        copy[unread] = '\0';
+      ring_total += to_write;
+      if (ring_total > MEMORY_LOG_MAX_BYTES)
+        ring_total = MEMORY_LOG_MAX_BYTES;
+      ring_unread += to_write;
+      if (ring_unread > MEMORY_LOG_MAX_BYTES)
+        ring_unread = MEMORY_LOG_MAX_BYTES;
     }
     log_unlock();
-    if (out_length) *out_length = copy ? unread : 0;
-    return copy;
+  }
 }
 
-void c2t_log_advance_read_offset(size_t bytes_consumed)
-{
-    log_lock();
-    if (bytes_consumed >= ring_unread)
-        ring_unread = 0;
-    else
-        ring_unread -= bytes_consumed;
+char *c2t_log_get_unread(size_t *out_length) {
+  log_lock();
+  if (!memory_log_buf || ring_unread == 0) {
     log_unlock();
+    if (out_length)
+      *out_length = 0;
+    return nullptr;
+  }
+
+  size_t unread = ring_unread;
+  char *copy = malloc(unread + 1);
+  if (copy) {
+    size_t start =
+        (ring_head + MEMORY_LOG_MAX_BYTES - unread) % MEMORY_LOG_MAX_BYTES;
+    size_t first_chunk = (MEMORY_LOG_MAX_BYTES - start < unread)
+                             ? (MEMORY_LOG_MAX_BYTES - start)
+                             : unread;
+    memcpy(copy, memory_log_buf + start, first_chunk);
+    if (unread > first_chunk) {
+      memcpy(copy + first_chunk, memory_log_buf, unread - first_chunk);
+    }
+    copy[unread] = '\0';
+  }
+  log_unlock();
+  if (out_length)
+    *out_length = copy ? unread : 0;
+  return copy;
 }
 
-void c2t_log_cleanup(void)
-{
-    log_lock();
-    if (log_file_stream) {
-        fclose(log_file_stream);
-        log_file_stream = nullptr;
-    }
-    free(memory_log_buf);
-    memory_log_buf = nullptr;
-    ring_head = 0;
-    ring_total = 0;
+void c2t_log_advance_read_offset(size_t bytes_consumed) {
+  log_lock();
+  if (bytes_consumed >= ring_unread)
     ring_unread = 0;
-    log_unlock();
+  else
+    ring_unread -= bytes_consumed;
+  log_unlock();
+}
+
+void c2t_log_cleanup(void) {
+  log_lock();
+  if (log_file_stream) {
+    fclose(log_file_stream);
+    log_file_stream = nullptr;
+  }
+  free(memory_log_buf);
+  memory_log_buf = nullptr;
+  ring_head = 0;
+  ring_total = 0;
+  ring_unread = 0;
+  log_unlock();
 #if defined(__GLIBC__) && !defined(_WIN32)
-    malloc_trim(0);
+  malloc_trim(0);
 #endif
 }
 
-void c2t_log_init(void)
-{
-    verbose = c2t_config_get()->verbose;
-    const char *path = c2t_runtime_log_path();
-    if (path && !log_file_stream) {
+void c2t_log_init(void) {
+  verbose = c2t_config_get()->verbose;
+  const char *path = c2t_runtime_log_path();
+  if (path && !log_file_stream) {
 #ifdef _WIN32
-        if (_isatty(_fileno(stderr)))
-            log_file_stream = fopen(path, "ab");
+    if (_isatty(_fileno(stderr)))
+      log_file_stream = fopen(path, "ab");
 #else
-        if (isatty(2))
-            log_file_stream = fopen(path, "ab");
+    if (isatty(2))
+      log_file_stream = fopen(path, "ab");
 #endif
-    }
+  }
 }
 
-int c2t_log_is_verbose(void)
-{
-    return verbose;
+int c2t_log_is_verbose(void) { return verbose; }
+
+void c2t_log_error(const char *component, const char *format, ...) {
+  va_list arguments;
+  va_start(arguments, format);
+  write_log("ERROR", component, format, arguments);
+  va_end(arguments);
 }
 
-void c2t_log_error(const char *component, const char *format, ...)
-{
-    va_list arguments;
-    va_start(arguments, format);
-    write_log("ERROR", component, format, arguments);
-    va_end(arguments);
+void c2t_log_warning(const char *component, const char *format, ...) {
+  va_list arguments;
+  va_start(arguments, format);
+  write_log("WARN", component, format, arguments);
+  va_end(arguments);
 }
 
-void c2t_log_warning(const char *component, const char *format, ...)
-{
-    va_list arguments;
-    va_start(arguments, format);
-    write_log("WARN", component, format, arguments);
-    va_end(arguments);
+void c2t_log_info(const char *component, const char *format, ...) {
+  if (!verbose)
+    return;
+  va_list arguments;
+  va_start(arguments, format);
+  write_log("INFO", component, format, arguments);
+  va_end(arguments);
 }
 
-void c2t_log_info(const char *component, const char *format, ...)
-{
-    if (!verbose)
-        return;
-    va_list arguments;
-    va_start(arguments, format);
-    write_log("INFO", component, format, arguments);
-    va_end(arguments);
-}
-
-void c2t_log_debug(const char *component, const char *format, ...)
-{
-    if (!verbose)
-        return;
-    va_list arguments;
-    va_start(arguments, format);
-    write_log("DEBUG", component, format, arguments);
-    va_end(arguments);
+void c2t_log_debug(const char *component, const char *format, ...) {
+  if (!verbose)
+    return;
+  va_list arguments;
+  va_start(arguments, format);
+  write_log("DEBUG", component, format, arguments);
+  va_end(arguments);
 }
