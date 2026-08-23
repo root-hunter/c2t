@@ -144,6 +144,7 @@ jobs:
                 -DBUILD_TESTING=ON
               cmake --build /build --parallel 2
               ctest --test-dir /build --output-on-failure
+              /build/perf_bench --markdown-out /build/perf_report.md --json-out /build/perf_report.json
             '
 
       - name: Configure Linux with glibc
@@ -195,15 +196,11 @@ jobs:
           echo "## Benchmark Results (${{ matrix.platform }} ${{ matrix.arch }})" >> "$GITHUB_STEP_SUMMARY"
           cat perf_report.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Run benchmark in Docker for Linux musl
+      - name: Report benchmark for Linux musl
         if: matrix.platform == 'linux-musl'
         shell: bash
         run: |
           set -euo pipefail
-          docker run --rm \
-            --volume "${GITHUB_WORKSPACE}/build/linux-musl:/build" \
-            alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d \
-            sh -c '/build/perf_bench --markdown-out /build/perf_report.md --json-out /build/perf_report.json'
           cp build/linux-musl/perf_report.md perf_report.md
           cp build/linux-musl/perf_report.json perf_report.json
           echo "## Benchmark Results (${{ matrix.platform }} ${{ matrix.arch }})" >> "$GITHUB_STEP_SUMMARY"

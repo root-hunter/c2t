@@ -470,6 +470,9 @@ if(BUILD_TESTING)
             zstd jitterentropy
             "-Wl,--end-group"
         )
+        if(C2T_STANDALONE_LINUX)
+            target_link_options(perf_bench PRIVATE -static)
+        endif()
     endif()
     target_include_directories(perf_bench PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_compile_features(perf_bench PRIVATE c_std_23)

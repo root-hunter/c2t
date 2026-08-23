@@ -24,8 +24,8 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
-#include <bcrypt.h>
 #include <windows.h>
+#include <bcrypt.h>
 #else
 #include <errno.h>
 #include <fcntl.h>
@@ -296,7 +296,7 @@ int c2t_crypto_init(void) {
   if (wer_lib) {
     typedef HRESULT(WINAPI * pfnWerSetFlags)(DWORD);
     pfnWerSetFlags set_flags =
-        (pfnWerSetFlags)(void *)GetProcAddress(wer_lib, "WerSetFlags");
+        (pfnWerSetFlags)GetProcAddress(wer_lib, "WerSetFlags");
     if (set_flags) {
       (void)set_flags(1U);
     }
