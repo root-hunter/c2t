@@ -1083,7 +1083,7 @@ int c2t_runtime_acquire(void) {
     return -1;
 
   int acquired = 0;
-  for (int attempt = 0; attempt < 20; ++attempt) {
+  for (int attempt = 0; attempt < 100; ++attempt) {
     if (flock(lock_descriptor, LOCK_EX | LOCK_NB) == 0) {
       acquired = 1;
       break;
@@ -1096,10 +1096,13 @@ int c2t_runtime_acquire(void) {
     /* Verify if another process actually holds the active daemon lock */
     c2t_runtime_status_t status;
     if (state_read(&status) && status.process_id > 0) {
-      if (c2t_runtime_is_c2t_process(status.process_id)) {
-        close(lock_descriptor);
-        lock_descriptor = -1;
-        return 0;
+      if (status.state == C2T_RUNTIME_RUNNING &&
+          c2t_runtime_is_c2t_process(status.process_id)) {
+        if (attempt >= 5) {
+          close(lock_descriptor);
+          lock_descriptor = -1;
+          return 0;
+        }
       }
     }
     sleep_ms(50);
@@ -1696,6 +1699,9 @@ static void *worker_watchdog_func(void *arg) {
 #endif
 
       if (!supervisor_alive && !c2t_runtime_stop_requested()) {
+        supervisor_sleep_ms(100);
+        if (c2t_runtime_stop_requested())
+          break;
         c2t_log_warning(
             "worker",
             "Supervisor process (PID %lu) died or was killed. Restoring supervisor process...",

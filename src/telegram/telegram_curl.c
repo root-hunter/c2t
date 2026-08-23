@@ -17,6 +17,7 @@
 
 #include "../config/config.h"
 #include "../logging/logging.h"
+#include "../runtime/runtime.h"
 #include "c2t_version.h"
 #include "telegram_platform.h"
 
@@ -110,6 +111,19 @@ static void sanitize_response(response_buffer_t *response) {
   }
 }
 
+static int c2t_curl_progress_cb(void *clientp, curl_off_t dltotal,
+                               curl_off_t dlnow, curl_off_t ultotal,
+                               curl_off_t ulnow) {
+  (void)clientp;
+  (void)dltotal;
+  (void)dlnow;
+  (void)ultotal;
+  (void)ulnow;
+  if (c2t_runtime_stop_requested())
+    return 1;
+  return 0;
+}
+
 static CURL *acquire_curl_handle(void) {
   if (!thread_curl_handle) {
     thread_curl_handle = curl_easy_init();
@@ -122,6 +136,9 @@ static CURL *acquire_curl_handle(void) {
     curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPIDLE, 60L);
     curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPINTVL, 60L);
+    curl_easy_setopt(thread_curl_handle, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(thread_curl_handle, CURLOPT_XFERINFOFUNCTION,
+                     (curl_xferinfo_callback)c2t_curl_progress_cb);
     const c2t_config_t *cfg = c2t_config_get();
     if (cfg && cfg->proxy && *cfg->proxy) {
       curl_easy_setopt(thread_curl_handle, CURLOPT_PROXY, cfg->proxy);
