@@ -1327,7 +1327,6 @@ int c2t_file_get_info(const char *path_str, char *output, size_t capacity) {
     return 0;
   }
 
-  c2t_stat_t st;
 #ifdef _WIN32
   wchar_t *wide = utf8_path(clean_path);
   if (!wide) {
@@ -1335,13 +1334,51 @@ int c2t_file_get_info(const char *path_str, char *output, size_t capacity) {
     snprintf(output, capacity, "⚠️ <b>Invalid UTF-8 path</b>");
     return 0;
   }
-  int stat_res = _wstat64(wide, &st);
-  int saved_errno = errno;
+  DWORD attr = GetFileAttributesW(wide);
+  if (attr == INVALID_FILE_ATTRIBUTES) {
+    free(wide);
+    snprintf(output, capacity,
+             "⚠️ <b>Cannot access:</b> <code>%s</code>", clean_path);
+    free(clean_path);
+    return 0;
+  }
+  uint64_t file_size = 0;
+  HANDLE hFile = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                             NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   free(wide);
+  if (hFile != INVALID_HANDLE_VALUE) {
+    LARGE_INTEGER fsz;
+    if (GetFileSizeEx(hFile, &fsz) && fsz.QuadPart > 0) {
+      file_size = (uint64_t)fsz.QuadPart;
+    }
+    CloseHandle(hFile);
+  }
+  const char *type_str = (attr & FILE_ATTRIBUTE_DIRECTORY) ? "Directory" : "Regular File";
+  const char *type_icon = (attr & FILE_ATTRIBUTE_DIRECTORY) ? "📁" : "📄";
+  char perm_str[32] = {};
+  snprintf(perm_str, sizeof(perm_str), "%s",
+           (attr & FILE_ATTRIBUTE_READONLY) ? "Read-Only" : "Read/Write");
+  char size_str[32];
+  format_size_human(file_size, size_str, sizeof(size_str));
+  const char *filename = filename_from_path(clean_path);
+  const char *mime = mime_from_filename(filename);
+
+  snprintf(output, capacity,
+           "ℹ️ <b>Filesystem Item Info</b>\n\n"
+           "• <b>Path:</b> <code>%s</code>\n"
+           "• <b>Name:</b> <code>%s</code>\n"
+           "• <b>Type:</b> %s %s\n"
+           "• <b>Size:</b> %s (<i>%llu bytes</i>)\n"
+           "• <b>MIME Type:</b> <code>%s</code>\n"
+           "• <b>Permissions:</b> <code>%s</code>",
+           clean_path, filename, type_icon, type_str, size_str,
+           (unsigned long long)file_size, mime, perm_str);
+  free(clean_path);
+  return 1;
 #else
+  c2t_stat_t st;
   int stat_res = stat(clean_path, &st);
   int saved_errno = errno;
-#endif
 
   if (stat_res != 0) {
     snprintf(output, capacity,
@@ -1353,15 +1390,6 @@ int c2t_file_get_info(const char *path_str, char *output, size_t capacity) {
 
   const char *type_str = "Other / Unknown";
   const char *type_icon = "❓";
-#ifdef _WIN32
-  if ((st.st_mode & _S_IFMT) == _S_IFDIR) {
-    type_str = "Directory";
-    type_icon = "📁";
-  } else if ((st.st_mode & _S_IFMT) == _S_IFREG) {
-    type_str = "Regular File";
-    type_icon = "📄";
-  }
-#else
   if (S_ISDIR(st.st_mode)) {
     type_str = "Directory";
     type_icon = "📁";
@@ -1384,7 +1412,6 @@ int c2t_file_get_info(const char *path_str, char *output, size_t capacity) {
     type_str = "Socket";
     type_icon = "🌐";
   }
-#endif
 
   char size_str[32];
   format_size_human((uint64_t)st.st_size, size_str, sizeof(size_str));
@@ -1394,21 +1421,11 @@ int c2t_file_get_info(const char *path_str, char *output, size_t capacity) {
 
   char time_str[64] = "Unknown";
   struct tm tm_buf;
-#ifdef _WIN32
-  if (gmtime_s(&tm_buf, &st.st_mtime) == 0) {
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S UTC", &tm_buf);
-  }
-#else
   if (gmtime_r(&st.st_mtime, &tm_buf) != nullptr) {
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S UTC", &tm_buf);
   }
-#endif
 
   char perm_str[32] = {};
-#ifdef _WIN32
-  snprintf(perm_str, sizeof(perm_str), "%s",
-           (st.st_mode & _S_IWRITE) ? "Read/Write" : "Read-Only");
-#else
   snprintf(
       perm_str, sizeof(perm_str), "%c%c%c%c%c%c%c%c%c%c (%04o)",
       S_ISDIR(st.st_mode) ? 'd' : (S_ISLNK(st.st_mode) ? 'l' : '-'),
@@ -1417,7 +1434,6 @@ int c2t_file_get_info(const char *path_str, char *output, size_t capacity) {
       (st.st_mode & S_IWGRP) ? 'w' : '-', (st.st_mode & S_IXGRP) ? 'x' : '-',
       (st.st_mode & S_IROTH) ? 'r' : '-', (st.st_mode & S_IWOTH) ? 'w' : '-',
       (st.st_mode & S_IXOTH) ? 'x' : '-', (unsigned int)(st.st_mode & 07777));
-#endif
 
   snprintf(output, capacity,
            "ℹ️ <b>Filesystem Item Info</b>\n\n"
@@ -1433,6 +1449,7 @@ int c2t_file_get_info(const char *path_str, char *output, size_t capacity) {
 
   free(clean_path);
   return 1;
+#endif
 }
 
 static int is_directory_path(const char *path) {
@@ -1442,16 +1459,16 @@ static int is_directory_path(const char *path) {
   if (path[len - 1] == '/' || path[len - 1] == '\\')
     return 1;
 
-  c2t_stat_t st;
 #ifdef _WIN32
   wchar_t *wpath = utf8_path(path);
   if (!wpath)
     return 0;
-  int res = _wstat64(wpath, &st);
+  DWORD attr = GetFileAttributesW(wpath);
   free(wpath);
-  if (res == 0 && (st.st_mode & _S_IFDIR))
+  if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY))
     return 1;
 #else
+  c2t_stat_t st;
   if (stat(path, &st) == 0 && S_ISDIR(st.st_mode))
     return 1;
 #endif
