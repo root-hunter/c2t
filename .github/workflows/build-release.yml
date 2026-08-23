@@ -265,7 +265,6 @@ jobs:
 
   virustotal-scan:
     name: VirusTotal artifact scan
-    if: ${{ secrets.VT_API_KEY != '' }}
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -302,11 +301,8 @@ jobs:
   release:
     name: Publish GitHub release
     needs: [build, virustotal-scan]
-    if: |
-      always() &&
-      startsWith(github.ref, 'refs/tags/') &&
-      needs.build.result == 'success' &&
-      (needs.virustotal-scan.result == 'success' || needs.virustotal-scan.result == 'skipped')
+    if: startsWith(github.ref, 'refs/tags/')
+
     runs-on: ubuntu-latest
     permissions:
       actions: write

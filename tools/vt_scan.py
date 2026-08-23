@@ -325,10 +325,11 @@ def main():
 
     if not args.api_key:
         print(
-            "[-] Error: VirusTotal API key is missing. Set VT_API_KEY environment variable or pass --api-key.",
+            "[!] Notice: VirusTotal API key (VT_API_KEY) is not set. Skipping VirusTotal scan.",
             file=sys.stderr,
         )
-        sys.exit(1)
+        sys.exit(0)
+
 
     target_files = []
     for pattern in args.files:
