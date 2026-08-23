@@ -39,6 +39,35 @@ static void telegram_unlock(void) {
 #else
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include "../win32/win32_api.h"
+
+static void c2t_InitializeCriticalSection(
+    LPCRITICAL_SECTION lpCriticalSection) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.InitializeCriticalSection)
+    g_c2t_win32.InitializeCriticalSection(lpCriticalSection);
+}
+static void c2t_EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.EnterCriticalSection)
+    g_c2t_win32.EnterCriticalSection(lpCriticalSection);
+}
+static void c2t_LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.LeaveCriticalSection)
+    g_c2t_win32.LeaveCriticalSection(lpCriticalSection);
+}
+static void c2t_Sleep(DWORD dwMilliseconds) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.Sleep)
+    g_c2t_win32.Sleep(dwMilliseconds);
+}
+
+#define InitializeCriticalSection c2t_InitializeCriticalSection
+#define EnterCriticalSection c2t_EnterCriticalSection
+#define LeaveCriticalSection c2t_LeaveCriticalSection
+#define Sleep c2t_Sleep
+
 static CRITICAL_SECTION telegram_mutex;
 static int telegram_mutex_initialized;
 static void telegram_lock(void) {

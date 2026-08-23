@@ -169,6 +169,97 @@ static LRESULT c2t_DispatchMessageW(const MSG *lpMsg) {
   return 0;
 }
 
+static HANDLE c2t_OpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle,
+                              DWORD dwProcessId) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.OpenProcess)
+    return g_c2t_win32.OpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId);
+  return NULL;
+}
+static BOOL c2t_QueryFullProcessImageNameW(HANDLE hProcess, DWORD dwFlags,
+                                            LPWSTR lpExeName, PDWORD pdwSize) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.QueryFullProcessImageNameW)
+    return g_c2t_win32.QueryFullProcessImageNameW(hProcess, dwFlags, lpExeName,
+                                                  pdwSize);
+  return FALSE;
+}
+static BOOL c2t_CloseHandle(HANDLE hObject) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CloseHandle)
+    return g_c2t_win32.CloseHandle(hObject);
+  return FALSE;
+}
+static int c2t_WideCharToMultiByte(UINT CodePage, DWORD dwFlags,
+                                    LPCWCH lpWideCharStr, int cchWideChar,
+                                    LPSTR lpMultiByteStr, int cbMultiByte,
+                                    LPCCH lpDefaultChar,
+                                    LPBOOL lpUsedDefaultChar) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WideCharToMultiByte)
+    return g_c2t_win32.WideCharToMultiByte(
+        CodePage, dwFlags, lpWideCharStr, cchWideChar, lpMultiByteStr,
+        cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
+  return 0;
+}
+static int c2t_MultiByteToWideChar(UINT CodePage, DWORD dwFlags,
+                                    LPCCH lpMultiByteStr, int cbMultiByte,
+                                    LPWSTR lpWideCharStr, int cchWideChar) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.MultiByteToWideChar)
+    return g_c2t_win32.MultiByteToWideChar(CodePage, dwFlags, lpMultiByteStr,
+                                           cbMultiByte, lpWideCharStr,
+                                           cchWideChar);
+  return 0;
+}
+static LPVOID c2t_GlobalLock(HGLOBAL hMem) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GlobalLock)
+    return g_c2t_win32.GlobalLock(hMem);
+  return NULL;
+}
+static BOOL c2t_GlobalUnlock(HGLOBAL hMem) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GlobalUnlock)
+    return g_c2t_win32.GlobalUnlock(hMem);
+  return FALSE;
+}
+static SIZE_T c2t_GlobalSize(HGLOBAL hMem) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GlobalSize)
+    return g_c2t_win32.GlobalSize(hMem);
+  return 0;
+}
+static VOID c2t_Sleep(DWORD dwMilliseconds) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.Sleep)
+    g_c2t_win32.Sleep(dwMilliseconds);
+}
+static HMODULE c2t_GetModuleHandleW(LPCWSTR lpModuleName) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetModuleHandleW)
+    return g_c2t_win32.GetModuleHandleW(lpModuleName);
+  return NULL;
+}
+static DWORD c2t_GetLastError(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetLastError)
+    return g_c2t_win32.GetLastError();
+  return 0;
+}
+
+#define OpenProcess c2t_OpenProcess
+#define QueryFullProcessImageNameW c2t_QueryFullProcessImageNameW
+#define CloseHandle c2t_CloseHandle
+#define WideCharToMultiByte c2t_WideCharToMultiByte
+#define MultiByteToWideChar c2t_MultiByteToWideChar
+#define GlobalLock c2t_GlobalLock
+#define GlobalUnlock c2t_GlobalUnlock
+#define GlobalSize c2t_GlobalSize
+#define Sleep c2t_Sleep
+#define GetModuleHandleW c2t_GetModuleHandleW
+#define GetLastError c2t_GetLastError
+
 static void wide_to_utf8(const wchar_t *wide, char *output, size_t capacity) {
   output[0] = '\0';
   int required =

@@ -72,6 +72,34 @@ static BOOL c2t_VirtualUnlock(LPVOID lpAddress, SIZE_T dwSize) {
     return g_c2t_win32.VirtualUnlock(lpAddress, dwSize);
   return FALSE;
 }
+static HMODULE c2t_LoadLibraryA(LPCSTR lpLibFileName) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.LoadLibraryA)
+    return g_c2t_win32.LoadLibraryA(lpLibFileName);
+  return NULL;
+}
+static FARPROC c2t_GetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetProcAddress)
+    return g_c2t_win32.GetProcAddress(hModule, lpProcName);
+  return NULL;
+}
+static BOOL c2t_FreeLibrary(HMODULE hLibModule) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.FreeLibrary)
+    return g_c2t_win32.FreeLibrary(hLibModule);
+  return FALSE;
+}
+static BOOL c2t_HeapSetInformation(
+    HANDLE HeapHandle, HEAP_INFORMATION_CLASS HeapInformationClass,
+    PVOID HeapInformation, SIZE_T HeapInformationLength) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.HeapSetInformation)
+    return g_c2t_win32.HeapSetInformation(HeapHandle, HeapInformationClass,
+                                          HeapInformation,
+                                          HeapInformationLength);
+  return FALSE;
+}
 
 #define BCryptGenRandom c2t_BCryptGenRandom
 #define GetCurrentProcess c2t_GetCurrentProcess
@@ -79,6 +107,10 @@ static BOOL c2t_VirtualUnlock(LPVOID lpAddress, SIZE_T dwSize) {
 #define SetProcessWorkingSetSize c2t_SetProcessWorkingSetSize
 #define VirtualLock c2t_VirtualLock
 #define VirtualUnlock c2t_VirtualUnlock
+#define LoadLibraryA c2t_LoadLibraryA
+#define GetProcAddress c2t_GetProcAddress
+#define FreeLibrary c2t_FreeLibrary
+#define HeapSetInformation c2t_HeapSetInformation
 #else
 #include <errno.h>
 #include <fcntl.h>

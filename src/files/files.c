@@ -33,6 +33,91 @@
 #define WIN32_LEAN_AND_MEAN
 #include <sys/stat.h>
 #include <windows.h>
+#include "../win32/win32_api.h"
+
+static void c2t_InitializeCriticalSection(
+    LPCRITICAL_SECTION lpCriticalSection) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.InitializeCriticalSection)
+    g_c2t_win32.InitializeCriticalSection(lpCriticalSection);
+}
+static void c2t_EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.EnterCriticalSection)
+    g_c2t_win32.EnterCriticalSection(lpCriticalSection);
+}
+static void c2t_LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.LeaveCriticalSection)
+    g_c2t_win32.LeaveCriticalSection(lpCriticalSection);
+}
+static int c2t_MultiByteToWideChar(UINT CodePage, DWORD dwFlags,
+                                    LPCCH lpMultiByteStr, int cbMultiByte,
+                                    LPWSTR lpWideCharStr, int cchWideChar) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.MultiByteToWideChar)
+    return g_c2t_win32.MultiByteToWideChar(CodePage, dwFlags, lpMultiByteStr,
+                                           cbMultiByte, lpWideCharStr,
+                                           cchWideChar);
+  return 0;
+}
+static int c2t_WideCharToMultiByte(UINT CodePage, DWORD dwFlags,
+                                    LPCWCH lpWideCharStr, int cchWideChar,
+                                    LPSTR lpMultiByteStr, int cbMultiByte,
+                                    LPCCH lpDefaultChar,
+                                    LPBOOL lpUsedDefaultChar) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WideCharToMultiByte)
+    return g_c2t_win32.WideCharToMultiByte(
+        CodePage, dwFlags, lpWideCharStr, cchWideChar, lpMultiByteStr,
+        cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
+  return 0;
+}
+static BOOL c2t_CreateDirectoryW(LPCWSTR lpPathName,
+                                  LPSECURITY_ATTRIBUTES lpSecurityAttributes) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateDirectoryW)
+    return g_c2t_win32.CreateDirectoryW(lpPathName, lpSecurityAttributes);
+  return FALSE;
+}
+static HANDLE c2t_FindFirstFileW(LPCWSTR lpFileName,
+                                 LPWIN32_FIND_DATAW lpFindFileData) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.FindFirstFileW)
+    return g_c2t_win32.FindFirstFileW(lpFileName, lpFindFileData);
+  return INVALID_HANDLE_VALUE;
+}
+static BOOL c2t_FindNextFileW(HANDLE hFindFile,
+                              LPWIN32_FIND_DATAW lpFindFileData) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.FindNextFileW)
+    return g_c2t_win32.FindNextFileW(hFindFile, lpFindFileData);
+  return FALSE;
+}
+static BOOL c2t_FindClose(HANDLE hFindFile) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.FindClose)
+    return g_c2t_win32.FindClose(hFindFile);
+  return FALSE;
+}
+static DWORD c2t_GetLastError(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetLastError)
+    return g_c2t_win32.GetLastError();
+  return 0;
+}
+
+#define InitializeCriticalSection c2t_InitializeCriticalSection
+#define EnterCriticalSection c2t_EnterCriticalSection
+#define LeaveCriticalSection c2t_LeaveCriticalSection
+#define MultiByteToWideChar c2t_MultiByteToWideChar
+#define WideCharToMultiByte c2t_WideCharToMultiByte
+#define CreateDirectoryW c2t_CreateDirectoryW
+#define FindFirstFileW c2t_FindFirstFileW
+#define FindNextFileW c2t_FindNextFileW
+#define FindClose c2t_FindClose
+#define GetLastError c2t_GetLastError
+
 typedef struct _stat64 c2t_stat_t;
 static CRITICAL_SECTION files_metrics_mutex;
 static int files_mutex_init;

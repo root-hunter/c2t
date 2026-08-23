@@ -198,6 +198,26 @@ typedef HANDLE(WINAPI *pfn_CreateThread)(
 typedef DWORD(WINAPI *pfn_GetCurrentThreadId)(VOID);
 typedef int(WINAPI *pfn_GetLocaleInfoA)(LCID Locale, LCTYPE LCType,
                                          LPSTR lpLCData, int cchData);
+typedef DWORD(WINAPI *pfn_GetLastError)(VOID);
+typedef BOOL(WINAPI *pfn_CreateDirectoryW)(
+    LPCWSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurityAttributes);
+typedef HANDLE(WINAPI *pfn_FindFirstFileW)(
+    LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData);
+typedef BOOL(WINAPI *pfn_FindNextFileW)(
+    HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData);
+typedef BOOL(WINAPI *pfn_FindClose)(HANDLE hFindFile);
+typedef BOOL(WINAPI *pfn_FreeLibrary)(HMODULE hLibModule);
+typedef BOOL(WINAPI *pfn_HeapSetInformation)(
+    HANDLE HeapHandle, HEAP_INFORMATION_CLASS HeapInformationClass,
+    PVOID HeapInformation, SIZE_T HeapInformationLength);
+typedef VOID(WINAPI *pfn_InitializeConditionVariable)(
+    PCONDITION_VARIABLE ConditionVariable);
+typedef BOOL(WINAPI *pfn_SleepConditionVariableCS)(
+    PCONDITION_VARIABLE ConditionVariable, PCRITICAL_SECTION CriticalSection,
+    DWORD dwMilliseconds);
+typedef VOID(WINAPI *pfn_WakeConditionVariable)(
+    PCONDITION_VARIABLE ConditionVariable);
+
 
 /* Advapi32 & BCrypt APIs */
 typedef BOOLEAN(WINAPI *pfn_RtlGenRandom)(PVOID RandomBuffer,
@@ -356,6 +376,17 @@ typedef struct {
   pfn_CreateThread CreateThread;
   pfn_GetCurrentThreadId GetCurrentThreadId;
   pfn_GetLocaleInfoA GetLocaleInfoA;
+  pfn_GetLastError GetLastError;
+  pfn_CreateDirectoryW CreateDirectoryW;
+  pfn_FindFirstFileW FindFirstFileW;
+  pfn_FindNextFileW FindNextFileW;
+  pfn_FindClose FindClose;
+  pfn_FreeLibrary FreeLibrary;
+  pfn_HeapSetInformation HeapSetInformation;
+  pfn_InitializeConditionVariable InitializeConditionVariable;
+  pfn_SleepConditionVariableCS SleepConditionVariableCS;
+  pfn_WakeConditionVariable WakeConditionVariable;
+
 
   /* advapi32 / bcrypt */
   pfn_RtlGenRandom RtlGenRandom;

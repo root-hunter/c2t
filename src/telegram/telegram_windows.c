@@ -141,6 +141,13 @@ static int c2t_MultiByteToWideChar(UINT CodePage, DWORD dwFlags,
   return 0;
 }
 
+static DWORD c2t_GetLastError(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetLastError)
+    return g_c2t_win32.GetLastError();
+  return 0;
+}
+
 #define WinHttpOpen c2t_WinHttpOpen
 #define WinHttpConnect c2t_WinHttpConnect
 #define WinHttpOpenRequest c2t_WinHttpOpenRequest
@@ -153,6 +160,7 @@ static int c2t_MultiByteToWideChar(UINT CodePage, DWORD dwFlags,
 #define WinHttpCloseHandle c2t_WinHttpCloseHandle
 #define WinHttpSetTimeouts c2t_WinHttpSetTimeouts
 #define MultiByteToWideChar c2t_MultiByteToWideChar
+#define GetLastError c2t_GetLastError
 
 static HINTERNET session;
 static HINTERNET connection;

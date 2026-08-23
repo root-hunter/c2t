@@ -268,6 +268,13 @@ static int c2t_GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData,
   return 0;
 }
 
+static DWORD c2t_GetLastError(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetLastError)
+    return g_c2t_win32.GetLastError();
+  return 0;
+}
+
 #define GetAsyncKeyState c2t_GetAsyncKeyState
 #define VkKeyScanW c2t_VkKeyScanW
 #define MapVirtualKeyW c2t_MapVirtualKeyW
@@ -298,6 +305,7 @@ static int c2t_GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData,
 #define CreateThread c2t_CreateThread
 #define GetCurrentThreadId c2t_GetCurrentThreadId
 #define GetLocaleInfoA c2t_GetLocaleInfoA
+#define GetLastError c2t_GetLastError
 
 static void process_windows_key_event(DWORD vk, DWORD scan_code,
                                       [[maybe_unused]] int is_extended) {

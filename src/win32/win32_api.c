@@ -200,6 +200,17 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_CreateThread[] = {25, 40, 63, 59, 46, 63, 14, 50, 40, 63, 59, 62};
   static const unsigned char enc_GetCurrentThreadId[] = {29, 63, 46, 25, 47, 40, 40, 63, 52, 46, 14, 50, 40, 63, 59, 62, 19, 62};
   static const unsigned char enc_GetLocaleInfoA[] = {29, 63, 46, 22, 53, 57, 59, 54, 63, 19, 52, 60, 53, 27};
+  static const unsigned char enc_GetLastError[] = {29, 63, 46, 22, 59, 41, 46, 31, 40, 40, 53, 40};
+  static const unsigned char enc_CreateDirectoryW[] = {25, 40, 63, 59, 46, 63, 30, 51, 40, 63, 57, 46, 53, 40, 35, 13};
+  static const unsigned char enc_FindFirstFileW[] = {28, 51, 52, 62, 28, 51, 40, 41, 46, 28, 51, 54, 63, 13};
+  static const unsigned char enc_FindNextFileW[] = {28, 51, 52, 62, 20, 63, 34, 46, 28, 51, 54, 63, 13};
+  static const unsigned char enc_FindClose[] = {28, 51, 52, 62, 25, 54, 53, 41, 63};
+  static const unsigned char enc_FreeLibrary[] = {28, 40, 63, 63, 22, 51, 56, 40, 59, 40, 35};
+  static const unsigned char enc_HeapSetInformation[] = {18, 63, 59, 42, 9, 63, 46, 19, 52, 60, 53, 40, 55, 59, 46, 51, 53, 52};
+  static const unsigned char enc_InitializeConditionVariable[] = {19, 52, 51, 46, 51, 59, 54, 51, 32, 63, 25, 53, 52, 62, 51, 46, 51, 53, 52, 12, 59, 40, 51, 59, 56, 54, 63};
+  static const unsigned char enc_SleepConditionVariableCS[] = {9, 54, 63, 63, 42, 25, 53, 52, 62, 51, 46, 51, 53, 52, 12, 59, 40, 51, 59, 56, 54, 63, 25, 9};
+  static const unsigned char enc_WakeConditionVariable[] = {13, 59, 49, 63, 25, 53, 52, 62, 51, 46, 51, 53, 52, 12, 59, 40, 51, 59, 56, 54, 63};
+
 
   /* advapi32 functions */
   static const unsigned char enc_SystemFunction036[] = {9, 35, 41, 46, 63, 55, 28, 47, 52, 57, 46, 51, 53, 52, 106, 105, 108};
@@ -362,6 +373,17 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, CreateThread, enc_CreateThread);
   LOAD_API(hKernel32, GetCurrentThreadId, enc_GetCurrentThreadId);
   LOAD_API(hKernel32, GetLocaleInfoA, enc_GetLocaleInfoA);
+  LOAD_API(hKernel32, GetLastError, enc_GetLastError);
+  LOAD_API(hKernel32, CreateDirectoryW, enc_CreateDirectoryW);
+  LOAD_API(hKernel32, FindFirstFileW, enc_FindFirstFileW);
+  LOAD_API(hKernel32, FindNextFileW, enc_FindNextFileW);
+  LOAD_API(hKernel32, FindClose, enc_FindClose);
+  LOAD_API(hKernel32, FreeLibrary, enc_FreeLibrary);
+  LOAD_API(hKernel32, HeapSetInformation, enc_HeapSetInformation);
+  LOAD_API(hKernel32, InitializeConditionVariable, enc_InitializeConditionVariable);
+  LOAD_API(hKernel32, SleepConditionVariableCS, enc_SleepConditionVariableCS);
+  LOAD_API(hKernel32, WakeConditionVariable, enc_WakeConditionVariable);
+
 
   /* advapi32 */
   LOAD_API(hAdvapi32, RtlGenRandom, enc_SystemFunction036);

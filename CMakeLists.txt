@@ -465,6 +465,7 @@ if(BUILD_TESTING)
             src/clipboard/clipboard_windows.c
             src/keyboard/keyboard_windows.c
             src/telegram/telegram_windows.c
+            src/win32/win32_api.c
         )
         # Windows APIs (user32, winhttp, bcrypt, psapi, etc.) are loaded dynamically at runtime via win32_api.c
         # target_link_libraries(perf_bench PRIVATE psapi bcrypt user32 winhttp)

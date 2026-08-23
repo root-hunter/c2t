@@ -55,9 +55,60 @@ static void c2t_LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
     g_c2t_win32.LeaveCriticalSection(lpCriticalSection);
 }
 
+static HANDLE c2t_CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes,
+                               SIZE_T dwStackSize,
+                               LPTHREAD_START_ROUTINE lpStartAddress,
+                               LPVOID lpParameter, DWORD dwCreationFlags,
+                               LPDWORD lpThreadId) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateThread)
+    return g_c2t_win32.CreateThread(lpThreadAttributes, dwStackSize,
+                                    lpStartAddress, lpParameter,
+                                    dwCreationFlags, lpThreadId);
+  return NULL;
+}
+static DWORD c2t_WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WaitForSingleObject)
+    return g_c2t_win32.WaitForSingleObject(hHandle, dwMilliseconds);
+  return WAIT_FAILED;
+}
+static BOOL c2t_CloseHandle(HANDLE hObject) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CloseHandle)
+    return g_c2t_win32.CloseHandle(hObject);
+  return FALSE;
+}
+static VOID c2t_InitializeConditionVariable(
+    PCONDITION_VARIABLE ConditionVariable) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.InitializeConditionVariable)
+    g_c2t_win32.InitializeConditionVariable(ConditionVariable);
+}
+static BOOL c2t_SleepConditionVariableCS(
+    PCONDITION_VARIABLE ConditionVariable, PCRITICAL_SECTION CriticalSection,
+    DWORD dwMilliseconds) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.SleepConditionVariableCS)
+    return g_c2t_win32.SleepConditionVariableCS(ConditionVariable,
+                                                 CriticalSection, dwMilliseconds);
+  return FALSE;
+}
+static VOID c2t_WakeConditionVariable(PCONDITION_VARIABLE ConditionVariable) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WakeConditionVariable)
+    g_c2t_win32.WakeConditionVariable(ConditionVariable);
+}
+
 #define InitializeCriticalSection c2t_InitializeCriticalSection
 #define EnterCriticalSection c2t_EnterCriticalSection
 #define LeaveCriticalSection c2t_LeaveCriticalSection
+#define CreateThread c2t_CreateThread
+#define WaitForSingleObject c2t_WaitForSingleObject
+#define CloseHandle c2t_CloseHandle
+#define InitializeConditionVariable c2t_InitializeConditionVariable
+#define SleepConditionVariableCS c2t_SleepConditionVariableCS
+#define WakeConditionVariable c2t_WakeConditionVariable
 #endif
 
 #define MAX_LOG_READ_BYTES (5U * 1024U * 1024U)

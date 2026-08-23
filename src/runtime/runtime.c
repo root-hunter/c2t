@@ -208,6 +208,57 @@ static DWORD c2t_GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename,
   return (HRESULT)0x80004005L; /* E_FAIL */
 }
 
+static BOOL c2t_ReleaseMutex(HANDLE hMutex) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.ReleaseMutex)
+    return g_c2t_win32.ReleaseMutex(hMutex);
+  return FALSE;
+}
+static HANDLE c2t_OpenMutexA(DWORD dwDesiredAccess, BOOL bInheritHandle,
+                             LPCSTR lpName) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.OpenMutexA)
+    return g_c2t_win32.OpenMutexA(dwDesiredAccess, bInheritHandle, lpName);
+  return NULL;
+}
+static HANDLE c2t_OpenEventA(DWORD dwDesiredAccess, BOOL bInheritHandle,
+                             LPCSTR lpName) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.OpenEventA)
+    return g_c2t_win32.OpenEventA(dwDesiredAccess, bInheritHandle, lpName);
+  return NULL;
+}
+static ULONGLONG c2t_GetTickCount64(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetTickCount64)
+    return g_c2t_win32.GetTickCount64();
+  return 0;
+}
+static BOOL c2t_ShowWindow(HWND hWnd, int nCmdShow) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.ShowWindow)
+    return g_c2t_win32.ShowWindow(hWnd, nCmdShow);
+  return FALSE;
+}
+static HANDLE c2t_CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes,
+                               SIZE_T dwStackSize,
+                               LPTHREAD_START_ROUTINE lpStartAddress,
+                               LPVOID lpParameter, DWORD dwCreationFlags,
+                               LPDWORD lpThreadId) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateThread)
+    return g_c2t_win32.CreateThread(lpThreadAttributes, dwStackSize,
+                                    lpStartAddress, lpParameter,
+                                    dwCreationFlags, lpThreadId);
+  return NULL;
+}
+static DWORD c2t_GetLastError(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetLastError)
+    return g_c2t_win32.GetLastError();
+  return 0;
+}
+
 #define Sleep c2t_Sleep
 #define OpenProcess c2t_OpenProcess
 #define QueryFullProcessImageNameA c2t_QueryFullProcessImageNameA
@@ -232,6 +283,14 @@ static DWORD c2t_GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename,
 #define TerminateProcess c2t_TerminateProcess
 #define GetModuleFileNameA c2t_GetModuleFileNameA
 #define SHGetFolderPathW c2t_SHGetFolderPathW
+#define ReleaseMutex c2t_ReleaseMutex
+#define OpenMutexA c2t_OpenMutexA
+#define OpenEventA c2t_OpenEventA
+#define GetTickCount64 c2t_GetTickCount64
+#define ShowWindow c2t_ShowWindow
+#define CreateThread c2t_CreateThread
+#define GetLastError c2t_GetLastError
+#define getpid GetCurrentProcessId
 #else
 #include <fcntl.h>
 #include <pthread.h>

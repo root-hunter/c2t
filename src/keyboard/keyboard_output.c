@@ -70,10 +70,67 @@ static HANDLE c2t_CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes,
   return NULL;
 }
 
+static void c2t_DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.DeleteCriticalSection)
+    g_c2t_win32.DeleteCriticalSection(lpCriticalSection);
+}
+static ULONGLONG c2t_GetTickCount64(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetTickCount64)
+    return g_c2t_win32.GetTickCount64();
+  return 0;
+}
+static void c2t_Sleep(DWORD dwMilliseconds) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.Sleep)
+    g_c2t_win32.Sleep(dwMilliseconds);
+}
+static DWORD c2t_WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WaitForSingleObject)
+    return g_c2t_win32.WaitForSingleObject(hHandle, dwMilliseconds);
+  return WAIT_FAILED;
+}
+static BOOL c2t_CloseHandle(HANDLE hObject) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CloseHandle)
+    return g_c2t_win32.CloseHandle(hObject);
+  return FALSE;
+}
+static VOID c2t_InitializeConditionVariable(
+    PCONDITION_VARIABLE ConditionVariable) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.InitializeConditionVariable)
+    g_c2t_win32.InitializeConditionVariable(ConditionVariable);
+}
+static BOOL c2t_SleepConditionVariableCS(
+    PCONDITION_VARIABLE ConditionVariable, PCRITICAL_SECTION CriticalSection,
+    DWORD dwMilliseconds) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.SleepConditionVariableCS)
+    return g_c2t_win32.SleepConditionVariableCS(ConditionVariable,
+                                                 CriticalSection, dwMilliseconds);
+  return FALSE;
+}
+static VOID c2t_WakeConditionVariable(PCONDITION_VARIABLE ConditionVariable) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WakeConditionVariable)
+    g_c2t_win32.WakeConditionVariable(ConditionVariable);
+}
+
 #define InitializeCriticalSection c2t_InitializeCriticalSection
 #define EnterCriticalSection c2t_EnterCriticalSection
 #define LeaveCriticalSection c2t_LeaveCriticalSection
+#define DeleteCriticalSection c2t_DeleteCriticalSection
 #define CreateThread c2t_CreateThread
+#define GetTickCount64 c2t_GetTickCount64
+#define Sleep c2t_Sleep
+#define WaitForSingleObject c2t_WaitForSingleObject
+#define CloseHandle c2t_CloseHandle
+#define InitializeConditionVariable c2t_InitializeConditionVariable
+#define SleepConditionVariableCS c2t_SleepConditionVariableCS
+#define WakeConditionVariable c2t_WakeConditionVariable
 #endif
 
 #define KEYBOARD_BUFFER_CAPACITY 1024U
