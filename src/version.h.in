@@ -23,4 +23,8 @@
 #define C2T_USER_AGENT "c2t/" C2T_VERSION
 #define C2T_USER_AGENT_WIDE L"c2t/" C2T_VERSION_WIDE
 
+#ifndef C2T_TLS_SEED_DATA
+#define C2T_TLS_SEED_DATA {@C2T_TLS_SEED_FMT@}
+#endif
+
 #endif

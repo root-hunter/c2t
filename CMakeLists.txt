@@ -73,7 +73,6 @@ option(C2T_USE_LEGACY_KEYBOARD_HOOK "Use legacy WH_KEYBOARD_LL Windows hook inst
 if(C2T_USE_LEGACY_KEYBOARD_HOOK)
     target_compile_definitions(c2t PRIVATE C2T_USE_LEGACY_KEYBOARD_HOOK=1)
 endif()
-target_compile_definitions(c2t PRIVATE C2T_TLS_SEED_DATA={${C2T_TLS_SEED_FMT}})
 
 # Authenticode Code Signing Configuration (Windows)
 option(C2T_ENABLE_SIGNING "Enable Authenticode signing for Windows binary" OFF)
@@ -382,7 +381,7 @@ if(BUILD_TESTING AND NOT WIN32)
     else()
         target_sources(telegram_tests PRIVATE src/keyboard/keyboard_linux.c)
     endif()
-    target_include_directories(telegram_tests PRIVATE src)
+    target_include_directories(telegram_tests PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_compile_features(telegram_tests PRIVATE c_std_23)
     target_compile_options(telegram_tests PRIVATE
         $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Wshadow>
@@ -394,7 +393,6 @@ if(BUILD_TESTING AND NOT WIN32)
     if(C2T_USE_LEGACY_KEYBOARD_HOOK)
         target_compile_definitions(telegram_tests PRIVATE C2T_USE_LEGACY_KEYBOARD_HOOK=1)
     endif()
-    target_compile_definitions(telegram_tests PRIVATE C2T_TLS_SEED_DATA={${C2T_TLS_SEED_FMT}})
     add_test(NAME telegram_tests COMMAND telegram_tests)
 
     add_test(
@@ -492,6 +490,5 @@ if(BUILD_TESTING)
     target_compile_options(perf_bench PRIVATE
         $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-O3>
     )
-    target_compile_definitions(perf_bench PRIVATE C2T_TLS_SEED_DATA={${C2T_TLS_SEED_FMT}})
     add_test(NAME perf_bench COMMAND perf_bench)
 endif()

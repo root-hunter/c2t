@@ -16,6 +16,7 @@
  */
 
 #include "runtime.h"
+#include "c2t_version.h"
 #include "../config/config.h"
 #include "../crypto/crypto.h"
 #include "../logging/logging.h"
