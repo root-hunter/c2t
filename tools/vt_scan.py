@@ -43,7 +43,8 @@ class VirusTotalScanner:
     ) -> tuple[int, dict]:
         if headers is None:
             headers = {}
-        headers["x-api-key"] = self.api_key
+        headers["x-apikey"] = self.api_key
+        headers["X-Apikey"] = self.api_key
         headers["Accept"] = "application/json"
 
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
