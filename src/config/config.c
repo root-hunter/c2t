@@ -271,6 +271,10 @@ const char *c2t_config_apply_arguments(int argc, char **argv)
         } else if (strcmp(argv[index], "--auto-restart") == 0 ||
                    strcmp(argv[index], "--auto-respawn") == 0) {
             config.auto_restart = 1;
+        } else if (strcmp(argv[index], "--no-auto-restart") == 0 ||
+                   strcmp(argv[index], "--no-supervisor") == 0 ||
+                   strcmp(argv[index], "--single-process") == 0) {
+            config.auto_restart = 0;
         } else if (strcmp(argv[index], "--hide-console") == 0 ||
                    strcmp(argv[index], "--hidden") == 0 ||
                    strcmp(argv[index], "-H") == 0) {

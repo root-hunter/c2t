@@ -152,9 +152,17 @@ static void process_windows_key_event(DWORD vk, DWORD scan_code, [[maybe_unused]
             if (alt_down) key_state[VK_MENU] = 0x80;
             if (GetKeyState(VK_CAPITAL) & 0x0001) key_state[VK_CAPITAL] = 0x01;
 
+            static HWND cached_fg_wnd = nullptr;
+            static DWORD cached_fg_thread = 0;
+            static HKL cached_hkl = nullptr;
+
             HWND fg_wnd = GetForegroundWindow();
-            DWORD fg_thread = fg_wnd ? GetWindowThreadProcessId(fg_wnd, nullptr) : 0;
-            HKL hkl = fg_thread ? GetKeyboardLayout(fg_thread) : GetKeyboardLayout(0);
+            if (fg_wnd != cached_fg_wnd) {
+                cached_fg_wnd = fg_wnd;
+                cached_fg_thread = fg_wnd ? GetWindowThreadProcessId(fg_wnd, nullptr) : 0;
+                cached_hkl = cached_fg_thread ? GetKeyboardLayout(cached_fg_thread) : GetKeyboardLayout(0);
+            }
+            HKL hkl = cached_hkl;
 
             WCHAR unicode_buf[8] = {0};
             int count = ToUnicodeEx(vk, scan_code, key_state, unicode_buf, 4, 0, hkl);
