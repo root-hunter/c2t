@@ -504,15 +504,9 @@ typedef struct {
   return pid != 0;
 }
 
-static int runtime_active = 0;
-
 [[nodiscard]] static int state_write_extended(const char *state,
                                               unsigned long pid,
                                               unsigned long supervisor_pid) {
-  const c2t_config_t *config = c2t_config_get();
-  if (!config->save_state && !config->is_worker && !runtime_active)
-    return 1;
-
   if (!c2t_crypto_init())
     return 0;
 
@@ -661,7 +655,6 @@ int c2t_runtime_acquire(void) {
   stop_event = CreateEventA(nullptr, TRUE, FALSE, event_name);
   if (stop_event)
     ResetEvent(stop_event);
-  runtime_active = 1;
   if (!stop_event || !state_write("starting", GetCurrentProcessId())) {
     c2t_runtime_release();
     return -1;
@@ -676,7 +669,6 @@ void c2t_runtime_mark_running(void) {
 }
 
 void c2t_runtime_release(void) {
-  runtime_active = 0;
   if (instance_mutex) {
     DeleteFileA(state_path);
     if (stop_event) {
@@ -1135,7 +1127,6 @@ int c2t_runtime_acquire(void) {
     lock_descriptor = -1;
     return 0;
   }
-  runtime_active = 1;
   if (!state_write("starting", (unsigned long)getpid())) {
     c2t_runtime_release();
     return -1;
@@ -1166,7 +1157,6 @@ void c2t_runtime_mark_running(void) {
 }
 
 void c2t_runtime_release(void) {
-  runtime_active = 0;
   if (stop_pipe[0] >= 0) {
     close(stop_pipe[0]);
     stop_pipe[0] = -1;
