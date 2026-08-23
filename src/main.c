@@ -66,6 +66,7 @@ typedef enum {
 } command_t;
 
 static void print_usage(FILE *stream) {
+  
   fprintf(
       stream,
       "Usage: c2t <command> [options]\n"
