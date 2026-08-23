@@ -285,7 +285,7 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Scan main x86_64 artifacts with VirusTotal
+      - name: Scan Windows executable with VirusTotal
         env:
           VT_API_KEY: ${{ secrets.VT_API_KEY }}
           GH_TOKEN: ${{ github.token }}
@@ -293,20 +293,31 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Scan 1 main representative artifact per OS (x86_64)
+          # Scan ONLY the Windows .exe binary
           targets=()
-          for p in dist/*linux-glibc-x86_64* dist/*windows-x86_64* dist/*macos-x86_64*; do
+          for p in dist/*windows*.zip dist/*windows*.exe; do
             if [[ -f "$p" ]]; then
-              targets+=("$p")
+              if [[ "$p" == *.zip ]]; then
+                unzip -o "$p" -d dist/win_unpacked
+                exe_file="$(find dist/win_unpacked -type f -name "*.exe" | head -n 1)"
+                if [[ -n "${exe_file}" ]]; then
+                  targets+=("${exe_file}")
+                else
+                  targets+=("$p")
+                fi
+              else
+                targets+=("$p")
+              fi
             fi
           done
 
           if [[ ${#targets[@]} -eq 0 ]]; then
-            echo "[!] No x86_64 artifacts found to scan."
+            echo "[!] No Windows executable found to scan."
             exit 0
           fi
 
           python3 tools/vt_scan.py "${targets[@]}" --output-markdown virustotal-report.md || true
+
 
           # If on a release tag, append VT report to GitHub Release notes asynchronously
           if [[ "${GITHUB_REF}" == refs/tags/* && -f virustotal-report.md ]]; then
