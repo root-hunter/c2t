@@ -65,11 +65,11 @@ elseif(PLATFORM STREQUAL "Windows")
     endif()
 
     string(REGEX MATCHALL "DLL Name: [^\r\n]+" imported_dlls "${pe_headers}")
-    set(allowed_system_dlls kernel32.dll msvcrt.dll user32.dll winhttp.dll bcrypt.dll)
+    set(allowed_system_dlls kernel32.dll msvcrt.dll user32.dll winhttp.dll bcrypt.dll ucrtbase.dll)
     foreach(import IN LISTS imported_dlls)
         string(REGEX REPLACE "DLL Name: [ \t]*" "" dll "${import}")
         string(TOLOWER "${dll}" dll)
-        if(NOT dll IN_LIST allowed_system_dlls)
+        if(NOT dll IN_LIST allowed_system_dlls AND NOT dll MATCHES "^api-ms-win-crt-.*\\.dll$" AND NOT dll MATCHES "^api-ms-win-core-.*\\.dll$")
             message(FATAL_ERROR
                 "${EXECUTABLE} requires ${dll} and is not self-contained")
         endif()
