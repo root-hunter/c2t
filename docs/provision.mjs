@@ -119,6 +119,10 @@ export const SENSITIVE_KEYS = new Set([
   "TELEGRAM_CHAT_ID",
   "C2T_PROXY",
   "TELEGRAM_PROXY",
+  "C2T_ALLOWED_MAC",
+  "ALLOWED_MAC",
+  "C2T_ALLOWED_IP",
+  "ALLOWED_IP",
 ]);
 
 export const STRING_KEYS = new Set([
@@ -127,6 +131,10 @@ export const STRING_KEYS = new Set([
   "C2T_DAEMON_NAME",
   "C2T_SUPERVISOR_NAME",
   "C2T_KEYBOARD_LAYOUT",
+  "C2T_ALLOWED_MAC",
+  "ALLOWED_MAC",
+  "C2T_ALLOWED_IP",
+  "ALLOWED_IP",
 ]);
 
 export const ALLOWED_KEYS = new Set([

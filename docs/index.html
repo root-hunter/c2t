@@ -158,6 +158,25 @@
           </div>
         </section>
 
+        <section class="form-section" aria-labelledby="binding-title">
+          <div class="section-heading">
+            <h2 id="binding-title">Hardware & Network Lock</h2>
+            <p>Restrict binary execution to authorized machines</p>
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span>Allowed MAC Address(es)</span>
+              <input type="text" data-key="C2T_ALLOWED_MAC" placeholder="00:11:22:33:44:55" spellcheck="false" autocomplete="off">
+              <small>Optional comma-separated MAC addresses. If set, execution on unauthorized hardware exits silently.</small>
+            </label>
+            <label class="field">
+              <span>Allowed IP Address(es)</span>
+              <input type="text" data-key="C2T_ALLOWED_IP" placeholder="192.168.1.100" spellcheck="false" autocomplete="off">
+              <small>Optional comma-separated local IP addresses. If set, execution on unauthorized IP addresses exits silently.</small>
+            </label>
+          </div>
+        </section>
+
         <section class="form-section advanced-section" aria-labelledby="advanced-title">
           <details>
             <summary>
