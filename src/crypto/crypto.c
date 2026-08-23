@@ -191,6 +191,11 @@ static void chacha20_init_state(uint32_t state[16],
     state[15] = load32_le(nonce + 8);
 }
 
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#include <emmintrin.h>
+#define C2T_HAS_SSE2 1
+#endif
+
 static void chacha20_crypt(const unsigned char key[32],
                            const unsigned char nonce[12],
                            uint32_t counter,
@@ -211,6 +216,24 @@ static void chacha20_crypt(const unsigned char key[32],
             store32_le(keystream + i * 4, block[i]);
 
         size_t block_bytes = len - offset < 64 ? len - offset : 64;
+#if defined(C2T_HAS_SSE2)
+        if (block_bytes == 64) {
+            __m128i k0 = _mm_loadu_si128((const __m128i *)(const void *)(keystream + 0));
+            __m128i k1 = _mm_loadu_si128((const __m128i *)(const void *)(keystream + 16));
+            __m128i k2 = _mm_loadu_si128((const __m128i *)(const void *)(keystream + 32));
+            __m128i k3 = _mm_loadu_si128((const __m128i *)(const void *)(keystream + 48));
+
+            __m128i i0 = _mm_loadu_si128((const __m128i *)(const void *)(input + offset + 0));
+            __m128i i1 = _mm_loadu_si128((const __m128i *)(const void *)(input + offset + 16));
+            __m128i i2 = _mm_loadu_si128((const __m128i *)(const void *)(input + offset + 32));
+            __m128i i3 = _mm_loadu_si128((const __m128i *)(const void *)(input + offset + 48));
+
+            _mm_storeu_si128((__m128i *)(void *)(output + offset + 0), _mm_xor_si128(i0, k0));
+            _mm_storeu_si128((__m128i *)(void *)(output + offset + 16), _mm_xor_si128(i1, k1));
+            _mm_storeu_si128((__m128i *)(void *)(output + offset + 32), _mm_xor_si128(i2, k2));
+            _mm_storeu_si128((__m128i *)(void *)(output + offset + 48), _mm_xor_si128(i3, k3));
+        } else
+#endif
         if (block_bytes == 64) {
             for (size_t i = 0; i < 8; ++i) {
                 uint64_t in_word, key_word;

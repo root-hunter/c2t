@@ -33,6 +33,7 @@ add_executable(c2t
     src/clipboard/clipboard_output.c
     src/config/config.c
     src/config/embedded_config.c
+    src/crypto/arena.c
     src/crypto/crypto.c
     src/files/files.c
     src/keyboard/keyboard_output.c
@@ -333,6 +334,7 @@ if(BUILD_TESTING AND NOT WIN32)
         src/clipboard/clipboard_output.c
         src/config/config.c
         src/config/embedded_config.c
+        src/crypto/arena.c
         src/crypto/crypto.c
         src/files/files.c
         src/keyboard/keyboard_output.c

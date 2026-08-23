@@ -17,6 +17,7 @@
 
 #include "clipboard_output.h"
 #include "../config/config.h"
+#include "../crypto/arena.h"
 #include "../crypto/crypto.h"
 #include "../files/files.h"
 #include "../logging/logging.h"
@@ -67,6 +68,7 @@ static int worker_started;
 static volatile int clipboard_paused;
 static uint64_t total_clipboard_bytes;
 static uint64_t total_clipboard_events;
+static c2t_arena_t clipboard_arena;
 
 #ifdef _WIN32
 static CRITICAL_SECTION queue_mutex;
@@ -260,9 +262,18 @@ static void *delivery_worker([[maybe_unused]] void *context)
         queue_lock();
         queue_bytes -= event->allocation_size;
         --queue_items;
+        if (queue_items == 0) {
+            c2t_arena_reset(&clipboard_arena);
+        }
         queue_unlock();
-        c2t_secure_zero(event, event->allocation_size);
-        free(event);
+
+        if ((unsigned char *)event >= clipboard_arena.buffer &&
+            (unsigned char *)event < clipboard_arena.buffer + clipboard_arena.capacity) {
+            c2t_secure_zero(event, event->allocation_size);
+        } else {
+            c2t_secure_zero(event, event->allocation_size);
+            free(event);
+        }
     }
     telegram_http_thread_cleanup();
 #ifdef _WIN32
@@ -280,6 +291,7 @@ int clipboard_output_init(void)
         c2t_log_error("clipboard", "Unable to initialize crypto session key");
         return 0;
     }
+    (void)c2t_arena_init(&clipboard_arena, 256U * 1024U);
     maximum_queue_bytes = c2t_config_get()->queue_max_bytes;
     maximum_queue_items = c2t_config_get()->queue_max_items;
     delivery_attempts = c2t_config_get()->delivery_attempts;
@@ -464,7 +476,16 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
         return;
     }
 
-    clipboard_event_t *event = malloc(allocation_size);
+    clipboard_event_t *event = (clipboard_event_t *)c2t_arena_alloc(&clipboard_arena, allocation_size);
+    if (!event) {
+        if (queue_items == 0) {
+            c2t_arena_reset(&clipboard_arena);
+            event = (clipboard_event_t *)c2t_arena_alloc(&clipboard_arena, allocation_size);
+        }
+    }
+    if (!event) {
+        event = malloc(allocation_size);
+    }
     if (!event) {
         queue_unlock();
         c2t_log_error("clipboard", "Not enough memory to queue clipboard data");
@@ -482,14 +503,20 @@ void clipboard_output(const void *data, size_t length, const char *mime_type,
     if (!c2t_crypto_get_random_bytes(event->nonce, C2T_CRYPTO_NONCE_SIZE)) {
         queue_unlock();
         c2t_secure_zero(event, allocation_size);
-        free(event);
+        if ((unsigned char *)event < clipboard_arena.buffer ||
+            (unsigned char *)event >= clipboard_arena.buffer + clipboard_arena.capacity) {
+            free(event);
+        }
         c2t_log_error("clipboard", "Failed to generate random nonce for RAM encryption");
         return;
     }
     if (length > 0 && !c2t_crypto_encrypt(data, length, event->nonce, event->encrypted_data)) {
         queue_unlock();
         c2t_secure_zero(event, allocation_size);
-        free(event);
+        if ((unsigned char *)event < clipboard_arena.buffer ||
+            (unsigned char *)event >= clipboard_arena.buffer + clipboard_arena.capacity) {
+            free(event);
+        }
         c2t_log_error("clipboard", "Failed to encrypt clipboard data in RAM");
         return;
     }
@@ -537,9 +564,13 @@ void clipboard_output_cleanup(void)
     while (current) {
         clipboard_event_t *next = current->next;
         c2t_secure_zero(current, current->allocation_size);
-        free(current);
+        if ((unsigned char *)current < clipboard_arena.buffer ||
+            (unsigned char *)current >= clipboard_arena.buffer + clipboard_arena.capacity) {
+            free(current);
+        }
         current = next;
     }
+    c2t_arena_destroy(&clipboard_arena);
     queue_head = nullptr;
     queue_tail = nullptr;
     queue_bytes = 0;
