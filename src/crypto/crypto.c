@@ -60,9 +60,22 @@ void c2t_secure_lock(void *ptr, size_t len)
     if (!ptr || len == 0)
         return;
 #ifdef _WIN32
+    SIZE_T min_ws = 0, max_ws = 0;
+    HANDLE proc = GetCurrentProcess();
+    if (GetProcessWorkingSetSize(proc, &min_ws, &max_ws)) {
+        if (min_ws < len + 64 * 1024) {
+            (void)SetProcessWorkingSetSize(proc, min_ws + len + 64 * 1024, max_ws + len + 64 * 1024);
+        }
+    }
     (void)VirtualLock(ptr, len);
 #else
     (void)mlock(ptr, len);
+#if defined(__linux__) && defined(MADV_DONTDUMP)
+    (void)madvise(ptr, len, MADV_DONTDUMP);
+#endif
+#if defined(__linux__) && defined(MADV_WIPEONFORK)
+    (void)madvise(ptr, len, MADV_WIPEONFORK);
+#endif
 #endif
 }
 
@@ -267,6 +280,19 @@ int c2t_crypto_init(void)
 {
     if (crypto_initialized)
         return 1;
+
+#ifdef _WIN32
+    (void)HeapSetInformation(NULL, HeapEnableTerminationOnCorruption, NULL, 0);
+    HMODULE wer_lib = LoadLibraryA("wer.dll");
+    if (wer_lib) {
+        typedef HRESULT (WINAPI *pfnWerSetFlags)(DWORD);
+        pfnWerSetFlags set_flags = (pfnWerSetFlags)(void *)GetProcAddress(wer_lib, "WerSetFlags");
+        if (set_flags) {
+            (void)set_flags(1U);
+        }
+        FreeLibrary(wer_lib);
+    }
+#endif
 
     c2t_secure_lock(session_key, sizeof(session_key));
     if (!c2t_crypto_get_random_bytes(session_key, sizeof(session_key))) {
