@@ -1462,6 +1462,12 @@ int c2t_runtime_run_supervisor(int argc, char **argv) {
       if (is_child) {
         while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
         }
+      } else {
+        unsigned int wait_elapsed = 0;
+        while (wait_elapsed < 5000 && kill(pid, 0) == 0) {
+          sleep_ms(50);
+          wait_elapsed += 50;
+        }
       }
       break;
     }
@@ -1699,16 +1705,24 @@ static void *worker_watchdog_func(void *arg) {
 #endif
 
       if (!supervisor_alive && !c2t_runtime_stop_requested()) {
-        supervisor_sleep_ms(100);
+        supervisor_sleep_ms(300);
         if (c2t_runtime_stop_requested())
           break;
-        c2t_log_warning(
-            "worker",
-            "Supervisor process (PID %lu) died or was killed. Restoring supervisor process...",
-            last_supervisor_pid);
-        spawn_supervisor_process(watchdog_ctx.argc, watchdog_ctx.argv);
-        last_supervisor_pid = 0;
-        supervisor_sleep_ms(2000);
+        c2t_runtime_status_t check_st;
+        if (state_read(&check_st) && check_st.supervisor_pid > 0 &&
+            c2t_runtime_is_c2t_process(check_st.supervisor_pid)) {
+          last_supervisor_pid = check_st.supervisor_pid;
+          continue;
+        }
+        if (!c2t_runtime_stop_requested()) {
+          c2t_log_warning(
+              "worker",
+              "Supervisor process (PID %lu) died or was killed. Restoring supervisor process...",
+              last_supervisor_pid);
+          spawn_supervisor_process(watchdog_ctx.argc, watchdog_ctx.argv);
+          last_supervisor_pid = 0;
+          supervisor_sleep_ms(2000);
+        }
       }
     }
     supervisor_sleep_ms(1000);
