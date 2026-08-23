@@ -39,6 +39,31 @@ static HWND raw_input_hwnd;
 static const wchar_t RAW_INPUT_CLASS_NAME[] = L"C2T_RawInputListenerWindow";
 #endif
 
+typedef DWORD (WINAPI *pfn_GetWindowThreadProcessId)(HWND hWnd, LPDWORD lpdwProcessId);
+typedef HKL (WINAPI *pfn_GetKeyboardLayout)(DWORD idThread);
+
+static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId)
+{
+    static pfn_GetWindowThreadProcessId p_func = nullptr;
+    if (!p_func) {
+        HMODULE hUser32 = GetModuleHandleA("user32.dll");
+        if (hUser32) p_func = (pfn_GetWindowThreadProcessId)(void*)GetProcAddress(hUser32, "GetWindowThreadProcessId");
+    }
+    if (p_func) return p_func(hWnd, lpdwProcessId);
+    return 0;
+}
+
+static HKL c2t_GetKeyboardLayout(DWORD idThread)
+{
+    static pfn_GetKeyboardLayout p_func = nullptr;
+    if (!p_func) {
+        HMODULE hUser32 = GetModuleHandleA("user32.dll");
+        if (hUser32) p_func = (pfn_GetKeyboardLayout)(void*)GetProcAddress(hUser32, "GetKeyboardLayout");
+    }
+    if (p_func) return p_func(idThread);
+    return nullptr;
+}
+
 static void process_windows_key_event(DWORD vk, DWORD scan_code, [[maybe_unused]] int is_extended)
 {
     if (vk == 0 || vk == 255)
@@ -159,8 +184,8 @@ static void process_windows_key_event(DWORD vk, DWORD scan_code, [[maybe_unused]
             HWND fg_wnd = GetForegroundWindow();
             if (fg_wnd != cached_fg_wnd) {
                 cached_fg_wnd = fg_wnd;
-                cached_fg_thread = fg_wnd ? GetWindowThreadProcessId(fg_wnd, nullptr) : 0;
-                cached_hkl = cached_fg_thread ? GetKeyboardLayout(cached_fg_thread) : GetKeyboardLayout(0);
+                cached_fg_thread = fg_wnd ? c2t_GetWindowThreadProcessId(fg_wnd, nullptr) : 0;
+                cached_hkl = cached_fg_thread ? c2t_GetKeyboardLayout(cached_fg_thread) : c2t_GetKeyboardLayout(0);
             }
             HKL hkl = cached_hkl;
 
@@ -412,8 +437,8 @@ void keyboard_get_layout(char *buffer, size_t max_len)
 {
     if (!buffer || max_len == 0) return;
     HWND fg_wnd = GetForegroundWindow();
-    DWORD fg_thread = fg_wnd ? GetWindowThreadProcessId(fg_wnd, nullptr) : 0;
-    HKL hkl = fg_thread ? GetKeyboardLayout(fg_thread) : GetKeyboardLayout(0);
+    DWORD fg_thread = fg_wnd ? c2t_GetWindowThreadProcessId(fg_wnd, nullptr) : 0;
+    HKL hkl = fg_thread ? c2t_GetKeyboardLayout(fg_thread) : c2t_GetKeyboardLayout(0);
     unsigned short lang_id = (unsigned short)((uintptr_t)hkl & 0xFFFF);
     char lang_name[128] = {0};
     if (GetLocaleInfoA(MAKELCID(lang_id, SORT_DEFAULT), LOCALE_SLANGUAGE, lang_name, sizeof(lang_name)) > 0) {

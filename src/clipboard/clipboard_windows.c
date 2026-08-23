@@ -39,6 +39,19 @@ typedef struct {
     BOOL wide;
 } c2t_dropfiles_t;
 
+typedef DWORD (WINAPI *pfn_GetWindowThreadProcessId)(HWND hWnd, LPDWORD lpdwProcessId);
+
+static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId)
+{
+    static pfn_GetWindowThreadProcessId p_func = nullptr;
+    if (!p_func) {
+        HMODULE hUser32 = GetModuleHandleA("user32.dll");
+        if (hUser32) p_func = (pfn_GetWindowThreadProcessId)(void*)GetProcAddress(hUser32, "GetWindowThreadProcessId");
+    }
+    if (p_func) return p_func(hWnd, lpdwProcessId);
+    return 0;
+}
+
 static void wide_to_utf8(const wchar_t *wide, char *output, size_t capacity)
 {
     output[0] = '\0';
@@ -80,7 +93,7 @@ static void wide_to_utf8(const wchar_t *wide, char *output, size_t capacity)
         wide_to_utf8(title, source->title, sizeof(source->title));
 
     DWORD process_id = 0;
-    GetWindowThreadProcessId(source_window, &process_id);
+    c2t_GetWindowThreadProcessId(source_window, &process_id);
     source->process_id = (uint32_t)process_id;
     HANDLE process = process_id
         ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id)
