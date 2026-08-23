@@ -17,10 +17,12 @@
 
 #include "runtime.h"
 #include "../config/config.h"
+#include "../crypto/crypto.h"
 #include "../logging/logging.h"
 
 #include <errno.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,11 +117,66 @@ static void supervisor_sleep_ms(unsigned int milliseconds) {
   }
 }
 
+#define C2T_STATE_MAGIC "\x7fST2C\r\n\x1a"
+#define C2T_STATE_MAGIC_LEN 8U
+#define C2T_STATE_VERSION 1U
+
+typedef struct {
+  uint32_t version;
+  uint32_t state_code; // 1 = starting, 2 = running
+  uint64_t pid;
+  uint64_t supervisor_pid;
+  uint64_t timestamp;
+  uint32_t crc32;
+} c2t_state_payload_t;
+
+[[nodiscard]] static uint32_t compute_crc32(const void *data, size_t length) {
+  uint32_t crc = UINT32_C(0xffffffff);
+  const unsigned char *p = (const unsigned char *)data;
+  for (size_t i = 0; i < length; ++i) {
+    crc ^= p[i];
+    for (unsigned int bit = 0; bit < 8; ++bit) {
+      crc = (crc >> 1) ^ (UINT32_C(0xedb88320) & (uint32_t)-(int32_t)(crc & 1));
+    }
+  }
+  return crc ^ UINT32_C(0xffffffff);
+}
+
 [[nodiscard]] static int state_read(c2t_runtime_status_t *status) {
   FILE *stream = fopen(state_path, "rb");
   if (!stream)
     return 0;
 
+  unsigned char header[C2T_STATE_MAGIC_LEN];
+  if (fread(header, 1, C2T_STATE_MAGIC_LEN, stream) == C2T_STATE_MAGIC_LEN &&
+      memcmp(header, C2T_STATE_MAGIC, C2T_STATE_MAGIC_LEN) == 0) {
+    unsigned char nonce[C2T_CRYPTO_NONCE_SIZE];
+    c2t_state_payload_t payload;
+    if (fread(nonce, 1, C2T_CRYPTO_NONCE_SIZE, stream) == C2T_CRYPTO_NONCE_SIZE &&
+        fread(&payload, 1, sizeof(payload), stream) == sizeof(payload)) {
+      fclose(stream);
+      if (c2t_crypto_init()) {
+        c2t_state_payload_t dec;
+        if (c2t_crypto_state_decrypt(&payload, sizeof(payload), nonce, &dec)) {
+          uint32_t expected_crc = dec.crc32;
+          dec.crc32 = 0;
+          if (compute_crc32(&dec, sizeof(dec)) == expected_crc &&
+              dec.version == C2T_STATE_VERSION) {
+            status->process_id = (unsigned long)dec.pid;
+            status->supervisor_pid = (unsigned long)dec.supervisor_pid;
+            status->state = dec.state_code == 2 ? C2T_RUNTIME_RUNNING
+                                                : C2T_RUNTIME_STARTING;
+            return dec.pid != 0;
+          }
+        }
+      }
+    } else {
+      fclose(stream);
+    }
+    return 0;
+  }
+
+  fseek(stream, 0, SEEK_SET);
   char state[16] = "starting";
   unsigned long pid = 0;
   unsigned long supervisor_pid = 0;
@@ -142,14 +199,39 @@ static void supervisor_sleep_ms(unsigned int milliseconds) {
 [[nodiscard]] static int state_write_extended(const char *state,
                                               unsigned long pid,
                                               unsigned long supervisor_pid) {
+  if (!c2t_crypto_init())
+    return 0;
+
+  unsigned char nonce[C2T_CRYPTO_NONCE_SIZE];
+  if (!c2t_crypto_get_random_bytes(nonce, sizeof(nonce)))
+    return 0;
+
+  c2t_state_payload_t payload = {
+      .version = C2T_STATE_VERSION,
+      .state_code = strcmp(state, "running") == 0 ? 2U : 1U,
+      .pid = (uint64_t)pid,
+      .supervisor_pid = (uint64_t)supervisor_pid,
+      .timestamp = (uint64_t)time(nullptr),
+      .crc32 = 0,
+  };
+  payload.crc32 = compute_crc32(&payload, sizeof(payload));
+
+  c2t_state_payload_t encrypted_payload;
+  if (!c2t_crypto_state_encrypt(&payload, sizeof(payload), nonce,
+                                &encrypted_payload))
+    return 0;
+
   FILE *stream = fopen(state_path, "wb");
   if (!stream)
     return 0;
+
   int written =
-      supervisor_pid != 0
-          ? (fprintf(stream, "pid=%lu\nsupervisor_pid=%lu\nstate=%s\n", pid,
-                     supervisor_pid, state) > 0)
-          : (fprintf(stream, "pid=%lu\nstate=%s\n", pid, state) > 0);
+      (fwrite(C2T_STATE_MAGIC, 1, C2T_STATE_MAGIC_LEN, stream) ==
+           C2T_STATE_MAGIC_LEN &&
+       fwrite(nonce, 1, sizeof(nonce), stream) == sizeof(nonce) &&
+       fwrite(&encrypted_payload, 1, sizeof(encrypted_payload), stream) ==
+           sizeof(encrypted_payload));
+
   if (fflush(stream) != 0)
     written = 0;
   if (fclose(stream) != 0)

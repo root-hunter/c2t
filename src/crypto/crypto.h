@@ -83,6 +83,16 @@ c2t_crypto_decrypt_offset(const void *ciphertext, size_t offset, size_t len,
                           const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
                           void *plaintext);
 
+[[nodiscard]] int
+c2t_crypto_state_encrypt(const void *plaintext, size_t len,
+                         const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
+                         void *ciphertext);
+
+[[nodiscard]] int
+c2t_crypto_state_decrypt(const void *ciphertext, size_t len,
+                         const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
+                         void *plaintext);
+
 void c2t_encrypted_stream_init(c2t_encrypted_stream_t *stream,
                                const char *prefix, size_t prefix_len,
                                const unsigned char *ciphertext,

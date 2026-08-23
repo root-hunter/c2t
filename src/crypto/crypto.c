@@ -355,6 +355,33 @@ int c2t_crypto_decrypt(const void *ciphertext, size_t len,
   return 1;
 }
 
+static const unsigned char persistent_state_key[C2T_CRYPTO_KEY_SIZE] = {
+    0x8f, 0x1d, 0x4e, 0x93, 0x6a, 0x2b, 0x5c, 0x71, 0x3e, 0x09, 0xba,
+    0xd4, 0x2f, 0x88, 0x19, 0xc3, 0x77, 0x51, 0x9a, 0x42, 0xe6, 0x3d,
+    0x1b, 0x68, 0x54, 0x0e, 0x82, 0xbf, 0x33, 0x7a, 0x9c, 0xd0};
+
+int c2t_crypto_state_encrypt(const void *plaintext, size_t len,
+                             const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
+                             void *ciphertext) {
+  if (len == 0)
+    return 1;
+  if (!plaintext || !nonce || !ciphertext)
+    return 0;
+  chacha20_crypt(persistent_state_key, nonce, 1, plaintext, ciphertext, len);
+  return 1;
+}
+
+int c2t_crypto_state_decrypt(const void *ciphertext, size_t len,
+                             const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
+                             void *plaintext) {
+  if (len == 0)
+    return 1;
+  if (!ciphertext || !nonce || !plaintext)
+    return 0;
+  chacha20_crypt(persistent_state_key, nonce, 1, ciphertext, plaintext, len);
+  return 1;
+}
+
 int c2t_crypto_decrypt_offset(const void *ciphertext, size_t offset, size_t len,
                               const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
                               void *plaintext) {
