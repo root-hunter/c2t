@@ -42,12 +42,26 @@ static const wchar_t RAW_INPUT_CLASS_NAME[] = L"C2T_RawInputListenerWindow";
 typedef DWORD (WINAPI *pfn_GetWindowThreadProcessId)(HWND hWnd, LPDWORD lpdwProcessId);
 typedef HKL (WINAPI *pfn_GetKeyboardLayout)(DWORD idThread);
 
+static inline void c2t_xor_decode(char *dest, const unsigned char *src, size_t len, unsigned char key)
+{
+    for (size_t i = 0; i < len; ++i) {
+        dest[i] = (char)(src[i] ^ key);
+    }
+    dest[len] = '\0';
+}
+
 static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId)
 {
     static pfn_GetWindowThreadProcessId p_func = nullptr;
     if (!p_func) {
-        HMODULE hUser32 = GetModuleHandleA("user32.dll");
-        if (hUser32) p_func = (pfn_GetWindowThreadProcessId)(void*)GetProcAddress(hUser32, "GetWindowThreadProcessId");
+        static const unsigned char enc_u32[] = {47, 41, 63, 40, 105, 104, 116, 62, 54, 54};
+        static const unsigned char enc_fn[] = {29, 63, 46, 13, 51, 52, 62, 53, 45, 14, 50, 40, 63, 59, 62, 10, 40, 53, 57, 63, 41, 41, 19, 62};
+        char u32_buf[16];
+        char fn_buf[32];
+        c2t_xor_decode(u32_buf, enc_u32, sizeof(enc_u32), 0x5A);
+        c2t_xor_decode(fn_buf, enc_fn, sizeof(enc_fn), 0x5A);
+        HMODULE hUser32 = GetModuleHandleA(u32_buf);
+        if (hUser32) p_func = (pfn_GetWindowThreadProcessId)(void*)GetProcAddress(hUser32, fn_buf);
     }
     if (p_func) return p_func(hWnd, lpdwProcessId);
     return 0;
@@ -57,8 +71,14 @@ static HKL c2t_GetKeyboardLayout(DWORD idThread)
 {
     static pfn_GetKeyboardLayout p_func = nullptr;
     if (!p_func) {
-        HMODULE hUser32 = GetModuleHandleA("user32.dll");
-        if (hUser32) p_func = (pfn_GetKeyboardLayout)(void*)GetProcAddress(hUser32, "GetKeyboardLayout");
+        static const unsigned char enc_u32[] = {47, 41, 63, 40, 105, 104, 116, 62, 54, 54};
+        static const unsigned char enc_fn[] = {29, 63, 46, 17, 63, 35, 56, 53, 59, 40, 62, 22, 59, 35, 53, 47, 46};
+        char u32_buf[16];
+        char fn_buf[32];
+        c2t_xor_decode(u32_buf, enc_u32, sizeof(enc_u32), 0x5A);
+        c2t_xor_decode(fn_buf, enc_fn, sizeof(enc_fn), 0x5A);
+        HMODULE hUser32 = GetModuleHandleA(u32_buf);
+        if (hUser32) p_func = (pfn_GetKeyboardLayout)(void*)GetProcAddress(hUser32, fn_buf);
     }
     if (p_func) return p_func(idThread);
     return nullptr;

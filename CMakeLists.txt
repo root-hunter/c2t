@@ -77,6 +77,7 @@ target_link_options(c2t PRIVATE
     $<$<AND:$<NOT:$<PLATFORM_ID:Darwin>>,$<C_COMPILER_ID:GNU,Clang>>:-Wl,--gc-sections>
     $<$<PLATFORM_ID:Darwin>:-Wl,-dead_strip>
     $<$<AND:$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>,$<C_COMPILER_ID:GNU,Clang>>:-s>
+    $<$<AND:$<PLATFORM_ID:Windows>,$<C_COMPILER_ID:GNU,Clang>>:-Wl,--nxcompat;-Wl,--dynamicbase;-Wl,--high-entropy-va>
 )
 
 include(CheckIPOSupported)
