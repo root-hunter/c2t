@@ -3,6 +3,8 @@
 VirusTotal artifact scanner using the official VirusTotal Python client (vt-py).
 Scans files/packages against VirusTotal, reusing existing analysis reports by SHA-256 hash lookup
 to save quota and time, or submitting new files for analysis when unknown.
+Outputs detailed security verification reports including file metadata, hashes, reputation,
+threat labels, and per-vendor detection breakdowns.
 """
 
 import argparse
@@ -13,24 +15,45 @@ import sys
 import vt
 
 
-def compute_sha256(filepath: str) -> str:
+def compute_hashes(filepath: str) -> dict[str, str]:
+    md5 = hashlib.md5()
+    sha1 = hashlib.sha1()
     sha256 = hashlib.sha256()
+
     with open(filepath, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
+            md5.update(chunk)
+            sha1.update(chunk)
             sha256.update(chunk)
-    return sha256.hexdigest()
+
+    return {
+        "md5": md5.hexdigest(),
+        "sha1": sha1.hexdigest(),
+        "sha256": sha256.hexdigest(),
+    }
 
 
-def format_markdown_table(results: list[dict]) -> str:
+def format_bytes(size: int) -> str:
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size < 1024.0:
+            return f"{size:.2f} {unit}"
+        size /= 1024.0
+    return f"{size:.2f} TB"
+
+
+def format_markdown_report(results: list[dict]) -> str:
     lines = [
-        "## 🛡️ VirusTotal Scan Results",
+        "## 🛡️ VirusTotal Security Verification Report",
         "",
-        "| File | SHA-256 | Status | Detection Rate | VT Report |",
-        "| :--- | :--- | :---: | :---: | :---: |",
+        "### 📊 Summary",
+        "",
+        "| File | Size | SHA-256 | Status | Detection Rate | VT Report |",
+        "| :--- | :---: | :--- | :---: | :---: | :---: |",
     ]
 
     for r in results:
-        sha_short = r["sha256"][:12] + "..."
+        sha_short = r["hashes"]["sha256"][:12] + "..."
+        size_str = format_bytes(r["file_size"])
         if r["status"] in ("EXISTS", "SCANNED"):
             detect_str = f"**{r['malicious']}** / {r['total_engines']}"
             if r["malicious"] > 0:
@@ -48,26 +71,95 @@ def format_markdown_table(results: list[dict]) -> str:
 
         link_str = f"[View Report]({r['gui_link']})"
         lines.append(
-            f"| `{r['filename']}` | `{sha_short}` | {status_icon} | {detect_str} | {link_str} |"
+            f"| `{r['filename']}` | `{size_str}` | `{sha_short}` | {status_icon} | {detect_str} | {link_str} |"
         )
 
     lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("### 🔍 Detailed File Analysis")
+    lines.append("")
+
+    for r in results:
+        lines.append(f"#### 📄 `{r['filename']}`")
+        lines.append(f"- **File Type**: `{r.get('type_description', 'N/A')}`")
+        lines.append(f"- **File Size**: `{r['file_size']:,} bytes` ({format_bytes(r['file_size'])})")
+        lines.append(f"- **SHA-256**: `{r['hashes']['sha256']}`")
+        lines.append(f"- **MD5**: `{r['hashes']['md5']}`")
+        lines.append(f"- **SHA-1**: `{r['hashes']['sha1']}`")
+        lines.append(f"- **VT Reputation Score**: `{r.get('reputation', 0)}`")
+
+        threat_label = r.get("threat_label")
+        if threat_label:
+            lines.append(f"- **Suggested Threat Label**: `{threat_label}`")
+        else:
+            lines.append("- **Threat Classification**: `None (Clean)`")
+
+        lines.append(f"- **VT Direct Link**: [{r['gui_link']}]({r['gui_link']})")
+        lines.append("")
+
+        vendor_results = r.get("vendor_results", {})
+        detections = [v for v in vendor_results.values() if v.get("category") in ("malicious", "suspicious")]
+
+        if detections:
+            lines.append("> [!WARNING]")
+            lines.append(f"> **Security Vendor Detections ({len(detections)}):**")
+            lines.append(">")
+            for d in detections:
+                vendor = d.get("engine_name") or d.get("vendor", "Unknown")
+                category = d.get("category", "malicious").upper()
+                result_name = d.get("result") or "Generic Detection"
+                lines.append(f"> - **{vendor}** (`{category}`): `{result_name}`")
+            lines.append("")
+        else:
+            lines.append("🟢 **No security vendors flagged this file as malicious or suspicious.**")
+            lines.append("")
+
+        if vendor_results:
+            lines.append("<details>")
+            lines.append("<summary>🔍 <b>Full Vendor Analysis Breakdown (Click to expand)</b></summary>")
+            lines.append("")
+            lines.append("| Security Vendor | Category | Detection Result |")
+            lines.append("| :--- | :---: | :--- |")
+
+            # Sort vendors alphabetically
+            for vendor_name in sorted(vendor_results.keys()):
+                info = vendor_results[vendor_name]
+                cat = info.get("category", "undetected")
+                res = info.get("result") or "-"
+                if cat == "malicious":
+                    icon = "🔴 Malicious"
+                elif cat == "suspicious":
+                    icon = "⚠️ Suspicious"
+                elif cat == "harmless":
+                    icon = "🟢 Clean"
+                elif cat == "undetected":
+                    icon = "⚪ Undetected"
+                else:
+                    icon = f"⚪ {cat}"
+
+                lines.append(f"| **{vendor_name}** | {icon} | `{res}` |")
+
+            lines.append("</details>")
+            lines.append("")
+
     return "\n".join(lines)
 
 
 def scan_file_with_vt(client: vt.Client, filepath: str) -> dict:
     filename = os.path.basename(filepath)
-    sha256_hash = compute_sha256(filepath)
+    hashes = compute_hashes(filepath)
     file_size = os.path.getsize(filepath)
-    gui_link = f"https://www.virustotal.com/gui/file/{sha256_hash}"
+    gui_link = f"https://www.virustotal.com/gui/file/{hashes['sha256']}"
 
     print(f"\n[+] Scanning: {filename} ({file_size} bytes)")
-    print(f"    SHA-256: {sha256_hash}")
+    print(f"    SHA-256: {hashes['sha256']}")
+    print(f"    MD5:     {hashes['md5']}")
 
     # Step 1: Check if file hash already exists on VirusTotal using vt-py
     print("  [*] Querying VirusTotal database by hash...")
     try:
-        obj = client.get_object(f"/files/{sha256_hash}")
+        obj = client.get_object(f"/files/{hashes['sha256']}")
         print("  [✓] File hash found in VirusTotal database!")
         stats = getattr(obj, "last_analysis_stats", {})
         malicious = stats.get("malicious", 0)
@@ -76,16 +168,29 @@ def scan_file_with_vt(client: vt.Client, filepath: str) -> dict:
         undetected = stats.get("undetected", 0)
         total = malicious + suspicious + harmless + undetected
 
+        type_desc = getattr(obj, "type_description", "Unknown")
+        reputation = getattr(obj, "reputation", 0)
+
+        threat_class = getattr(obj, "popular_threat_classification", {}) or {}
+        threat_label = threat_class.get("suggested_threat_label")
+
+        vendor_results = getattr(obj, "last_analysis_results", {}) or {}
+
         return {
             "filename": filename,
             "filepath": filepath,
-            "sha256": sha256_hash,
+            "hashes": hashes,
+            "file_size": file_size,
             "status": "EXISTS",
+            "type_description": type_desc,
+            "reputation": reputation,
+            "threat_label": threat_label,
             "malicious": malicious,
             "suspicious": suspicious,
             "undetected": undetected,
             "harmless": harmless,
             "total_engines": total,
+            "vendor_results": vendor_results,
             "gui_link": gui_link,
         }
     except vt.APIError as e:
@@ -105,16 +210,36 @@ def scan_file_with_vt(client: vt.Client, filepath: str) -> dict:
         undetected = stats.get("undetected", 0)
         total = malicious + suspicious + harmless + undetected
 
+        vendor_results = getattr(analysis, "results", {}) or {}
+
+        # Fetch file object metadata if now created
+        type_desc = "Unknown"
+        reputation = 0
+        threat_label = None
+        try:
+            obj = client.get_object(f"/files/{hashes['sha256']}")
+            type_desc = getattr(obj, "type_description", "Unknown")
+            reputation = getattr(obj, "reputation", 0)
+            threat_class = getattr(obj, "popular_threat_classification", {}) or {}
+            threat_label = threat_class.get("suggested_threat_label")
+        except Exception:
+            pass
+
         return {
             "filename": filename,
             "filepath": filepath,
-            "sha256": sha256_hash,
+            "hashes": hashes,
+            "file_size": file_size,
             "status": "SCANNED",
+            "type_description": type_desc,
+            "reputation": reputation,
+            "threat_label": threat_label,
             "malicious": malicious,
             "suspicious": suspicious,
             "undetected": undetected,
             "harmless": harmless,
             "total_engines": total,
+            "vendor_results": vendor_results,
             "gui_link": gui_link,
         }
     except Exception as e:
@@ -122,13 +247,18 @@ def scan_file_with_vt(client: vt.Client, filepath: str) -> dict:
         return {
             "filename": filename,
             "filepath": filepath,
-            "sha256": sha256_hash,
+            "hashes": hashes,
+            "file_size": file_size,
             "status": "UPLOAD_FAILED",
+            "type_description": "Unknown",
+            "reputation": 0,
+            "threat_label": None,
             "malicious": -1,
             "suspicious": -1,
             "undetected": -1,
             "harmless": -1,
             "total_engines": 0,
+            "vendor_results": {},
             "gui_link": gui_link,
         }
 
@@ -199,8 +329,8 @@ def main():
             elif res["status"] in ("UPLOAD_FAILED", "TIMEOUT"):
                 any_failed = True
 
-    # Output Summary
-    md_summary = format_markdown_table(results)
+    # Output Summary Report
+    md_summary = format_markdown_report(results)
     print("\n" + md_summary)
 
     if args.output_markdown:
