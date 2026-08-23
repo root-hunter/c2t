@@ -41,10 +41,7 @@
 #include <windows.h>
 
 #include <iphlpapi.h>
-
-typedef ULONG(WINAPI *pfn_GetAdaptersAddresses)(
-    ULONG Family, ULONG Flags, PVOID Reserved,
-    PIP_ADAPTER_ADDRESSES AdapterAddresses, PULONG SizePointer);
+#include "../win32/win32_api.h"
 #endif
 
 static void normalize_mac(const char *input, char *output, size_t capacity) {
@@ -225,38 +222,26 @@ static void check_posix_interfaces(const c2t_config_t *config, int *mac_matched,
 #else
 static void check_win32_interfaces(const c2t_config_t *config, int *mac_matched,
                                     int *ip_matched) {
-  HMODULE hIphlpapi = LoadLibraryA("iphlpapi.dll");
-  if (!hIphlpapi)
+  c2t_win32_api_init();
+  if (!g_c2t_win32.GetAdaptersAddresses)
     return;
-
-  pfn_GetAdaptersAddresses pGetAdaptersAddresses =
-      (pfn_GetAdaptersAddresses)(uintptr_t)GetProcAddress(hIphlpapi,
-                                                          "GetAdaptersAddresses");
-  if (!pGetAdaptersAddresses) {
-    FreeLibrary(hIphlpapi);
-    return;
-  }
 
   ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
                 GAA_FLAG_SKIP_DNS_SERVER;
   ULONG bufLen = 15360;
   PIP_ADAPTER_ADDRESSES pAddresses = (IP_ADAPTER_ADDRESSES *)malloc(bufLen);
-  if (!pAddresses) {
-    FreeLibrary(hIphlpapi);
+  if (!pAddresses)
     return;
-  }
 
   ULONG dwRetVal =
-      pGetAdaptersAddresses(AF_UNSPEC, flags, NULL, pAddresses, &bufLen);
+      g_c2t_win32.GetAdaptersAddresses(AF_UNSPEC, flags, NULL, pAddresses, &bufLen);
   if (dwRetVal == ERROR_BUFFER_OVERFLOW) {
     free(pAddresses);
     pAddresses = (IP_ADAPTER_ADDRESSES *)malloc(bufLen);
-    if (!pAddresses) {
-      FreeLibrary(hIphlpapi);
+    if (!pAddresses)
       return;
-    }
     dwRetVal =
-        pGetAdaptersAddresses(AF_UNSPEC, flags, NULL, pAddresses, &bufLen);
+        g_c2t_win32.GetAdaptersAddresses(AF_UNSPEC, flags, NULL, pAddresses, &bufLen);
   }
 
   if (dwRetVal == NO_ERROR) {
@@ -311,7 +296,6 @@ static void check_win32_interfaces(const c2t_config_t *config, int *mac_matched,
   }
 
   free(pAddresses);
-  FreeLibrary(hIphlpapi);
 }
 #endif
 

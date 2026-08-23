@@ -24,7 +24,10 @@
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0600
 #endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
+#include <iphlpapi.h>
 #include <shellapi.h>
 #include <bcrypt.h>
 #include <shlobj.h>
@@ -282,6 +285,11 @@ typedef BOOL(WINAPI *pfn_WinHttpSetOption)(HINTERNET hInternet, DWORD dwOption,
                                            LPVOID lpBuffer,
                                            DWORD dwBufferLength);
 
+/* iphlpapi APIs */
+typedef ULONG(WINAPI *pfn_GetAdaptersAddresses)(
+    ULONG Family, ULONG Flags, PVOID Reserved,
+    PIP_ADAPTER_ADDRESSES AdapterAddresses, PULONG SizePointer);
+
 typedef struct {
   /* user32 */
   pfn_GetWindowThreadProcessId GetWindowThreadProcessId;
@@ -411,6 +419,9 @@ typedef struct {
   pfn_WinHttpCloseHandle WinHttpCloseHandle;
   pfn_WinHttpSetTimeouts WinHttpSetTimeouts;
   pfn_WinHttpSetOption WinHttpSetOption;
+
+  /* iphlpapi */
+  pfn_GetAdaptersAddresses GetAdaptersAddresses;
 } c2t_win32_api_t;
 
 extern c2t_win32_api_t g_c2t_win32;

