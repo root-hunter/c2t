@@ -21,7 +21,7 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName",      "Antonio Ricciardi\0"
+            VALUE "CompanyName",      "roothunter.dev\0"
             VALUE "FileDescription",  "c2t Clipboard & Keyboard Synchronization Utility\0"
             VALUE "FileVersion",      VER_FILEVERSION_STR
             VALUE "InternalName",     "c2t\0"
