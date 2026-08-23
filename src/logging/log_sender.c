@@ -182,7 +182,10 @@ static void sender_signal(void) {
       }
     }
 
-    char msg[16384];
+    char *msg = (char *)malloc(16384);
+    if (!msg)
+      return 0;
+
     size_t msg_idx = 0;
     const char *prefix =
         (chunk_index == 0)
@@ -192,7 +195,7 @@ static void sender_signal(void) {
     memcpy(msg + msg_idx, prefix, prefix_len);
     msg_idx += prefix_len;
 
-    for (size_t i = 0; i < chunk_len && msg_idx + 10 < sizeof(msg); ++i) {
+    for (size_t i = 0; i < chunk_len && msg_idx + 10 < 16384; ++i) {
       char c = buffer[offset + i];
       if (c == '&') {
         memcpy(msg + msg_idx, "&amp;", 5);
@@ -210,18 +213,20 @@ static void sender_signal(void) {
 
     static const char suffix[] = "</code></pre>";
     size_t suffix_len = sizeof(suffix) - 1;
-    if (msg_idx + suffix_len < sizeof(msg)) {
+    if (msg_idx + suffix_len < 16384) {
       memcpy(msg + msg_idx, suffix, suffix_len);
       msg_idx += suffix_len;
     }
     msg[msg_idx] = '\0';
 
     if (!telegram_send_html(msg)) {
-      c2t_secure_zero(msg, sizeof(msg));
+      c2t_secure_zero(msg, 16384);
+      free(msg);
       return 0;
     }
 
-    c2t_secure_zero(msg, sizeof(msg));
+    c2t_secure_zero(msg, 16384);
+    free(msg);
     offset += chunk_len;
     chunk_index++;
   }
@@ -393,7 +398,7 @@ int c2t_log_sender_init(void) {
 #else
   pthread_attr_t attr;
   pthread_attr_init(&attr);
-  pthread_attr_setstacksize(&attr, 128 * 1024);
+  pthread_attr_setstacksize(&attr, 512 * 1024);
   worker_started = pthread_create(&worker_thread, &attr, log_sender_worker_func,
                                   nullptr) == 0;
   pthread_attr_destroy(&attr);

@@ -1032,7 +1032,7 @@ int c2t_telegram_listener_init(void) {
 #else
   pthread_attr_t attr;
   pthread_attr_init(&attr);
-  pthread_attr_setstacksize(&attr, 128 * 1024);
+  pthread_attr_setstacksize(&attr, 512 * 1024);
   listener_started =
       pthread_create(&listener_thread, &attr, telegram_listener_worker_func,
                      nullptr) == 0;

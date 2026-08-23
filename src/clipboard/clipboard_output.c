@@ -392,7 +392,7 @@ int clipboard_output_init(void) {
 #else
   pthread_attr_t attr;
   pthread_attr_init(&attr);
-  pthread_attr_setstacksize(&attr, 128 * 1024);
+  pthread_attr_setstacksize(&attr, 512 * 1024);
   worker_started =
       pthread_create(&worker_thread, &attr, delivery_worker, nullptr) == 0;
   pthread_attr_destroy(&attr);
