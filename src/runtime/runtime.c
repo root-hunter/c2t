@@ -1293,6 +1293,13 @@ int c2t_runtime_start_background([[maybe_unused]] int argc,
     if (second > 0)
       _exit(0);
     umask(077);
+    /* The launcher may already have initialized the runtime paths (notably
+       for `restart`).  Rebuild them in the final daemon after the double
+       fork instead of trusting inherited process-local buffers. */
+    paths_ready = 0;
+    state_path[0] = '\0';
+    lock_path[0] = '\0';
+    log_path[0] = '\0';
     if (chdir("/") != 0 || !redirect_background_io())
       _exit(1);
     c2t_log_cleanup();
