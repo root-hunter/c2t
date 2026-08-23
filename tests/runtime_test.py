@@ -39,6 +39,12 @@ def get_parent_pid(pid: int) -> int:
                         return int(line.split(":")[1].strip())
         except (FileNotFoundError, ValueError, IndexError):
             pass
+    try:
+        out = subprocess.check_output(["ps", "-o", "ppid=", "-p", str(pid)], text=True).strip()
+        if out:
+            return int(out)
+    except (subprocess.SubprocessError, ValueError, FileNotFoundError):
+        pass
     return 0
 
 
@@ -58,6 +64,16 @@ def get_child_pids(parent_pid: int) -> list:
                                 break
             except (FileNotFoundError, ValueError, PermissionError):
                 pass
+        if children:
+            return children
+    try:
+        out = subprocess.check_output(["pgrep", "-P", str(parent_pid)], text=True)
+        for line in out.splitlines():
+            line = line.strip()
+            if line.isdigit():
+                children.append(int(line))
+    except (subprocess.SubprocessError, ValueError, FileNotFoundError):
+        pass
     return children
 
 
@@ -71,6 +87,13 @@ def safe_kill(pid: int, sig: int):
                 if comm in ("systemd", "init", "wsl-init", "systemd-exec", "gnome-session", "bash", "zsh"):
                     raise ValueError(f"Refusing to kill system process '{comm}' (PID {pid})")
         except FileNotFoundError:
+            pass
+    elif sys.platform == "darwin":
+        try:
+            out = subprocess.check_output(["ps", "-o", "comm=", "-p", str(pid)], text=True).strip()
+            if any(sys_proc in out for sys_proc in ("launchd", "zsh", "bash", "Finder", "Dock")):
+                raise ValueError(f"Refusing to kill system process '{out}' (PID {pid})")
+        except (subprocess.SubprocessError, FileNotFoundError):
             pass
     os.kill(pid, sig)
 
