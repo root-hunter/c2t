@@ -30,6 +30,7 @@ typedef struct {
   c2t_runtime_state_t state;
   unsigned long process_id;
   unsigned long supervisor_pid;
+  unsigned long last_heartbeat;
 } c2t_runtime_status_t;
 
 enum {
@@ -40,6 +41,7 @@ enum {
 
 [[nodiscard]] int c2t_runtime_acquire(void);
 void c2t_runtime_mark_running(void);
+void c2t_runtime_heartbeat(void);
 void c2t_runtime_release(void);
 [[nodiscard]] int c2t_runtime_stop_requested(void);
 [[nodiscard]] int c2t_runtime_stop_descriptor(void);
@@ -55,5 +57,6 @@ void c2t_runtime_set_process_name(const char *name, int argc, char **argv);
 [[nodiscard]] const char *c2t_runtime_log_path(void);
 void c2t_runtime_start_worker_watchdog(int argc, char **argv);
 void c2t_runtime_stop_worker_watchdog(void);
+[[nodiscard]] int c2t_runtime_is_c2t_process(unsigned long pid);
 
 #endif

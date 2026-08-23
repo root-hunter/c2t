@@ -303,6 +303,7 @@ static void print_usage(FILE *stream) {
                          "waiting for runtime termination");
     int stop_fd = c2t_runtime_stop_descriptor();
     while (!c2t_runtime_stop_requested()) {
+      c2t_runtime_heartbeat();
 #ifndef _WIN32
       if (stop_fd >= 0) {
         struct pollfd pfd = {.fd = stop_fd, .events = POLLIN, .revents = 0};

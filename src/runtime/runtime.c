@@ -131,6 +131,38 @@ typedef struct {
   uint32_t crc32;
 } c2t_state_payload_t;
 
+[[nodiscard]] int c2t_runtime_is_c2t_process(unsigned long pid) {
+  if (pid <= 1)
+    return 0;
+#ifdef _WIN32
+  HANDLE hProc =
+      OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+  if (!hProc)
+    return 0;
+  char path[MAX_PATH] = {};
+  DWORD size = sizeof(path);
+  BOOL ok = QueryFullProcessImageNameA(hProc, 0, path, &size);
+  CloseHandle(hProc);
+  if (!ok)
+    return 0;
+  return (strstr(path, "c2t") != NULL || strstr(path, "C2T") != NULL);
+#elif defined(__linux__)
+  char path[64];
+  snprintf(path, sizeof(path), "/proc/%lu/cmdline", pid);
+  FILE *f = fopen(path, "r");
+  if (!f)
+    return 0;
+  char cmd[256] = {};
+  size_t n = fread(cmd, 1, sizeof(cmd) - 1, f);
+  fclose(f);
+  if (n == 0)
+    return 0;
+  return (strstr(cmd, "c2t") != NULL || strstr(cmd, "t2c") != NULL);
+#else
+  return kill((pid_t)pid, 0) == 0;
+#endif
+}
+
 [[nodiscard]] static uint32_t compute_crc32(const void *data, size_t length) {
   uint32_t crc = UINT32_C(0xffffffff);
   const unsigned char *p = (const unsigned char *)data;
@@ -165,6 +197,7 @@ typedef struct {
               dec.version == C2T_STATE_VERSION) {
             status->process_id = (unsigned long)dec.pid;
             status->supervisor_pid = (unsigned long)dec.supervisor_pid;
+            status->last_heartbeat = (unsigned long)dec.timestamp;
             status->state = dec.state_code == 2 ? C2T_RUNTIME_RUNNING
                                                 : C2T_RUNTIME_STARTING;
             return dec.pid != 0;
@@ -192,6 +225,7 @@ typedef struct {
   fclose(stream);
   status->process_id = pid;
   status->supervisor_pid = supervisor_pid;
+  status->last_heartbeat = 0;
   status->state = strcmp(state, "running") == 0 ? C2T_RUNTIME_RUNNING
                                                 : C2T_RUNTIME_STARTING;
   return pid != 0;
@@ -222,7 +256,12 @@ typedef struct {
                                 &encrypted_payload))
     return 0;
 
-  FILE *stream = fopen(state_path, "wb");
+  char tmp_path[C2T_PATH_CAPACITY];
+  if (!format_path(tmp_path, sizeof(tmp_path), "%s.tmp.%lu", state_path,
+                   (unsigned long)getpid()))
+    return 0;
+
+  FILE *stream = fopen(tmp_path, "wb");
   if (!stream)
     return 0;
 
@@ -235,13 +274,48 @@ typedef struct {
 
   if (fflush(stream) != 0)
     written = 0;
+#ifndef _WIN32
+  int fd = fileno(stream);
+  if (fd >= 0)
+    (void)fsync(fd);
+#endif
   if (fclose(stream) != 0)
     written = 0;
-  return written;
+
+  if (!written) {
+#ifdef _WIN32
+    (void)DeleteFileA(tmp_path);
+#else
+    (void)unlink(tmp_path);
+#endif
+    return 0;
+  }
+
+#ifdef _WIN32
+  if (!MoveFileExA(tmp_path, state_path,
+                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    (void)DeleteFileA(tmp_path);
+    return 0;
+  }
+#else
+  if (rename(tmp_path, state_path) != 0) {
+    (void)unlink(tmp_path);
+    return 0;
+  }
+#endif
+  return 1;
 }
 
 [[nodiscard]] static int state_write(const char *state, unsigned long pid) {
   return state_write_extended(state, pid, 0);
+}
+
+void c2t_runtime_heartbeat(void) {
+  c2t_runtime_status_t status;
+  if (state_read(&status) && status.process_id == (unsigned long)getpid()) {
+    (void)state_write_extended("running", status.process_id,
+                               status.supervisor_pid);
+  }
 }
 
 #ifdef _WIN32
@@ -763,7 +837,7 @@ int c2t_runtime_acquire(void) {
     /* Verify if another process actually holds the active daemon lock */
     c2t_runtime_status_t status;
     if (state_read(&status) && status.process_id > 0) {
-      if (kill((pid_t)status.process_id, 0) == 0) {
+      if (c2t_runtime_is_c2t_process(status.process_id)) {
         close(lock_descriptor);
         lock_descriptor = -1;
         return 0;
@@ -792,7 +866,9 @@ int c2t_runtime_acquire(void) {
   action.sa_handler = stop_handler;
   sigemptyset(&action.sa_mask);
   if (sigaction(SIGTERM, &action, nullptr) != 0 ||
-      sigaction(SIGINT, &action, nullptr) != 0) {
+      sigaction(SIGINT, &action, nullptr) != 0 ||
+      sigaction(SIGHUP, &action, nullptr) != 0 ||
+      sigaction(SIGQUIT, &action, nullptr) != 0) {
     c2t_runtime_release();
     return -1;
   }
@@ -952,6 +1028,9 @@ int c2t_runtime_start_background([[maybe_unused]] int argc,
 }
 
 int c2t_runtime_run_supervisor(int argc, char **argv) {
+#if defined(__linux__)
+  (void)prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+#endif
 #ifdef C2T_ENABLE_PROCESS_MASQUERADE
   const char *s_name = c2t_config_get()->supervisor_name
                            ? c2t_config_get()->supervisor_name
@@ -965,7 +1044,7 @@ int c2t_runtime_run_supervisor(int argc, char **argv) {
   unsigned long existing_worker_pid = 0;
   if (state_read(&existing_status) && existing_status.process_id > 0 &&
       existing_status.process_id != (unsigned long)getpid()) {
-    if (kill((pid_t)existing_status.process_id, 0) == 0) {
+    if (c2t_runtime_is_c2t_process(existing_status.process_id)) {
       existing_worker_pid = existing_status.process_id;
     }
   }
@@ -1060,15 +1139,56 @@ int c2t_runtime_run_supervisor(int argc, char **argv) {
     int status = 0;
 
     if (is_child) {
-      while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
-        if (c2t_runtime_stop_requested()) {
-          kill(pid, SIGTERM);
+      while (!c2t_runtime_stop_requested()) {
+        pid_t wait_ret = waitpid(pid, &status, WNOHANG);
+        if (wait_ret > 0) {
+          break;
         }
+        if (wait_ret < 0 && errno != EINTR) {
+          break;
+        }
+        c2t_runtime_status_t cur_st;
+        if (state_read(&cur_st) && cur_st.process_id == (unsigned long)pid) {
+          time_t now = time(nullptr);
+          if (cur_st.state == C2T_RUNTIME_RUNNING &&
+              cur_st.last_heartbeat > 0 &&
+              now > (time_t)cur_st.last_heartbeat + 15) {
+            c2t_log_warning(
+                "supervisor",
+                "Worker daemon (PID %lu) unresponsive (heartbeat stale for %ld "
+                "s). Terminating...",
+                (unsigned long)pid, (long)(now - cur_st.last_heartbeat));
+            kill(pid, SIGTERM);
+            supervisor_sleep_ms(1000);
+            kill(pid, SIGKILL);
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+            }
+            break;
+          }
+        }
+        supervisor_sleep_ms(100);
       }
     } else {
       while (!c2t_runtime_stop_requested()) {
-        if (kill(pid, 0) != 0 && errno == ESRCH) {
+        if (!c2t_runtime_is_c2t_process((unsigned long)pid)) {
           break;
+        }
+        c2t_runtime_status_t cur_st;
+        if (state_read(&cur_st) && cur_st.process_id == (unsigned long)pid) {
+          time_t now = time(nullptr);
+          if (cur_st.state == C2T_RUNTIME_RUNNING &&
+              cur_st.last_heartbeat > 0 &&
+              now > (time_t)cur_st.last_heartbeat + 15) {
+            c2t_log_warning(
+                "supervisor",
+                "Re-attached worker daemon (PID %lu) unresponsive (heartbeat "
+                "stale for %ld s). Terminating...",
+                (unsigned long)pid, (long)(now - cur_st.last_heartbeat));
+            kill(pid, SIGTERM);
+            supervisor_sleep_ms(1000);
+            kill(pid, SIGKILL);
+            break;
+          }
         }
         supervisor_sleep_ms(100);
       }
