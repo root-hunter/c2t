@@ -27,7 +27,7 @@ import time
 def invoke(executable, *arguments, environment):
     return subprocess.run(
         [executable, *arguments], env=environment, text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=40)
 
 
 def get_parent_pid(pid: int) -> int:

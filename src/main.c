@@ -50,8 +50,8 @@ static void c2t_Sleep(DWORD dwMilliseconds) {
 #define Sleep c2t_Sleep
 #endif
 
-#define C2T_START_TIMEOUT_MS 10000U
-#define C2T_STOP_TIMEOUT_MS 15000U
+#define C2T_START_TIMEOUT_MS 20000U
+#define C2T_STOP_TIMEOUT_MS 20000U
 
 typedef enum {
   COMMAND_RUN,
