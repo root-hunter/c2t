@@ -1802,7 +1802,7 @@ int telegram_pair(const char *token, const char *expected_code,
          "===\n");
   printf("[PAIRING] Telegram Bot: @%s\n", bot_username);
   printf("[PAIRING] Please open Telegram and visit:\n");
-  printf("[PAIRING]   https://t.me/%s?start=%s\n", bot_username, code_buf);
+  printf("[PAIRING]   %s - %s\n", bot_username, code_buf);
   printf("[PAIRING] Or send '/start %s' to @%s\n", code_buf, bot_username);
   printf("[PAIRING] Waiting for pairing message (timeout: %ds)...\n",
          timeout_seconds);
