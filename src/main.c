@@ -174,9 +174,11 @@ static void print_usage(FILE *stream) {
     if (status.process_id)
       printf(" (PID %lu)", status.process_id);
     putchar('\n');
-    const char *path = c2t_runtime_log_path();
-    if (path)
-      printf("Log: %s\n", path);
+    if (c2t_config_get()->log_file) {
+      const char *path = c2t_runtime_log_path();
+      if (path)
+        printf("Log: %s\n", path);
+    }
   }
   return 0;
 }

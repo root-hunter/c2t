@@ -1259,6 +1259,14 @@ int c2t_runtime_stop(unsigned int timeout_ms, int force) {
     close(input);
   if (output > STDERR_FILENO)
     close(output);
+
+  int max_fd = (int)sysconf(_SC_OPEN_MAX);
+  if (max_fd < 0 || max_fd > 4096)
+    max_fd = 4096;
+  for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) {
+    close(fd);
+  }
+
   return ok;
 }
 
@@ -1283,6 +1291,9 @@ int c2t_runtime_start_background([[maybe_unused]] int argc,
     umask(077);
     if (chdir("/") != 0 || !redirect_background_io())
       _exit(1);
+    c2t_log_cleanup();
+    c2t_crypto_cleanup();
+    (void)c2t_crypto_init();
     return C2T_BACKGROUND_CHILD;
   }
   int child_status;
