@@ -24,8 +24,8 @@
 #include "clipboard.h"
 #include "clipboard_output.h"
 
-#include <shellapi.h>
 #include <windows.h>
+#include <shellapi.h>
 
 #include <stdint.h>
 #include <stdio.h>
