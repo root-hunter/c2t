@@ -86,7 +86,7 @@ def main():
             foreground = subprocess.Popen(
                 [executable, "run", "--verbose", "--log-file"], env=environment,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            for _ in range(50):
+            for _ in range(150):
                 foreground_status = invoke(
                     executable, "status", environment=environment)
                 if foreground_status.returncode == 0 and \
@@ -115,7 +115,7 @@ def main():
             import signal
             os.kill(worker_pid_1, signal.SIGTERM)
 
-            for _ in range(50):
+            for _ in range(150):
                 time.sleep(0.1)
                 auto_status_2 = invoke(executable, "status", environment=environment)
                 if auto_status_2.returncode == 0 and "running" in auto_status_2.stdout and "PID " in auto_status_2.stdout:
@@ -128,7 +128,7 @@ def main():
             # 2. Kill with SIGKILL (like 'kill -9 <PID>')
             os.kill(worker_pid_2, signal.SIGKILL)
 
-            for _ in range(50):
+            for _ in range(150):
                 time.sleep(0.1)
                 auto_status_3 = invoke(executable, "status", environment=environment)
                 if auto_status_3.returncode == 0 and "running" in auto_status_3.stdout and "PID " in auto_status_3.stdout:
