@@ -191,7 +191,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./build/${{ matrix.platform }}/tests/perf_bench --markdown-out perf_report.md --json-out perf_report.json
+          ./build/${{ matrix.platform }}/perf_bench --markdown-out perf_report.md --json-out perf_report.json
           echo "## Benchmark Results (${{ matrix.platform }} ${{ matrix.arch }})" >> "$GITHUB_STEP_SUMMARY"
           cat perf_report.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -203,7 +203,7 @@ jobs:
           docker run --rm \
             --volume "${GITHUB_WORKSPACE}/build/linux-musl:/build" \
             alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d \
-            sh -c '/build/tests/perf_bench --markdown-out /build/perf_report.md --json-out /build/perf_report.json'
+            sh -c '/build/perf_bench --markdown-out /build/perf_report.md --json-out /build/perf_report.json'
           cp build/linux-musl/perf_report.md perf_report.md
           cp build/linux-musl/perf_report.json perf_report.json
           echo "## Benchmark Results (${{ matrix.platform }} ${{ matrix.arch }})" >> "$GITHUB_STEP_SUMMARY"
@@ -215,7 +215,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update && sudo apt-get install -y wine || true
-          wine build/windows/tests/perf_bench.exe --markdown-out perf_report.md --json-out perf_report.json || true
+          wine build/windows/perf_bench.exe --markdown-out perf_report.md --json-out perf_report.json || true
           if [ -f perf_report.md ]; then
             echo "## Benchmark Results (${{ matrix.platform }} ${{ matrix.arch }})" >> "$GITHUB_STEP_SUMMARY"
             cat perf_report.md >> "$GITHUB_STEP_SUMMARY"
