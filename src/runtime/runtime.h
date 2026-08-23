@@ -53,5 +53,7 @@ void c2t_runtime_request_stop(void);
 void c2t_runtime_hide_console(void);
 void c2t_runtime_set_process_name(const char *name, int argc, char **argv);
 [[nodiscard]] const char *c2t_runtime_log_path(void);
+void c2t_runtime_start_worker_watchdog(int argc, char **argv);
+void c2t_runtime_stop_worker_watchdog(void);
 
 #endif

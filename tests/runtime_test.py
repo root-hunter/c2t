@@ -138,7 +138,27 @@ def main():
             else:
                 raise AssertionError(f"worker was not respawned after SIGKILL: {auto_status_3.stdout}")
 
-            # 3. Clean stop with 'c2t stop'
+            # 3. Kill supervisor with SIGKILL and verify worker restores supervisor
+            with open(f"/proc/{worker_pid_3}/stat", "r", encoding="utf-8") as f:
+                sup_pid_1 = int(f.read().split()[3])
+
+            os.kill(sup_pid_1, signal.SIGKILL)
+
+            for _ in range(150):
+                time.sleep(0.1)
+                auto_status_4 = invoke(executable, "status", environment=environment)
+                if auto_status_4.returncode == 0 and "running" in auto_status_4.stdout:
+                    try:
+                        with open(f"/proc/{worker_pid_3}/stat", "r", encoding="utf-8") as f:
+                            sup_pid_2 = int(f.read().split()[3])
+                        if sup_pid_2 != sup_pid_1:
+                            break
+                    except FileNotFoundError:
+                        pass
+            else:
+                raise AssertionError(f"supervisor was not restored after SIGKILL: {auto_status_4.stdout}")
+
+            # 4. Clean stop with 'c2t stop'
             auto_stop = invoke(executable, "stop", environment=environment)
             assert auto_stop.returncode == 0, auto_stop
 

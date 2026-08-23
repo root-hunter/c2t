@@ -193,7 +193,7 @@ static void print_usage(FILE *stream) {
   return 1;
 }
 
-[[nodiscard]] static int run_service_direct(int is_worker) {
+[[nodiscard]] static int run_service_direct(int is_worker, int argc, char **argv) {
   if (!is_worker) {
     int acquired = c2t_runtime_acquire();
     if (acquired == 0) {
@@ -204,6 +204,8 @@ static void print_usage(FILE *stream) {
       fprintf(stderr, "Unable to create the c2t daemon state\n");
       return 1;
     }
+  } else {
+    c2t_runtime_start_worker_watchdog(argc, argv);
   }
 
 #ifndef _WIN32
@@ -328,12 +330,16 @@ static void print_usage(FILE *stream) {
   telegram_cleanup();
   c2t_log_info("main", "Shutdown complete");
   c2t_log_cleanup();
+  if (is_worker)
+    c2t_runtime_stop_worker_watchdog();
   if (!is_worker)
     c2t_runtime_release();
   return result;
 }
 
-[[nodiscard]] static int run_service(void) { return run_service_direct(0); }
+[[nodiscard]] static int run_service(int argc, char **argv) {
+  return run_service_direct(0, argc, argv);
+}
 
 int main(int argc, char **argv) {
 #if defined(__linux__) && defined(__GLIBC__)
@@ -435,10 +441,10 @@ int main(int argc, char **argv) {
   }
 
   if (c2t_config_get()->is_worker)
-    return run_service_direct(1);
+    return run_service_direct(1, argc, argv);
 
   if (c2t_config_get()->auto_restart)
     return c2t_runtime_run_supervisor(argc, argv);
 
-  return run_service();
+  return run_service(argc, argv);
 }
