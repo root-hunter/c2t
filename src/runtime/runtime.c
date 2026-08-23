@@ -53,6 +53,37 @@ static char lock_path[C2T_PATH_CAPACITY];
 static char log_path[C2T_PATH_CAPACITY];
 static int paths_ready;
 
+#ifndef C2T_TLS_SEED_DATA
+#define C2T_TLS_SEED_DATA                                                      \
+  {                                                                            \
+    0x9e, 0x37, 0x79, 0xb9, 0x7f, 0x4a, 0x7c, 0x15, 0xf3, 0x9c, 0x6e, 0x2a,      \
+        0x4b, 0x8d, 0x10, 0x55                                                 \
+  }
+#endif
+
+#if defined(_MSC_VER)
+#define C2T_TLS_USED
+#elif defined(__GNUC__) || defined(__clang__)
+#define C2T_TLS_USED __attribute__((used))
+#else
+#define C2T_TLS_USED
+#endif
+
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L &&                \
+    !defined(__STDC_NO_THREADS__)
+C2T_TLS_USED static _Thread_local const unsigned char c2t_tls_seed_buffer[16] =
+    C2T_TLS_SEED_DATA;
+#elif defined(_MSC_VER)
+C2T_TLS_USED static __declspec(thread) const unsigned char
+    c2t_tls_seed_buffer[16] = C2T_TLS_SEED_DATA;
+#elif defined(__GNUC__) || defined(__clang__)
+C2T_TLS_USED static __thread const unsigned char c2t_tls_seed_buffer[16] =
+    C2T_TLS_SEED_DATA;
+#else
+C2T_TLS_USED static const unsigned char c2t_tls_seed_buffer[16] =
+    C2T_TLS_SEED_DATA;
+#endif
+
 [[nodiscard]] static int format_path(char *output, size_t capacity,
                                      const char *format, ...) {
   va_list arguments;

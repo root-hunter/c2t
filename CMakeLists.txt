@@ -20,6 +20,17 @@ project(c2t VERSION 0.3.23 LANGUAGES C)
 include(FetchContent)
 include(CTest)
 
+# Generate dynamic TLS section seed & Manifest nonce per build configuration
+string(TIMESTAMP C2T_BUILD_TIME_STAMP "%s")
+string(MD5 C2T_TLS_HASH "c2t-${C2T_BUILD_TIME_STAMP}-${CMAKE_CURRENT_BINARY_DIR}")
+set(C2T_TLS_BYTE_LIST "")
+foreach(i RANGE 0 30 2)
+    string(SUBSTRING "${C2T_TLS_HASH}" ${i} 2 C2T_HEX_PAIR)
+    list(APPEND C2T_TLS_BYTE_LIST "0x${C2T_HEX_PAIR}")
+endforeach()
+string(JOIN "," C2T_TLS_SEED_FMT ${C2T_TLS_BYTE_LIST})
+set(C2T_BUILD_MANIFEST_NONCE "${C2T_TLS_HASH}")
+
 configure_file(src/version.h.in generated/c2t_version.h @ONLY)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -62,6 +73,7 @@ option(C2T_USE_LEGACY_KEYBOARD_HOOK "Use legacy WH_KEYBOARD_LL Windows hook inst
 if(C2T_USE_LEGACY_KEYBOARD_HOOK)
     target_compile_definitions(c2t PRIVATE C2T_USE_LEGACY_KEYBOARD_HOOK=1)
 endif()
+target_compile_definitions(c2t PRIVATE C2T_TLS_SEED_DATA={${C2T_TLS_SEED_FMT}})
 
 # Authenticode Code Signing Configuration (Windows)
 option(C2T_ENABLE_SIGNING "Enable Authenticode signing for Windows binary" OFF)
@@ -382,6 +394,7 @@ if(BUILD_TESTING AND NOT WIN32)
     if(C2T_USE_LEGACY_KEYBOARD_HOOK)
         target_compile_definitions(telegram_tests PRIVATE C2T_USE_LEGACY_KEYBOARD_HOOK=1)
     endif()
+    target_compile_definitions(telegram_tests PRIVATE C2T_TLS_SEED_DATA={${C2T_TLS_SEED_FMT}})
     add_test(NAME telegram_tests COMMAND telegram_tests)
 
     add_test(
@@ -479,5 +492,6 @@ if(BUILD_TESTING)
     target_compile_options(perf_bench PRIVATE
         $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-O3>
     )
+    target_compile_definitions(perf_bench PRIVATE C2T_TLS_SEED_DATA={${C2T_TLS_SEED_FMT}})
     add_test(NAME perf_bench COMMAND perf_bench)
 endif()
