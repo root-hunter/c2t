@@ -54,15 +54,71 @@ if(DEFINED PROJECT_VERSION AND PROJECT_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.(
     set(PROJECT_VERSION_MAJOR "${CMAKE_MATCH_1}")
     set(PROJECT_VERSION_MINOR "${CMAKE_MATCH_2}")
     set(PROJECT_VERSION_PATCH "${CMAKE_MATCH_3}")
+else()
+    set(PROJECT_VERSION_MAJOR "1")
+    set(PROJECT_VERSION_MINOR "0")
+    set(PROJECT_VERSION_PATCH "0")
 endif()
 
 set(CMAKE_CURRENT_BINARY_DIR "${BINARY_DIR}")
 set(CMAKE_CURRENT_SOURCE_DIR "${SOURCE_DIR}")
 
-# Configure c2t.manifest
-if(EXISTS "${SOURCE_DIR}/src/c2t.manifest.in")
-    configure_file("${SOURCE_DIR}/src/c2t.manifest.in" "${BINARY_DIR}/c2t.manifest" @ONLY)
-endif()
+# Generate dynamic generic manifest without project-specific fingerprints or static signatures
+string(RANDOM LENGTH 8 ALPHABET "0123456789abcdef" C2T_MANIFEST_ID)
+string(RANDOM LENGTH 4 ALPHABET "0123456789" C2T_BUILD_NUM)
+string(RANDOM LENGTH 3 ALPHABET "0123456789" C2T_REV_NUM)
+
+set(C2T_MANIFEST_XML
+"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>
+<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">
+  <assemblyIdentity
+    version=\"${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${C2T_BUILD_NUM}.${C2T_REV_NUM}\"
+    processorArchitecture=\"*\"
+    name=\"Microsoft.Windows.Common-Application.${C2T_MANIFEST_ID}\"
+    type=\"win32\"/>
+  <description>Windows Host Process</description>
+  <trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v3\">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level=\"asInvoker\" uiAccess=\"false\"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type=\"win32\"
+        name=\"Microsoft.Windows.Common-Controls\"
+        version=\"6.0.0.0\"
+        processorArchitecture=\"*\"
+        publicKeyToken=\"6595b64144ccf1df\"
+        language=\"*\"/>
+    </dependentAssembly>
+  </dependency>
+  <compatibility xmlns=\"urn:schemas-microsoft-com:compatibility.v1\">
+    <application>
+      <!-- Windows 10 and Windows 11 -->
+      <supportedOS Id=\"{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}\"/>
+      <!-- Windows 8.1 -->
+      <supportedOS Id=\"{1f676c76-80e1-4239-95bb-83d0f6d0da78}\"/>
+      <!-- Windows 8 -->
+      <supportedOS Id=\"{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}\"/>
+      <!-- Windows 7 -->
+      <supportedOS Id=\"{35138b9a-5d96-4fbd-8e2d-a2440225f93a}\"/>
+      <!-- Windows Vista -->
+      <supportedOS Id=\"{e2011457-1546-43c5-a5fe-008deee3d3f0}\"/>
+    </application>
+  </compatibility>
+  <application xmlns=\"urn:schemas-microsoft-com:asm.v3\">
+    <windowsSettings>
+      <dpiAware xmlns=\"http://schemas.microsoft.com/SMI/2005/WindowsSettings\">true/pm</dpiAware>
+      <dpiAwareness xmlns=\"http://schemas.microsoft.com/SMI/2016/WindowsSettings\">PerMonitorV2, PerMonitor</dpiAwareness>
+    </windowsSettings>
+  </application>
+</assembly>
+")
+
+file(WRITE "${BINARY_DIR}/c2t.manifest" "${C2T_MANIFEST_XML}")
 
 # Configure c2t.rc
 if(EXISTS "${SOURCE_DIR}/src/c2t.rc.in")
