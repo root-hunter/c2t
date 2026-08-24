@@ -19,6 +19,7 @@
 
 #import <ApplicationServices/ApplicationServices.h>
 #import <CoreFoundation/CoreFoundation.h>
+#import <CoreGraphics/CoreGraphics.h>
 #import <ImageIO/ImageIO.h>
 #include "screenshot.h"
 #include "../logging/logging.h"
@@ -35,10 +36,15 @@ int screenshot_capture_macos(void **out_data, size_t *out_size,
   *out_data = NULL;
   *out_size = 0;
 
-  CGDirectDisplayID display = CGMainDisplayID();
-  CGImageRef image = CGDisplayCreateImage(display);
+  /* CGWindowListCreateImage is compatible with modern macOS (macOS 10.5 through macOS 15+) */
+  CGImageRef image = CGWindowListCreateImage(
+      CGRectInfinite,
+      kCGWindowListOptionOnScreenOnly,
+      kCGNullWindowID,
+      kCGWindowImageDefault);
+
   if (!image) {
-    c2t_log_warning("screenshot", "CGDisplayCreateImage failed; check Screen Recording permissions");
+    c2t_log_warning("screenshot", "CGWindowListCreateImage failed; check Screen Recording permissions in System Settings");
     return 0;
   }
 
