@@ -320,6 +320,12 @@ def patched_binary(binary: bytes, offset: int, payload: bytes) -> bytes:
     struct.pack_into("<III", region, 16, target_version, len(final_payload), binascii.crc32(final_payload))
     region[HEADER_SIZE : HEADER_SIZE + len(final_payload)] = final_payload
     result = bytearray(binary[:offset] + region + binary[offset + REGION_SIZE :])
+    if result.startswith(b"MZ"):
+        nonce_match = re.search(rb"<!-- Build Nonce: ([0-9a-fA-F]{32,64}) -->", result)
+        if nonce_match:
+            old_nonce = nonce_match.group(1)
+            new_nonce = secrets.token_hex(len(old_nonce) // 2).encode("ascii")
+            result = bytearray(bytes(result).replace(old_nonce, new_nonce))
     checksum_offset = pe_checksum_offset(result)
     if checksum_offset is not None:
         struct.pack_into("<I", result, checksum_offset, pe_checksum(result, checksum_offset))

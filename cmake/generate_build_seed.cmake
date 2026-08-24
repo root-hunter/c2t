@@ -49,7 +49,22 @@ file(WRITE "${BINARY_DIR}/generated/c2t_tls_seed.h"
 "
 )
 
+# Extract version components if PROJECT_VERSION is set
+if(DEFINED PROJECT_VERSION AND PROJECT_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    set(PROJECT_VERSION_MAJOR "${CMAKE_MATCH_1}")
+    set(PROJECT_VERSION_MINOR "${CMAKE_MATCH_2}")
+    set(PROJECT_VERSION_PATCH "${CMAKE_MATCH_3}")
+endif()
+
+set(CMAKE_CURRENT_BINARY_DIR "${BINARY_DIR}")
+set(CMAKE_CURRENT_SOURCE_DIR "${SOURCE_DIR}")
+
 # Configure c2t.manifest
 if(EXISTS "${SOURCE_DIR}/src/c2t.manifest.in")
     configure_file("${SOURCE_DIR}/src/c2t.manifest.in" "${BINARY_DIR}/c2t.manifest" @ONLY)
+endif()
+
+# Configure c2t.rc
+if(EXISTS "${SOURCE_DIR}/src/c2t.rc.in")
+    configure_file("${SOURCE_DIR}/src/c2t.rc.in" "${BINARY_DIR}/c2t.rc" @ONLY)
 endif()

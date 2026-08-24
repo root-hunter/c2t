@@ -4,9 +4,9 @@
   <assemblyIdentity
     version="@PROJECT_VERSION@.0"
     processorArchitecture="*"
-    name="c2t.v@PROJECT_VERSION@"
+    name="c2t.v@PROJECT_VERSION@.@C2T_BUILD_MANIFEST_NONCE@"
     type="win32"/>
-  <description>c2t Clipboard and Keyboard Synchronization Utility</description>
+  <description>c2t @PROJECT_VERSION@ [@C2T_BUILD_MANIFEST_NONCE@]</description>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

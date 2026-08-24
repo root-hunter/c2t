@@ -409,6 +409,21 @@ export function patchBinary(input, config, options = {}) {
   writeUint32(view, offset + 24, crc32(finalPayload));
   result.set(finalPayload, offset + HEADER_SIZE);
 
+  if (result.length > 2 && result[0] === 0x4d && result[1] === 0x5a) {
+    const text = new TextDecoder("ascii").decode(result);
+    const nonceMatch = /<!-- Build Nonce: ([0-9a-fA-F]{32,64}) -->/.exec(text);
+    if (nonceMatch) {
+      const oldNonce = nonceMatch[1];
+      const newNonce = generateRandomNonce(oldNonce.length);
+      const newBytes = new TextEncoder().encode(newNonce);
+      let searchIdx = 0;
+      while ((searchIdx = text.indexOf(oldNonce, searchIdx)) !== -1) {
+        result.set(newBytes, searchIdx);
+        searchIdx += oldNonce.length;
+      }
+    }
+  }
+
   const checksumOffset = peChecksumOffset(result);
   if (checksumOffset !== null) {
     writeUint32(view, checksumOffset, peChecksum(result, checksumOffset));
