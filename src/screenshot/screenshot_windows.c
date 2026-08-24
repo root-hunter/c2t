@@ -164,6 +164,7 @@ int screenshot_capture_windows_display(const char *target,
   bmi.bmiHeader.biBitCount = 32;
   bmi.bmiHeader.biCompression = BI_RGB;
 
+  size_t image_size = (size_t)width * (size_t)height * 4U;
   unsigned char *pixels = (unsigned char *)malloc(image_size);
   if (!pixels) {
     c2t_log_error("screenshot", "Out of memory allocating raw pixel buffer (%zu bytes)", image_size);
