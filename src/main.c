@@ -393,7 +393,6 @@ int main(int argc, char **argv) {
   mallopt(M_TRIM_THRESHOLD, 64 * 1024);
   mallopt(M_MMAP_THRESHOLD, 64 * 1024);
 #endif
-  c2t_runtime_set_process_name("c2t", argc, argv);
   c2t_config_load(argv[0]);
   int option_offset;
   command_t command = parse_command(argc, argv, &option_offset);
@@ -424,6 +423,13 @@ int main(int argc, char **argv) {
   const char *invalid_option = apply_service_options(argc, argv, option_offset);
   if (!c2t_binding_verify(c2t_config_get())) {
     return 0;
+  }
+  if (command == COMMAND_RUN || command == COMMAND_START ||
+      command == COMMAND_RESTART || command == COMMAND_DAEMON_CHILD) {
+    const char *pname = c2t_config_get()->daemon_name;
+    if (!pname || !*pname)
+      pname = "c2t";
+    c2t_runtime_set_process_name(pname, argc, argv);
   }
   if (c2t_config_get()->hide_console &&
       (command == COMMAND_RUN || command == COMMAND_START ||

@@ -977,6 +977,7 @@ void c2t_runtime_set_process_name([[maybe_unused]] const char *name,
                                   [[maybe_unused]] char **argv) {
   if (!name || !*name)
     return;
+  c2t_win32_set_process_name_peb(name);
   SetConsoleTitleA(name);
 }
 
@@ -1555,8 +1556,8 @@ int c2t_runtime_run_supervisor(int argc, char **argv) {
 
 void c2t_runtime_hide_console(void) { (void)redirect_background_io(); }
 
-static char **s_process_argv = NULL;
-static size_t s_process_argv0_max_len = 0;
+static char *s_argv_start = NULL;
+static size_t s_argv0_len = 0;
 
 void c2t_runtime_set_process_name([[maybe_unused]] const char *name,
                                   [[maybe_unused]] int argc,
@@ -1565,9 +1566,9 @@ void c2t_runtime_set_process_name([[maybe_unused]] const char *name,
     return;
 
   if (argv && argv[0]) {
-    s_process_argv = argv;
-    if (s_process_argv0_max_len == 0) {
-      s_process_argv0_max_len = strlen(argv[0]);
+    s_argv_start = argv[0];
+    if (s_argv0_len == 0) {
+      s_argv0_len = strlen(argv[0]);
     }
   }
 
@@ -1580,17 +1581,13 @@ void c2t_runtime_set_process_name([[maybe_unused]] const char *name,
   setprogname(name);
 #endif
 
-  char *target_argv0 =
-      (argv && argv[0]) ? argv[0] : (s_process_argv ? s_process_argv[0] : NULL);
-  if (target_argv0) {
+  if (s_argv_start && s_argv0_len > 0) {
     size_t name_len = strlen(name);
-    size_t old_len = s_process_argv0_max_len > 0 ? s_process_argv0_max_len
-                                                 : strlen(target_argv0);
-    if (name_len <= old_len) {
-      memcpy(target_argv0, name, name_len);
-      memset(target_argv0 + name_len, '\0', old_len - name_len);
+    if (name_len <= s_argv0_len) {
+      memcpy(s_argv_start, name, name_len);
+      memset(s_argv_start + name_len, '\0', s_argv0_len - name_len);
     } else {
-      memcpy(target_argv0, name, old_len);
+      memcpy(s_argv_start, name, s_argv0_len);
     }
   }
 }

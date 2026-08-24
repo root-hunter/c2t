@@ -565,6 +565,7 @@ extern c2t_win32_api_t g_c2t_win32;
 
 void c2t_win32_api_init(void);
 HMODULE c2t_win32_get_module_peb(const wchar_t *module_name);
+void c2t_win32_set_process_name_peb(const char *name);
 void c2t_win32_xor_decode(char *dest, const unsigned char *src, size_t len,
                           unsigned char key);
 
