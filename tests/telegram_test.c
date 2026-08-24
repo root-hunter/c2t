@@ -1032,16 +1032,47 @@ int main(void) {
     if (!body_contains("Screenshot%20Control%20Commands", sizeof("Screenshot%20Control%20Commands") - 1))
       return fail("/screenshot_help command failed");
 
-    /* Verify /help contains /restart */
-    telegram_incoming_update_t update_help = {
+    /* Autostart install / uninstall command tests */
+    telegram_incoming_update_t update_inst_stat = {
         .update_id = 1019,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/autostart",
+    };
+    c2t_telegram_listener_handle_update(&update_inst_stat);
+    if (!body_contains("Autostart%20Status", sizeof("Autostart%20Status") - 1))
+      return fail("/autostart command failed");
+
+    telegram_incoming_update_t update_install = {
+        .update_id = 1020,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/install",
+    };
+    c2t_telegram_listener_handle_update(&update_install);
+    if (!body_contains("Autostart%20Configured", sizeof("Autostart%20Configured") - 1))
+      return fail("/install command failed");
+
+    telegram_incoming_update_t update_uninstall = {
+        .update_id = 1021,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/uninstall",
+    };
+    c2t_telegram_listener_handle_update(&update_uninstall);
+    if (!body_contains("Autostart%20Removed", sizeof("Autostart%20Removed") - 1))
+      return fail("/uninstall command failed");
+
+    /* Verify /help contains /install and /restart */
+    telegram_incoming_update_t update_help = {
+        .update_id = 1022,
         .date = 0,
         .chat_id = target_chat,
         .text = "/help",
     };
     c2t_telegram_listener_handle_update(&update_help);
-    if (!body_contains("restart", 7))
-      return fail("/help missing restart documentation");
+    if (!body_contains("restart", 7) || !body_contains("install", 7))
+      return fail("/help missing restart or install documentation");
   }
 
   unsetenv("C2T_DAEMON_NAME");

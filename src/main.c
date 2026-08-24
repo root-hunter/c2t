@@ -19,6 +19,7 @@
 #include "clipboard/clipboard.h"
 #include "clipboard/clipboard_output.h"
 #include "config/config.h"
+#include "install/install.h"
 #include "keyboard/keyboard.h"
 #include "keyboard/keyboard_output.h"
 #include "logging/log_sender.h"
@@ -58,6 +59,9 @@ static void c2t_Sleep(DWORD dwMilliseconds) {
 typedef enum {
   COMMAND_RUN,
   COMMAND_START,
+  COMMAND_INSTALL,
+  COMMAND_UNINSTALL,
+  COMMAND_AUTOSTART,
   COMMAND_PAIR,
   COMMAND_STATUS,
   COMMAND_STOP,
@@ -76,6 +80,9 @@ static void print_usage(FILE *stream) {
       "Commands:\n"
       "  start       Start c2t in the background\n"
       "  run         Run c2t in the foreground\n"
+      "  install     Install c2t to autostart on system boot / user login\n"
+      "  uninstall   Remove c2t autostart service / registry entry\n"
+      "  autostart   Check current autostart installation status\n"
       "  pair        Pair Telegram bot interactively via deep link\n"
       "  status      Show whether c2t is running\n"
       "  stop        Stop c2t gracefully\n"
@@ -145,6 +152,12 @@ static void print_usage(FILE *stream) {
     return COMMAND_START;
   if (strcmp(argv[1], "run") == 0)
     return COMMAND_RUN;
+  if (strcmp(argv[1], "install") == 0)
+    return COMMAND_INSTALL;
+  if (strcmp(argv[1], "uninstall") == 0)
+    return COMMAND_UNINSTALL;
+  if (strcmp(argv[1], "autostart") == 0)
+    return COMMAND_AUTOSTART;
   if (strcmp(argv[1], "pair") == 0)
     return COMMAND_PAIR;
   if (strcmp(argv[1], "status") == 0)
@@ -411,6 +424,26 @@ int main(int argc, char **argv) {
       return 2;
     }
     return show_status(0);
+  }
+  if (command == COMMAND_INSTALL) {
+    int system_wide = (argc >= 3 && strcmp(argv[2], "--system") == 0);
+    char detail[1024] = {};
+    int res = c2t_install_autostart(system_wide, detail, sizeof(detail));
+    printf("%s\n", detail);
+    return res ? 0 : 1;
+  }
+  if (command == COMMAND_UNINSTALL) {
+    int system_wide = (argc >= 3 && strcmp(argv[2], "--system") == 0);
+    char detail[1024] = {};
+    int res = c2t_uninstall_autostart(system_wide, detail, sizeof(detail));
+    printf("%s\n", detail);
+    return res ? 0 : 1;
+  }
+  if (command == COMMAND_AUTOSTART) {
+    char detail[1024] = {};
+    (void)c2t_get_autostart_status(detail, sizeof(detail));
+    printf("%s\n", detail);
+    return 0;
   }
   if (command == COMMAND_STOP) {
     int force = argc == 3 && strcmp(argv[2], "--force") == 0;

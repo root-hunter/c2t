@@ -189,6 +189,8 @@ C2T_DELIVERY_ATTEMPTS=5 C2T_RETRY_DELAY_MS=1000 c2t
   - `/restart logs` (or `/reset_logs`): Flushes and restarts log sender subsystem.
   - `/restart all` (or `/restart_all`, `/reset_all`): Resets and restarts all subsystems in-place.
   - `/restart daemon` (or `/restart`, `/reboot`): Fully restarts the daemon process (via supervisor or clean binary re-exec).
+- `/install [enable|remove|status]` (or `/autostart`): Configures the daemon to autostart on system boot or user login (Systemd user service & XDG autostart on Linux, Registry Run key on Windows, LaunchAgent on macOS).
+- `/uninstall`: Disables and removes autostart services/registry entries.
 - `/getfile <path>`: Retrieves and sends any file from the host filesystem as a Telegram document attachment.
 - `/upload [path]` (or sending any attached file/document with optional destination path in caption): Downloads and writes incoming files directly to host disk.
 - `/ls [path]`: Lists files and directories with sizes and permissions.

