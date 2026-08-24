@@ -1043,7 +1043,7 @@ int main(void) {
     return fail("decrypted plaintext mismatch");
 
   /* Independent ChaCha20 vectors spanning the SIMD and scalar paths. */
-  static const unsigned char chacha_expected[5][16] = {
+  static const unsigned char chacha_expected[9][16] = {
       {0x08, 0x5f, 0xfe, 0x3d, 0xaa, 0xe9, 0x27, 0x6b, 0x70, 0x3d, 0x39,
        0x6a, 0x35, 0xe6, 0xce, 0xb3},
       {0xf9, 0x06, 0x86, 0x1a, 0x2c, 0xac, 0x0e, 0x86, 0x9f, 0xf1, 0x72,
@@ -1053,19 +1053,40 @@ int main(void) {
       {0xb2, 0x9b, 0xf7, 0xb7, 0x3a, 0x2e, 0x0c, 0x92, 0x78, 0x5c, 0x91,
        0xf5, 0x93, 0x0f, 0x9a, 0x8c},
       {0xf1, 0x19, 0x30, 0x37, 0x13, 0x85, 0x0c, 0x7b, 0xea, 0x33, 0xed,
-       0xe2, 0x6f, 0xf5, 0xce, 0x55}};
+       0xe2, 0x6f, 0xf5, 0xce, 0x55},
+      {0x97, 0x4a, 0xd3, 0x88, 0xd8, 0xd9, 0xa4, 0x4d, 0x43, 0x6c, 0x03,
+       0x63, 0xbb, 0x78, 0xb0, 0xc2},
+      {0x4c, 0x15, 0xf3, 0x99, 0x97, 0x62, 0x48, 0x9f, 0x03, 0x11, 0xb6,
+       0xea, 0xa7, 0x41, 0xa4, 0xc3},
+      {0xdf, 0xe4, 0x07, 0x4a, 0xf2, 0xaf, 0x4f, 0x39, 0x0a, 0xdb, 0x58,
+       0x9e, 0x8c, 0x56, 0x4a, 0x93},
+      {0x51, 0x76, 0x9c, 0xbf, 0xfe, 0x16, 0xa1, 0x06, 0x04, 0xdc, 0x2c,
+       0xf0, 0x6c, 0x6f, 0xa3, 0xb1}};
   unsigned char chacha_nonce[C2T_CRYPTO_NONCE_SIZE];
-  unsigned char chacha_plain[320] = {0};
-  unsigned char chacha_output[320];
+  unsigned char chacha_plain[576] = {0};
+  unsigned char chacha_output[576];
   for (size_t i = 0; i < sizeof(chacha_nonce); ++i)
     chacha_nonce[i] = (unsigned char)i;
   if (!c2t_crypto_state_encrypt(chacha_plain, sizeof(chacha_plain),
                                 chacha_nonce, chacha_output))
     return fail("ChaCha20 known-vector encryption");
-  for (size_t block_index = 0; block_index < 5; ++block_index) {
+  for (size_t block_index = 0;
+       block_index < sizeof(chacha_expected) / sizeof(chacha_expected[0]);
+       ++block_index) {
     if (memcmp(chacha_output + block_index * 64, chacha_expected[block_index],
                sizeof(chacha_expected[block_index])) != 0)
       return fail("ChaCha20 known-vector mismatch");
+  }
+  memset(chacha_output, 0, sizeof(chacha_output));
+  if (!c2t_crypto_state_encrypt(chacha_output, sizeof(chacha_output),
+                                chacha_nonce, chacha_output))
+    return fail("ChaCha20 in-place known-vector encryption");
+  for (size_t block_index = 0;
+       block_index < sizeof(chacha_expected) / sizeof(chacha_expected[0]);
+       ++block_index) {
+    if (memcmp(chacha_output + block_index * 64, chacha_expected[block_index],
+               sizeof(chacha_expected[block_index])) != 0)
+      return fail("ChaCha20 in-place known-vector mismatch");
   }
 
   c2t_secure_zero(decrypted, sizeof(decrypted));

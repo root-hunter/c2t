@@ -295,6 +295,17 @@ static void chacha20_init_state(uint32_t state[16], const unsigned char key[32],
 #define C2T_HAS_SSE2 1
 #endif
 
+#if defined(C2T_HAS_SSE2) &&                                                   \
+    (defined(__GNUC__) || defined(__clang__) || defined(__AVX2__))
+#include <immintrin.h>
+#define C2T_HAS_AVX2_DISPATCH 1
+#if defined(__GNUC__) || defined(__clang__)
+#define C2T_TARGET_AVX2 __attribute__((target("avx2")))
+#else
+#define C2T_TARGET_AVX2
+#endif
+#endif
+
 #if defined(C2T_HAS_SSE2)
 #define ROTL32_SSE2(v, n)                                                     \
   _mm_or_si128(_mm_slli_epi32((v), (n)), _mm_srli_epi32((v), 32 - (n)))
@@ -405,6 +416,134 @@ static void chacha20_crypt_4blocks(const uint32_t state[16],
 }
 #endif
 
+#if defined(C2T_HAS_AVX2_DISPATCH)
+#define ROTL32_AVX2(v, n)                                                     \
+  _mm256_or_si256(_mm256_slli_epi32((v), (n)),                               \
+                  _mm256_srli_epi32((v), 32 - (n)))
+#define ROTL16_AVX2(v)                                                         \
+  _mm256_shuffle_epi8(                                                        \
+      (v), _mm256_setr_epi8(2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9, 14, 15,   \
+                             12, 13, 2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9,   \
+                             14, 15, 12, 13))
+#define ROTL8_AVX2(v)                                                          \
+  _mm256_shuffle_epi8(                                                        \
+      (v), _mm256_setr_epi8(3, 0, 1, 2, 7, 4, 5, 6, 11, 8, 9, 10, 15, 12,   \
+                             13, 14, 3, 0, 1, 2, 7, 4, 5, 6, 11, 8, 9, 10,   \
+                             15, 12, 13, 14))
+#define CHACHA20_QUARTERROUND_AVX2(a, b, c, d)                                \
+  do {                                                                         \
+    (a) = _mm256_add_epi32((a), (b));                                          \
+    (d) = ROTL16_AVX2(_mm256_xor_si256((d), (a)));                            \
+    (c) = _mm256_add_epi32((c), (d));                                          \
+    (b) = ROTL32_AVX2(_mm256_xor_si256((b), (c)), 12);                        \
+    (a) = _mm256_add_epi32((a), (b));                                          \
+    (d) = ROTL8_AVX2(_mm256_xor_si256((d), (a)));                             \
+    (c) = _mm256_add_epi32((c), (d));                                          \
+    (b) = ROTL32_AVX2(_mm256_xor_si256((b), (c)), 7);                         \
+  } while (0)
+
+static C2T_TARGET_AVX2 inline void
+chacha20_xor_8words(__m256i x0, __m256i x1, __m256i x2, __m256i x3,
+                    const unsigned char *input, unsigned char *output) {
+  __m256i t0 = _mm256_unpacklo_epi32(x0, x1);
+  __m256i t1 = _mm256_unpackhi_epi32(x0, x1);
+  __m256i t2 = _mm256_unpacklo_epi32(x2, x3);
+  __m256i t3 = _mm256_unpackhi_epi32(x2, x3);
+  __m256i b04 = _mm256_unpacklo_epi64(t0, t2);
+  __m256i b15 = _mm256_unpackhi_epi64(t0, t2);
+  __m256i b26 = _mm256_unpacklo_epi64(t1, t3);
+  __m256i b37 = _mm256_unpackhi_epi64(t1, t3);
+  __m128i blocks[8] = {
+      _mm256_castsi256_si128(b04),      _mm256_castsi256_si128(b15),
+      _mm256_castsi256_si128(b26),      _mm256_castsi256_si128(b37),
+      _mm256_extracti128_si256(b04, 1), _mm256_extracti128_si256(b15, 1),
+      _mm256_extracti128_si256(b26, 1), _mm256_extracti128_si256(b37, 1)};
+
+  for (size_t block_index = 0; block_index < 8; ++block_index) {
+    size_t block_offset = block_index * 64;
+    __m128i in = _mm_loadu_si128(
+        (const __m128i *)(const void *)(input + block_offset));
+    _mm_storeu_si128((__m128i *)(void *)(output + block_offset),
+                     _mm_xor_si128(in, blocks[block_index]));
+  }
+}
+
+static C2T_TARGET_AVX2 void
+chacha20_crypt_8blocks(const uint32_t state[16], const unsigned char *input,
+                       unsigned char *output) {
+  __m256i x0 = _mm256_set1_epi32((int)state[0]);
+  __m256i x1 = _mm256_set1_epi32((int)state[1]);
+  __m256i x2 = _mm256_set1_epi32((int)state[2]);
+  __m256i x3 = _mm256_set1_epi32((int)state[3]);
+  __m256i x4 = _mm256_set1_epi32((int)state[4]);
+  __m256i x5 = _mm256_set1_epi32((int)state[5]);
+  __m256i x6 = _mm256_set1_epi32((int)state[6]);
+  __m256i x7 = _mm256_set1_epi32((int)state[7]);
+  __m256i x8 = _mm256_set1_epi32((int)state[8]);
+  __m256i x9 = _mm256_set1_epi32((int)state[9]);
+  __m256i x10 = _mm256_set1_epi32((int)state[10]);
+  __m256i x11 = _mm256_set1_epi32((int)state[11]);
+  __m256i x12 = _mm256_set_epi32(
+      (int)(state[12] + 7U), (int)(state[12] + 6U),
+      (int)(state[12] + 5U), (int)(state[12] + 4U),
+      (int)(state[12] + 3U), (int)(state[12] + 2U),
+      (int)(state[12] + 1U), (int)state[12]);
+  __m256i x13 = _mm256_set1_epi32((int)state[13]);
+  __m256i x14 = _mm256_set1_epi32((int)state[14]);
+  __m256i x15 = _mm256_set1_epi32((int)state[15]);
+
+  for (size_t i = 0; i < 10; ++i) {
+    CHACHA20_QUARTERROUND_AVX2(x0, x4, x8, x12);
+    CHACHA20_QUARTERROUND_AVX2(x1, x5, x9, x13);
+    CHACHA20_QUARTERROUND_AVX2(x2, x6, x10, x14);
+    CHACHA20_QUARTERROUND_AVX2(x3, x7, x11, x15);
+    CHACHA20_QUARTERROUND_AVX2(x0, x5, x10, x15);
+    CHACHA20_QUARTERROUND_AVX2(x1, x6, x11, x12);
+    CHACHA20_QUARTERROUND_AVX2(x2, x7, x8, x13);
+    CHACHA20_QUARTERROUND_AVX2(x3, x4, x9, x14);
+  }
+
+#define CHACHA20_ADD_ORIGINAL_AVX2(n)                                          \
+  x##n = _mm256_add_epi32(x##n, _mm256_set1_epi32((int)state[n]))
+  CHACHA20_ADD_ORIGINAL_AVX2(0);
+  CHACHA20_ADD_ORIGINAL_AVX2(1);
+  CHACHA20_ADD_ORIGINAL_AVX2(2);
+  CHACHA20_ADD_ORIGINAL_AVX2(3);
+  CHACHA20_ADD_ORIGINAL_AVX2(4);
+  CHACHA20_ADD_ORIGINAL_AVX2(5);
+  CHACHA20_ADD_ORIGINAL_AVX2(6);
+  CHACHA20_ADD_ORIGINAL_AVX2(7);
+  CHACHA20_ADD_ORIGINAL_AVX2(8);
+  CHACHA20_ADD_ORIGINAL_AVX2(9);
+  CHACHA20_ADD_ORIGINAL_AVX2(10);
+  CHACHA20_ADD_ORIGINAL_AVX2(11);
+  x12 = _mm256_add_epi32(
+      x12, _mm256_set_epi32(
+               (int)(state[12] + 7U), (int)(state[12] + 6U),
+               (int)(state[12] + 5U), (int)(state[12] + 4U),
+               (int)(state[12] + 3U), (int)(state[12] + 2U),
+               (int)(state[12] + 1U), (int)state[12]));
+  CHACHA20_ADD_ORIGINAL_AVX2(13);
+  CHACHA20_ADD_ORIGINAL_AVX2(14);
+  CHACHA20_ADD_ORIGINAL_AVX2(15);
+#undef CHACHA20_ADD_ORIGINAL_AVX2
+
+  chacha20_xor_8words(x0, x1, x2, x3, input + 0, output + 0);
+  chacha20_xor_8words(x4, x5, x6, x7, input + 16, output + 16);
+  chacha20_xor_8words(x8, x9, x10, x11, input + 32, output + 32);
+  chacha20_xor_8words(x12, x13, x14, x15, input + 48, output + 48);
+  _mm256_zeroupper();
+}
+
+static int chacha20_has_avx2(void) {
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_cpu_supports("avx2") != 0;
+#else
+  return 1;
+#endif
+}
+#endif
+
 static void chacha20_crypt(const unsigned char key[32],
                            const unsigned char nonce[12], uint32_t counter,
                            const unsigned char *input, unsigned char *output,
@@ -416,6 +555,15 @@ static void chacha20_crypt(const unsigned char key[32],
   chacha20_init_state(state, key, nonce, counter);
 
   size_t offset = 0;
+#if defined(C2T_HAS_AVX2_DISPATCH)
+  if (chacha20_has_avx2()) {
+    while (len - offset >= 512) {
+      chacha20_crypt_8blocks(state, input + offset, output + offset);
+      state[12] += 8U;
+      offset += 512;
+    }
+  }
+#endif
 #if defined(C2T_HAS_SSE2)
   while (len - offset >= 256) {
     chacha20_crypt_4blocks(state, input + offset, output + offset);
