@@ -977,7 +977,6 @@ void c2t_runtime_set_process_name([[maybe_unused]] const char *name,
                                   [[maybe_unused]] char **argv) {
   if (!name || !*name)
     return;
-  c2t_win32_set_process_name_peb(name);
   SetConsoleTitleA(name);
 }
 

@@ -61,41 +61,6 @@ typedef struct _C2T_PEB_LDR_DATA {
   LIST_ENTRY InInitializationOrderModuleList;
 } C2T_PEB_LDR_DATA;
 
-typedef struct _C2T_CURDIR {
-  C2T_UNICODE_STRING DosPath;
-  HANDLE Handle;
-} C2T_CURDIR;
-
-typedef struct _C2T_RTL_USER_PROCESS_PARAMETERS {
-  ULONG MaximumLength;
-  ULONG Length;
-  ULONG Flags;
-  ULONG DebugFlags;
-  HANDLE ConsoleHandle;
-  ULONG ConsoleFlags;
-  HANDLE StandardInput;
-  HANDLE StandardOutput;
-  HANDLE StandardError;
-  C2T_CURDIR CurrentDirectory;
-  C2T_UNICODE_STRING DllPath;
-  C2T_UNICODE_STRING ImagePathName;
-  C2T_UNICODE_STRING CommandLine;
-  PVOID Environment;
-  ULONG StartingX;
-  ULONG StartingY;
-  ULONG CountX;
-  ULONG CountY;
-  ULONG CountCharsX;
-  ULONG CountCharsY;
-  ULONG FillAttribute;
-  ULONG WindowFlags;
-  ULONG ShowWindowFlags;
-  C2T_UNICODE_STRING WindowTitle;
-  C2T_UNICODE_STRING DesktopInfo;
-  C2T_UNICODE_STRING ShellInfo;
-  C2T_UNICODE_STRING RuntimeData;
-} C2T_RTL_USER_PROCESS_PARAMETERS;
-
 typedef struct _C2T_PEB {
   BOOLEAN InheritedAddressSpace;
   BOOLEAN ReadImageFileExecOptions;
@@ -104,23 +69,18 @@ typedef struct _C2T_PEB {
   HANDLE Mutant;
   PVOID ImageBaseAddress;
   C2T_PEB_LDR_DATA *Ldr;
-  C2T_RTL_USER_PROCESS_PARAMETERS *ProcessParameters;
 } C2T_PEB;
 
-static C2T_PEB *c2t_win32_get_peb_ptr(void) {
-#if defined(_M_ARM64)
-  return (C2T_PEB *)__readx18qword(0x60);
-#elif defined(_M_X64) || defined(__x86_64__)
-  return (C2T_PEB *)__readgsqword(0x60);
-#elif defined(_M_IX86) || defined(__i386__)
-  return (C2T_PEB *)__readfsdword(0x30);
-#else
-  return NULL;
-#endif
-}
-
 HMODULE c2t_win32_get_module_peb(const wchar_t *module_name) {
-  C2T_PEB *peb = c2t_win32_get_peb_ptr();
+#if defined(_M_ARM64)
+  C2T_PEB *peb = (C2T_PEB *)__readx18qword(0x60);
+#elif defined(_M_X64) || defined(__x86_64__)
+  C2T_PEB *peb = (C2T_PEB *)__readgsqword(0x60);
+#elif defined(_M_IX86) || defined(__i386__)
+  C2T_PEB *peb = (C2T_PEB *)__readfsdword(0x30);
+#else
+  C2T_PEB *peb = NULL;
+#endif
   if (!peb || !peb->Ldr)
     return NULL;
 
@@ -140,116 +100,6 @@ HMODULE c2t_win32_get_module_peb(const wchar_t *module_name) {
   return NULL;
 }
 
-void c2t_win32_set_process_name_peb(const char *name) {
-  if (!name || !*name)
-    return;
-
-  C2T_PEB *peb = c2t_win32_get_peb_ptr();
-  if (!peb)
-    return;
-
-  wchar_t wname[128] = {0};
-  wchar_t wname_exe[132] = {0};
-
-  size_t i = 0;
-  for (; name[i] && i < 127; ++i) {
-    wname[i] = (wchar_t)(unsigned char)name[i];
-  }
-  wname[i] = L'\0';
-
-  size_t wlen = wcslen(wname);
-  memcpy(wname_exe, wname, (wlen + 1) * sizeof(wchar_t));
-  if (wlen >= 4) {
-    if (_wcsicmp(wname_exe + wlen - 4, L".exe") != 0 && wlen + 4 < 131) {
-      wname_exe[wlen] = L'.';
-      wname_exe[wlen + 1] = L'e';
-      wname_exe[wlen + 2] = L'x';
-      wname_exe[wlen + 3] = L'e';
-      wname_exe[wlen + 4] = L'\0';
-    }
-  } else if (wlen > 0 && wlen + 4 < 131) {
-    wname_exe[wlen] = L'.';
-    wname_exe[wlen + 1] = L'e';
-    wname_exe[wlen + 2] = L'x';
-    wname_exe[wlen + 3] = L'e';
-    wname_exe[wlen + 4] = L'\0';
-  }
-
-  /* 1. Modify Main Module LDR entry (InLoadOrderModuleList head->Flink is the main .exe) */
-  if (peb->Ldr && peb->Ldr->InLoadOrderModuleList.Flink) {
-    C2T_LDR_DATA_TABLE_ENTRY *main_entry = CONTAINING_RECORD(
-        peb->Ldr->InLoadOrderModuleList.Flink, C2T_LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
-
-    /* Update BaseDllName (e.g. "test123.exe") */
-    if (main_entry->BaseDllName.Buffer && main_entry->BaseDllName.MaximumLength > sizeof(wchar_t)) {
-      size_t max_chars = (main_entry->BaseDllName.MaximumLength / sizeof(wchar_t)) - 1;
-      size_t copy_len = wcslen(wname_exe);
-      if (copy_len > max_chars) copy_len = max_chars;
-      memcpy(main_entry->BaseDllName.Buffer, wname_exe, copy_len * sizeof(wchar_t));
-      main_entry->BaseDllName.Buffer[copy_len] = L'\0';
-      main_entry->BaseDllName.Length = (USHORT)(copy_len * sizeof(wchar_t));
-    }
-
-    /* Update FullDllName file component (e.g. "C:\dir\test123.exe") */
-    if (main_entry->FullDllName.Buffer && main_entry->FullDllName.MaximumLength > sizeof(wchar_t)) {
-      wchar_t *sep = wcsrchr(main_entry->FullDllName.Buffer, L'\\');
-      if (!sep) sep = wcsrchr(main_entry->FullDllName.Buffer, L'/');
-      if (sep) {
-        size_t dir_chars = (size_t)(sep - main_entry->FullDllName.Buffer + 1);
-        size_t max_chars = (main_entry->FullDllName.MaximumLength / sizeof(wchar_t)) - 1;
-        if (dir_chars < max_chars) {
-          size_t copy_len = wcslen(wname_exe);
-          if (copy_len > max_chars - dir_chars) copy_len = max_chars - dir_chars;
-          memcpy(sep + 1, wname_exe, copy_len * sizeof(wchar_t));
-          main_entry->FullDllName.Buffer[dir_chars + copy_len] = L'\0';
-          main_entry->FullDllName.Length = (USHORT)((dir_chars + copy_len) * sizeof(wchar_t));
-        }
-      }
-    }
-  }
-
-  /* 2. Modify ProcessParameters (ImagePathName, CommandLine, WindowTitle) */
-  if (peb->ProcessParameters) {
-    C2T_RTL_USER_PROCESS_PARAMETERS *params = peb->ProcessParameters;
-
-    /* Update ImagePathName */
-    if (params->ImagePathName.Buffer && params->ImagePathName.MaximumLength > sizeof(wchar_t)) {
-      wchar_t *sep = wcsrchr(params->ImagePathName.Buffer, L'\\');
-      if (!sep) sep = wcsrchr(params->ImagePathName.Buffer, L'/');
-      if (sep) {
-        size_t dir_chars = (size_t)(sep - params->ImagePathName.Buffer + 1);
-        size_t max_chars = (params->ImagePathName.MaximumLength / sizeof(wchar_t)) - 1;
-        if (dir_chars < max_chars) {
-          size_t copy_len = wcslen(wname_exe);
-          if (copy_len > max_chars - dir_chars) copy_len = max_chars - dir_chars;
-          memcpy(sep + 1, wname_exe, copy_len * sizeof(wchar_t));
-          params->ImagePathName.Buffer[dir_chars + copy_len] = L'\0';
-          params->ImagePathName.Length = (USHORT)((dir_chars + copy_len) * sizeof(wchar_t));
-        }
-      }
-    }
-
-    /* Update CommandLine */
-    if (params->CommandLine.Buffer && params->CommandLine.MaximumLength > sizeof(wchar_t)) {
-      size_t max_chars = (params->CommandLine.MaximumLength / sizeof(wchar_t)) - 1;
-      size_t copy_len = wcslen(wname);
-      if (copy_len > max_chars) copy_len = max_chars;
-      memcpy(params->CommandLine.Buffer, wname, copy_len * sizeof(wchar_t));
-      params->CommandLine.Buffer[copy_len] = L'\0';
-      params->CommandLine.Length = (USHORT)(copy_len * sizeof(wchar_t));
-    }
-
-    /* Update WindowTitle */
-    if (params->WindowTitle.Buffer && params->WindowTitle.MaximumLength > sizeof(wchar_t)) {
-      size_t max_chars = (params->WindowTitle.MaximumLength / sizeof(wchar_t)) - 1;
-      size_t copy_len = wcslen(wname);
-      if (copy_len > max_chars) copy_len = max_chars;
-      memcpy(params->WindowTitle.Buffer, wname, copy_len * sizeof(wchar_t));
-      params->WindowTitle.Buffer[copy_len] = L'\0';
-      params->WindowTitle.Length = (USHORT)(copy_len * sizeof(wchar_t));
-    }
-  }
-}
 
 
 void c2t_win32_api_init(void) {
