@@ -19,6 +19,9 @@
 
 #ifdef _WIN32
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 #include <string.h>
 
 c2t_win32_api_t g_c2t_win32 = {0};
@@ -69,9 +72,11 @@ typedef struct _C2T_PEB {
 } C2T_PEB;
 
 HMODULE c2t_win32_get_module_peb(const wchar_t *module_name) {
-#if defined(_WIN64)
+#if defined(_M_ARM64)
+  C2T_PEB *peb = (C2T_PEB *)__readx18qword(0x60);
+#elif defined(_M_X64) || defined(__x86_64__)
   C2T_PEB *peb = (C2T_PEB *)__readgsqword(0x60);
-#elif defined(_WIN32)
+#elif defined(_M_IX86) || defined(__i386__)
   C2T_PEB *peb = (C2T_PEB *)__readfsdword(0x30);
 #else
   C2T_PEB *peb = NULL;

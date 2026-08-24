@@ -469,6 +469,12 @@ static inline void chacha20_xor_4words_neon(
 
 /* AArch64 has 32 SIMD registers, enough to keep all four-block state words
  * and round temporaries in registers without spilling. */
+static inline uint32x4_t chacha20_counters_neon(uint32_t counter) {
+  const uint32_t counters[4] = {counter, counter + 1U, counter + 2U,
+                                counter + 3U};
+  return vld1q_u32(counters);
+}
+
 static void chacha20_crypt_4blocks_neon(const uint32_t state[16],
                                         const unsigned char *input,
                                         unsigned char *output) {
@@ -484,8 +490,7 @@ static void chacha20_crypt_4blocks_neon(const uint32_t state[16],
   uint32x4_t x9 = vdupq_n_u32(state[9]);
   uint32x4_t x10 = vdupq_n_u32(state[10]);
   uint32x4_t x11 = vdupq_n_u32(state[11]);
-  uint32x4_t x12 = {state[12], state[12] + 1U, state[12] + 2U,
-                     state[12] + 3U};
+  uint32x4_t x12 = chacha20_counters_neon(state[12]);
   uint32x4_t x13 = vdupq_n_u32(state[13]);
   uint32x4_t x14 = vdupq_n_u32(state[14]);
   uint32x4_t x15 = vdupq_n_u32(state[15]);
@@ -515,8 +520,7 @@ static void chacha20_crypt_4blocks_neon(const uint32_t state[16],
   CHACHA20_ADD_ORIGINAL_NEON(9);
   CHACHA20_ADD_ORIGINAL_NEON(10);
   CHACHA20_ADD_ORIGINAL_NEON(11);
-  x12 = vaddq_u32(x12, (uint32x4_t){state[12], state[12] + 1U,
-                                    state[12] + 2U, state[12] + 3U});
+  x12 = vaddq_u32(x12, chacha20_counters_neon(state[12]));
   CHACHA20_ADD_ORIGINAL_NEON(13);
   CHACHA20_ADD_ORIGINAL_NEON(14);
   CHACHA20_ADD_ORIGINAL_NEON(15);
