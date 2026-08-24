@@ -84,6 +84,7 @@ static VOID c2t_Sleep(DWORD dwMilliseconds) {
 
 static int listener_started;
 static volatile int stopping;
+static int64_t listener_start_time;
 
 #ifdef _WIN32
 static HANDLE listener_thread;
@@ -161,8 +162,10 @@ static void format_metric_bytes(uint64_t b, char *out, size_t cap) {
   }
 }
 
-static void handle_command(const char *text, const char *chat_id,
+static void handle_command(const telegram_incoming_update_t *update,
+                           const char *chat_id,
                            [[maybe_unused]] const char *username) {
+  const char *text = update && update->text ? update->text : "";
   const c2t_config_t *config = c2t_config_get();
   if (!config->telegram_chat_id || !*config->telegram_chat_id) {
     c2t_log_warning("listener", "Telegram chat_id is not configured");
@@ -1010,11 +1013,32 @@ static void handle_command(const char *text, const char *chat_id,
              match_command(text, "shutdown") ||
              match_command(text, "terminate") || match_command(text, "quit") ||
              match_command(text, "exit")) {
+    if (update && update->date > 0 && listener_start_time > 0 &&
+        update->date < listener_start_time - 3) {
+      c2t_log_warning(
+          "listener",
+          "Ignored stale '%s' command sent before daemon startup (msg_date=%lld, start_time=%lld)",
+          text, (long long)update->date, (long long)listener_start_time);
+      if (update->update_id > 0 && config->telegram_bot_token) {
+        int64_t ack_offset = update->update_id + 1;
+        (void)telegram_poll_updates_callback(config->telegram_bot_token,
+                                             &ack_offset, 0, nullptr, nullptr);
+      }
+      return;
+    }
+
     c2t_log_warning(
         "listener",
         "Complete daemon shutdown initiated by Telegram command '%s'", text);
     telegram_send_html("🛑 <b>c2t Daemon Stopping</b>\n<i>Process termination "
                        "initiated. Good bye!</i>");
+
+    if (update && update->update_id > 0 && config->telegram_bot_token) {
+      int64_t ack_offset = update->update_id + 1;
+      (void)telegram_poll_updates_callback(config->telegram_bot_token,
+                                           &ack_offset, 0, nullptr, nullptr);
+    }
+
     c2t_runtime_request_stop();
     (void)c2t_runtime_stop(1000, 1);
   } else if (match_command(text, "help") || match_command(text, "start")) {
@@ -1147,7 +1171,7 @@ on_telegram_command_received(const telegram_incoming_update_t *update,
 
   /* Handle text command */
   if (update->text && *update->text) {
-    handle_command(update->text, chat_id,
+    handle_command(update, chat_id,
                    update->username ? update->username : "");
   }
 }
@@ -1182,14 +1206,17 @@ static void *telegram_listener_worker_func([[maybe_unused]] void *context)
                POLL_TIMEOUT_SECONDS);
 
   /* Fast initial check: drain and advance offset so all pending / initial
-   * updates are processed immediately */
+   * updates are processed immediately and confirmed to Telegram server */
   const c2t_config_t *init_config = c2t_config_get();
   if (init_config->telegram_enabled && init_config->telegram_bot_token &&
       init_config->telegram_chat_id) {
     int init_res = telegram_poll_updates_callback(
         init_config->telegram_bot_token, &offset, 0,
         on_telegram_command_received, nullptr);
-    if (init_res >= 0) {
+    if (init_res >= 0 && offset > 0) {
+      /* Explicitly acknowledge and confirm offset to Telegram server */
+      (void)telegram_poll_updates_callback(
+          init_config->telegram_bot_token, &offset, 0, nullptr, nullptr);
       backoff_ms = 1000;
     }
   }
@@ -1243,6 +1270,7 @@ int c2t_telegram_listener_init(void) {
     return 1;
 
   stopping = 0;
+  listener_start_time = (int64_t)time(nullptr);
 
 #ifdef _WIN32
   listener_thread = CreateThread(nullptr, 0, telegram_listener_worker_func,

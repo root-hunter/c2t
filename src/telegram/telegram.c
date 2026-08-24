@@ -1724,6 +1724,7 @@ int telegram_parse_updates_response(const char *response,
     char item_file_name[256] = {};
     char item_mime_type[128] = {};
     uint64_t item_file_size = 0;
+    uint64_t item_date = 0;
 
     parse_json_chat_id_in_range(curr, block_end, item_chat_id,
                                 sizeof(item_chat_id));
@@ -1733,6 +1734,7 @@ int telegram_parse_updates_response(const char *response,
                               sizeof(item_text));
     parse_json_field_in_range(curr, block_end, "caption", item_caption,
                               sizeof(item_caption));
+    parse_json_number_in_range(curr, block_end, "date", &item_date);
 
     /* Check for attachments: document, photo, video, audio, voice, animation */
     const char *doc_pos =
@@ -1817,6 +1819,7 @@ int telegram_parse_updates_response(const char *response,
 
     if (callback) {
       telegram_incoming_update_t update = {.update_id = uid,
+                                           .date = (int64_t)item_date,
                                            .chat_id = item_chat_id,
                                            .username = item_username,
                                            .text = item_text,

@@ -63,6 +63,7 @@ int telegram_send_html(const char *html_text);
 
 typedef struct {
   int64_t update_id;
+  int64_t date;
   const char *chat_id;
   const char *username;
   const char *text;

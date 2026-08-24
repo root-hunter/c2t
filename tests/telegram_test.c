@@ -203,6 +203,7 @@ static char test_last_caption[64] = {};
 typedef struct {
   int count;
   int attachment_leaked_between_updates;
+  int64_t last_date;
   char final_file_id[64];
 } parser_test_context_t;
 
@@ -212,6 +213,7 @@ static void parser_test_callback(const telegram_incoming_update_t *update,
   if (!context || !update)
     return;
   ++context->count;
+  context->last_date = update->date;
   if (update->update_id == 1 && update->file_id && *update->file_id)
     context->attachment_leaked_between_updates = 1;
   if (update->update_id == 2 && update->file_id)
@@ -982,17 +984,17 @@ int main(void) {
   const char bounded_updates[] =
       "{\"ok\":true,\"result\":["
       "{\"update_id\":1,\"message\":{\"chat\":{\"id\":10},"
-      "\"text\":\"plain\"}},"
+      "\"date\":1740001111,\"text\":\"plain\"}},"
       "{\"update_id\":2,\"message\":{\"chat\":{\"id\":10},"
-      "\"document\":{\"file_id\":\"second-file\"}}}]}";
+      "\"date\":1740002222,\"document\":{\"file_id\":\"second-file\"}}}]}";
   parser_test_context_t parser_context = {};
   if (telegram_parse_updates_response(
           bounded_updates, sizeof(bounded_updates) - 1U, &test_offset,
           parser_test_callback, &parser_context) != 2 ||
-      parser_context.count != 2 ||
+      parser_context.count != 2 || parser_context.last_date != 1740002222 ||
       parser_context.attachment_leaked_between_updates || test_offset != 3 ||
       strcmp(parser_context.final_file_id, "second-file") != 0) {
-    return fail("bounded linear Telegram update parsing");
+    return fail("bounded linear Telegram update parsing with date");
   }
 
   test_offset = 0;
