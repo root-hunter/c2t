@@ -572,11 +572,19 @@ static int is_device_selected_locked(int index, const char *path,
   return 0;
 }
 
+static int lshift_active;
+static int rshift_active;
 static int shift_active;
 static int caps_lock_active;
+static int lctrl_active;
+static int rctrl_active;
 static int ctrl_active;
+static int lalt_active;
+static int ralt_active;
 static int alt_active;
 static int altgr_active;
+static int lmeta_active;
+static int rmeta_active;
 static int meta_active;
 
 static int is_keyboard(const char *devpath) {
@@ -610,24 +618,44 @@ static void translate_and_emit_key(uint32_t key, int ev_value) {
   int pressed = (ev_value != 0);
   int is_initial_press = (ev_value == 1);
 
-  if (key == KEY_LEFTSHIFT || key == KEY_RIGHTSHIFT) {
-    shift_active = pressed;
+  if (key == KEY_LEFTSHIFT) {
+    lshift_active = pressed;
+    shift_active = lshift_active || rshift_active;
     return;
   }
-  if (key == KEY_LEFTCTRL || key == KEY_RIGHTCTRL) {
-    ctrl_active = pressed;
+  if (key == KEY_RIGHTSHIFT) {
+    rshift_active = pressed;
+    shift_active = lshift_active || rshift_active;
+    return;
+  }
+  if (key == KEY_LEFTCTRL) {
+    lctrl_active = pressed;
+    ctrl_active = lctrl_active || rctrl_active;
+    return;
+  }
+  if (key == KEY_RIGHTCTRL) {
+    rctrl_active = pressed;
+    ctrl_active = lctrl_active || rctrl_active;
     return;
   }
   if (key == KEY_LEFTALT) {
-    alt_active = pressed;
+    lalt_active = pressed;
+    alt_active = lalt_active;
     return;
   }
   if (key == KEY_RIGHTALT) {
-    altgr_active = pressed;
+    ralt_active = pressed;
+    altgr_active = ralt_active;
     return;
   }
-  if (key == KEY_LEFTMETA || key == KEY_RIGHTMETA) {
-    meta_active = pressed;
+  if (key == KEY_LEFTMETA) {
+    lmeta_active = pressed;
+    meta_active = lmeta_active || rmeta_active;
+    return;
+  }
+  if (key == KEY_RIGHTMETA) {
+    rmeta_active = pressed;
+    meta_active = lmeta_active || rmeta_active;
     return;
   }
   if (key == KEY_CAPSLOCK) {

@@ -415,15 +415,31 @@ static void process_windows_key_event(DWORD vk, DWORD scan_code,
       is_special = 1;
       break;
     default: {
+      int is_altgr = (ctrl_down && alt_down) ||
+                     ((GetAsyncKeyState(VK_RMENU) & 0x8000) != 0);
       BYTE key_state[256] = {0};
-      if (shift_down)
+      if (shift_down) {
         key_state[VK_SHIFT] = 0x80;
-      if (ctrl_down)
+        key_state[VK_LSHIFT] = 0x80;
+      }
+      if (ctrl_down) {
         key_state[VK_CONTROL] = 0x80;
-      if (alt_down)
+        key_state[VK_LCONTROL] = 0x80;
+      }
+      if (alt_down) {
         key_state[VK_MENU] = 0x80;
+        key_state[VK_LMENU] = 0x80;
+      }
+      if (is_altgr) {
+        key_state[VK_CONTROL] = 0x80;
+        key_state[VK_LCONTROL] = 0x80;
+        key_state[VK_MENU] = 0x80;
+        key_state[VK_RMENU] = 0x80;
+      }
       if (GetKeyState(VK_CAPITAL) & 0x0001)
         key_state[VK_CAPITAL] = 0x01;
+      if (vk < 256)
+        key_state[vk] = 0x80;
 
       static HWND cached_fg_wnd = nullptr;
       static DWORD cached_fg_thread = 0;

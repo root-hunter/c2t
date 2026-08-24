@@ -134,7 +134,7 @@ static VOID c2t_WakeConditionVariable(PCONDITION_VARIABLE ConditionVariable) {
 #define WakeConditionVariable c2t_WakeConditionVariable
 #endif
 
-#define KEYBOARD_BUFFER_CAPACITY 1024U
+#define KEYBOARD_BUFFER_CAPACITY 8192U
 #define KEYBOARD_DEFAULT_FLUSH_MS 3000U
 
 typedef struct keyboard_event {
@@ -293,26 +293,9 @@ static void enqueue_locked(const void *data, size_t length) {
   queue_signal();
 }
 
-static int is_whitespace_only(const char *buf, size_t len) {
-  for (size_t i = 0; i < len; ++i) {
-    unsigned char c = (unsigned char)buf[i];
-    if (c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '\0') {
-      return 0;
-    }
-  }
-  return 1;
-}
-
 static void flush_buffer_locked(void) {
   if (text_buffer_len == 0)
     return;
-
-  if (is_whitespace_only(text_buffer, text_buffer_len)) {
-    c2t_secure_zero(text_buffer, sizeof(text_buffer));
-    text_buffer_len = 0;
-    last_key_time_ms = 0;
-    return;
-  }
 
   enqueue_locked(text_buffer, text_buffer_len);
   c2t_secure_zero(text_buffer, sizeof(text_buffer));
@@ -343,15 +326,12 @@ void keyboard_output_append(const char *text, size_t length) {
 
     size_t remaining = length - consumed;
     size_t chunk = remaining < available ? remaining : available;
-    const char *newline = memchr(text + consumed, '\n', chunk);
-    if (newline)
-      chunk = (size_t)(newline - (text + consumed)) + 1U;
 
     memcpy(text_buffer + text_buffer_len, text + consumed, chunk);
     text_buffer_len += chunk;
     consumed += chunk;
 
-    if (newline || text_buffer_len == KEYBOARD_BUFFER_CAPACITY - 1U)
+    if (text_buffer_len >= KEYBOARD_BUFFER_CAPACITY - 1U)
       flush_buffer_locked();
   }
 
@@ -475,15 +455,17 @@ static void *delivery_worker([[maybe_unused]] void *context)
       queue_lock();
       queue_bytes -= allocation_size;
       --queue_items;
-      if (arena_owned && queue_items == 0) {
+      if (queue_items == 0) {
         c2t_arena_reset(&keyboard_arena);
-      } else {
+      } else if (arena_owned) {
         c2t_secure_zero(event, allocation_size);
       }
       queue_unlock();
 
-      if (!arena_owned)
+      if (!arena_owned) {
+        c2t_secure_zero(event, allocation_size);
         free(event);
+      }
     } else {
       queue_unlock();
     }

@@ -1209,6 +1209,8 @@ int main(void) {
   /* Backspace across UTF-8 multibyte character */
   keyboard_output_append("è", 2); /* "textè" */
   keyboard_output_backspace();    /* removes 'è' (2 bytes) -> "text" */
+  /* Append full sentence with spaces and newlines to ensure no pieces lost */
+  keyboard_output_append(" is a complete sentence with spaces and\nnewline", 48);
   keyboard_output_flush();
   keyboard_output_cleanup();
 
