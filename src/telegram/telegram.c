@@ -852,18 +852,16 @@ static int send_encrypted_file(const void *encrypted_data, size_t length,
   const char *method;
   const char *field;
   const char *filename;
-  if (requested_filename) {
+  if (allow_photo && (mime_is(mime_type, "image/png") ||
+                      mime_is(mime_type, "image/jpeg") ||
+                      mime_is(mime_type, "image/jpg"))) {
+    method = "sendPhoto";
+    field = "photo";
+    filename = requested_filename ? requested_filename : "screenshot.png";
+  } else if (requested_filename) {
     method = "sendDocument";
     field = "document";
     filename = requested_filename;
-  } else if (allow_photo && mime_is(mime_type, "image/png")) {
-    method = "sendPhoto";
-    field = "photo";
-    filename = "clipboard.png";
-  } else if (allow_photo && mime_is(mime_type, "image/jpeg")) {
-    method = "sendPhoto";
-    field = "photo";
-    filename = "clipboard.jpg";
   } else {
     method = "sendDocument";
     field = "document";
@@ -1134,6 +1132,26 @@ int telegram_send_encrypted_file(
   int result = send_encrypted_file(encrypted_data, length, nonce, mime_type,
                                    filename, 0, source);
   c2t_log_info("telegram", "Encrypted file delivery %s",
+               result ? "completed" : "failed");
+  return result;
+}
+
+int telegram_send_encrypted_photo(
+    const void *encrypted_data, size_t length,
+    const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE], const char *mime_type,
+    const char *filename, const c2t_clipboard_source_t *source) {
+  if (!initialized)
+    return 1;
+  if ((!encrypted_data && length != 0) || !nonce || !mime_type || !filename ||
+      !*filename)
+    return 0;
+
+  c2t_log_info("telegram",
+               "Streaming encrypted photo: name=%s, type=%s, size=%llu bytes",
+               filename, mime_type, (unsigned long long)length);
+  int result = send_encrypted_file(encrypted_data, length, nonce, mime_type,
+                                   filename, 1, source);
+  c2t_log_info("telegram", "Encrypted photo delivery %s",
                result ? "completed" : "failed");
   return result;
 }

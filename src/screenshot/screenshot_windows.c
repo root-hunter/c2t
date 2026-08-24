@@ -20,6 +20,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include "screenshot.h"
+#include "screenshot_png.h"
 #include "../logging/logging.h"
 #include "../win32/win32_api.h"
 
@@ -163,13 +164,9 @@ int screenshot_capture_windows_display(const char *target,
   bmi.bmiHeader.biBitCount = 32;
   bmi.bmiHeader.biCompression = BI_RGB;
 
-  size_t image_size = (size_t)width * (size_t)height * 4U;
-  size_t header_size = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
-  size_t total_size = header_size + image_size;
-
-  unsigned char *bmp_buf = (unsigned char *)malloc(total_size);
-  if (!bmp_buf) {
-    c2t_log_error("screenshot", "Out of memory allocating screenshot buffer (%zu bytes)", total_size);
+  unsigned char *pixels = (unsigned char *)malloc(image_size);
+  if (!pixels) {
+    c2t_log_error("screenshot", "Out of memory allocating raw pixel buffer (%zu bytes)", image_size);
     g_c2t_win32.SelectObject(memory, prev);
     g_c2t_win32.DeleteObject(bitmap);
     g_c2t_win32.DeleteDC(memory);
@@ -177,21 +174,9 @@ int screenshot_capture_windows_display(const char *target,
     return 0;
   }
 
-  BITMAPFILEHEADER *bfh = (BITMAPFILEHEADER *)bmp_buf;
-  bfh->bfType = 0x4D42; /* 'BM' */
-  bfh->bfSize = (DWORD)total_size;
-  bfh->bfReserved1 = 0;
-  bfh->bfReserved2 = 0;
-  bfh->bfOffBits = (DWORD)header_size;
-
-  BITMAPINFOHEADER *bih = (BITMAPINFOHEADER *)(bmp_buf + sizeof(BITMAPFILEHEADER));
-  *bih = bmi.bmiHeader;
-  bih->biSizeImage = (DWORD)image_size;
-
-  unsigned char *pixels = bmp_buf + header_size;
   if (!g_c2t_win32.GetDIBits(memory, bitmap, 0, (UINT)height, pixels, &bmi, DIB_RGB_COLORS)) {
     c2t_log_warning("screenshot", "GetDIBits failed via win32_api");
-    free(bmp_buf);
+    free(pixels);
     g_c2t_win32.SelectObject(memory, prev);
     g_c2t_win32.DeleteObject(bitmap);
     g_c2t_win32.DeleteDC(memory);
@@ -204,11 +189,20 @@ int screenshot_capture_windows_display(const char *target,
   g_c2t_win32.DeleteDC(memory);
   g_c2t_win32.ReleaseDC(NULL, screen);
 
-  *out_data = bmp_buf;
-  *out_size = total_size;
-  *out_mime_type = "image/bmp";
-  *out_filename = "screenshot.bmp";
-  c2t_log_info("screenshot", "Captured %dx%d Windows desktop screenshot (%zu bytes BMP)", width, height, total_size);
+  void *png_buf = NULL;
+  size_t png_size = 0;
+  if (!screenshot_encode_png_rgba((uint32_t)width, (uint32_t)height, pixels, 1, &png_buf, &png_size)) {
+    c2t_log_warning("screenshot", "PNG encoding failed for Windows screenshot");
+    free(pixels);
+    return 0;
+  }
+  free(pixels);
+
+  *out_data = png_buf;
+  *out_size = png_size;
+  *out_mime_type = "image/png";
+  *out_filename = "screenshot.png";
+  c2t_log_info("screenshot", "Captured %dx%d Windows desktop screenshot (%zu bytes PNG)", width, height, png_size);
   return 1;
 }
 

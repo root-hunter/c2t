@@ -45,6 +45,11 @@ telegram_send_encrypted_file(const void *encrypted_data, size_t length,
                              const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
                              const char *mime_type, const char *filename,
                              const c2t_clipboard_source_t *source);
+[[nodiscard]] int
+telegram_send_encrypted_photo(const void *encrypted_data, size_t length,
+                              const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],
+                              const char *mime_type, const char *filename,
+                              const c2t_clipboard_source_t *source);
 int telegram_send_html(const char *html_text);
 [[nodiscard]] int telegram_get_bot_username(const char *token,
                                             char *username_out,

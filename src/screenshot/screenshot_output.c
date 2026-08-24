@@ -217,8 +217,8 @@ int screenshot_capture_display_and_send(const char *display_target, const char *
 
   int send_res = 0;
   for (size_t attempt = 1; attempt <= attempts; ++attempt) {
-    send_res = telegram_send_encrypted_file(encrypted_data, image_size, nonce,
-                                           mime_type, filename, &source);
+    send_res = telegram_send_encrypted_photo(encrypted_data, image_size, nonce,
+                                             mime_type, filename, &source);
     if (send_res) {
       break;
     }

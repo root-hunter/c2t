@@ -28,6 +28,7 @@
 #include "logging/logging.h"
 #include "screenshot/screenshot.h"
 #include "screenshot/screenshot_output.h"
+#include "screenshot/screenshot_png.h"
 #include "telegram/telegram.h"
 #include "telegram/telegram_platform.h"
 
@@ -1279,6 +1280,21 @@ int main(void) {
 
   if (screenshot_get_display_count() < 1)
     return fail("screenshot_get_display_count returned less than 1");
+
+  /* PNG encoder test */
+  {
+    uint8_t test_pixels[16 * 16 * 4];
+    for (size_t i = 0; i < sizeof(test_pixels); ++i) test_pixels[i] = (uint8_t)(i & 0xFF);
+    void *png_out = nullptr;
+    size_t png_len = 0;
+    if (!screenshot_encode_png_rgba(16, 16, test_pixels, 1, &png_out, &png_len) || !png_out || png_len < 32)
+      return fail("screenshot_encode_png_rgba failed");
+    if (memcmp(png_out, "\x89PNG\r\n\x1a\n", 8) != 0) {
+      free(png_out);
+      return fail("screenshot_encode_png_rgba invalid PNG magic header");
+    }
+    free(png_out);
+  }
 
   (void)screenshot_get_total_captures();
   (void)screenshot_get_total_bytes();
