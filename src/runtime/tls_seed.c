@@ -30,12 +30,12 @@
 #if defined(_MSC_VER)
 #pragma section(".tls$seed", read, write)
 __declspec(allocate(".tls$seed"))
-#elif defined(__GNUC__) || defined(__clang__)
-#if defined(_WIN32)
+#elif defined(__APPLE__)
+__attribute__((used, section("__DATA,__thread_data")))
+#elif defined(_WIN32)
 __attribute__((used, section(".tls$seed")))
-#else
+#elif defined(__GNUC__) || defined(__clang__)
 __attribute__((used, section(".tdata")))
-#endif
 #endif
 unsigned char c2t_tls_seed_buffer[32] = C2T_TLS_SEED_DATA;
 
