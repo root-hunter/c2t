@@ -159,12 +159,57 @@ static void img_write_callback(void *context, void *data, int size) {
 #define C2T_HAS_NEON_PIXEL_CONVERT 1
 #elif (defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86))
 #include <tmmintrin.h>
+#include <immintrin.h>
 #define C2T_HAS_SSSE3_PIXEL_CONVERT 1
+#define C2T_HAS_AVX2_PIXEL_CONVERT 1
 #if defined(__GNUC__) || defined(__clang__)
 #define C2T_TARGET_SSSE3 __attribute__((target("ssse3")))
+#define C2T_TARGET_AVX2 __attribute__((target("avx2")))
 #else
 #define C2T_TARGET_SSSE3
+#define C2T_TARGET_AVX2
 #endif
+#endif
+
+#if defined(C2T_HAS_AVX2_PIXEL_CONVERT)
+static C2T_TARGET_AVX2 void convert_pixels_avx2(const uint8_t *src, uint8_t *dst, size_t total_pixels, int is_bgra) {
+  const __m256i shuf_bgra = _mm256_setr_epi8(
+      2, 1, 0, 6, 5, 4, 10, 9, 8, 14, 13, 12, (char)0x80, (char)0x80, (char)0x80, (char)0x80,
+      2, 1, 0, 6, 5, 4, 10, 9, 8, 14, 13, 12, (char)0x80, (char)0x80, (char)0x80, (char)0x80);
+  const __m256i shuf_rgba = _mm256_setr_epi8(
+      0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, (char)0x80, (char)0x80, (char)0x80, (char)0x80,
+      0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, (char)0x80, (char)0x80, (char)0x80, (char)0x80);
+  const __m256i shuf_mask = is_bgra ? shuf_bgra : shuf_rgba;
+  size_t i = 0;
+
+  /* 8 pixels (32 bytes BGRA/RGBA -> 24 bytes RGB) per AVX2 iteration */
+  for (; i + 8 <= total_pixels; i += 8) {
+    __m256i in = _mm256_loadu_si256((const __m256i *)src);
+    __m256i out = _mm256_shuffle_epi8(in, shuf_mask);
+    __m128i lo = _mm256_castsi256_si128(out);
+    __m128i hi = _mm256_extracti128_si256(out, 1);
+    memcpy(dst, &lo, 8);
+    memcpy(dst + 8, ((const char *)&lo) + 8, 4);
+    memcpy(dst + 12, &hi, 8);
+    memcpy(dst + 20, ((const char *)&hi) + 8, 4);
+    src += 32;
+    dst += 24;
+  }
+
+  for (; i < total_pixels; ++i) {
+    if (is_bgra) {
+      dst[0] = src[2];
+      dst[1] = src[1];
+      dst[2] = src[0];
+    } else {
+      dst[0] = src[0];
+      dst[1] = src[1];
+      dst[2] = src[2];
+    }
+    src += 4;
+    dst += 3;
+  }
+}
 #endif
 
 #if defined(C2T_HAS_SSSE3_PIXEL_CONVERT)
@@ -220,9 +265,24 @@ static void convert_pixels_to_rgb(const uint8_t *src, uint8_t *dst, size_t total
     src += 64;
     dst += 48;
   }
-#elif defined(C2T_HAS_SSSE3_PIXEL_CONVERT)
+#elif defined(C2T_HAS_AVX2_PIXEL_CONVERT)
+#if defined(__GNUC__) || defined(__clang__)
+  if (__builtin_cpu_supports("avx2")) {
+    convert_pixels_avx2(src, dst, total_pixels, is_bgra);
+    return;
+  }
+#endif
+#if defined(C2T_HAS_SSSE3_PIXEL_CONVERT)
+#if defined(__GNUC__) || defined(__clang__)
+  if (__builtin_cpu_supports("ssse3")) {
+    convert_pixels_ssse3(src, dst, total_pixels, is_bgra);
+    return;
+  }
+#else
   convert_pixels_ssse3(src, dst, total_pixels, is_bgra);
   return;
+#endif
+#endif
 #endif
 
   /* Unrolled 4-pixel batch fallback for remaining or non-SIMD architectures */
