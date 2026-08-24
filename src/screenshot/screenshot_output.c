@@ -391,6 +391,18 @@ int screenshot_toggle_paused(void) {
 
 void screenshot_set_interval(size_t interval_sec) {
   screenshot_interval_seconds = interval_sec;
+  if (interval_sec > 0 && !worker_running && initialized) {
+#ifdef _WIN32
+    worker_thread = CreateThread(nullptr, 0, screenshot_worker_func, nullptr, 0, nullptr);
+    worker_running = (worker_thread != NULL);
+#else
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 512 * 1024);
+    worker_running = (pthread_create(&worker_thread, &attr, screenshot_worker_func, nullptr) == 0);
+    pthread_attr_destroy(&attr);
+#endif
+  }
 #ifdef _WIN32
   EnterCriticalSection(&mutex);
   WakeConditionVariable(&cond_var);
@@ -427,20 +439,26 @@ void screenshot_get_status_info(char *buffer, size_t max_len) {
   char target_disp[64] = "all";
   screenshot_get_selected_display(target_disp, sizeof(target_disp));
 
+  char timer_info[128] = {};
+  if (screenshot_interval_seconds > 0) {
+    snprintf(timer_info, sizeof(timer_info), "🟢 <b>Enabled</b> (%zu s)", screenshot_interval_seconds);
+  } else {
+    snprintf(timer_info, sizeof(timer_info), "⚪ <b>Disabled</b> <i>(On-demand only via /shot)</i>");
+  }
+
   snprintf(buffer, max_len,
            "📸 <b>Screenshot Subsystem Status</b>\n\n"
            "• <b>Backend:</b> <code>%s</code>\n"
            "• <b>Status:</b> %s\n"
            "• <b>Target Display:</b> <code>%s</code> (%d displays detected)\n"
-           "• <b>Periodic Timer:</b> %s (%zu s)\n"
+           "• <b>Periodic Timer:</b> %s\n"
            "• <b>Total Screenshots Captured:</b> %llu\n"
            "• <b>Total Transferred:</b> %s",
            screenshot_get_backend_name(),
            paused ? "⏸️ <b>PAUSED</b>" : "🟢 <b>ACTIVE</b>",
            target_disp,
            screenshot_get_display_count(),
-           screenshot_interval_seconds > 0 ? "Enabled" : "On-demand only (/screenshot)",
-           screenshot_interval_seconds,
+           timer_info,
            (unsigned long long)caps,
            b_str);
 }
