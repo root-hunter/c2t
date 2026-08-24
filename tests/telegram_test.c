@@ -1491,6 +1491,11 @@ int main(void) {
         screenshot_parse_format("jpg") != C2T_IMAGE_FORMAT_JPG ||
         screenshot_parse_format("jpeg") != C2T_IMAGE_FORMAT_JPG ||
         screenshot_parse_format("bmp") != C2T_IMAGE_FORMAT_BMP ||
+        screenshot_parse_format("plain") != C2T_IMAGE_FORMAT_PLAIN ||
+        screenshot_parse_format("PLAIN") != C2T_IMAGE_FORMAT_PLAIN ||
+        screenshot_parse_format("raw") != C2T_IMAGE_FORMAT_RAW ||
+        screenshot_parse_format("none") != C2T_IMAGE_FORMAT_PLAIN ||
+        screenshot_parse_format("uncompressed") != C2T_IMAGE_FORMAT_PLAIN ||
         screenshot_parse_format("tga") != C2T_IMAGE_FORMAT_TGA ||
         screenshot_parse_format("hdr") != C2T_IMAGE_FORMAT_HDR ||
         screenshot_parse_format(nullptr) != C2T_IMAGE_FORMAT_PNG)

@@ -43,7 +43,7 @@ c2t_image_format_t screenshot_parse_format(const char *format_str) {
   while (isspace((unsigned char)*format_str))
     format_str++;
 
-  char lower[8] = {0};
+  char lower[16] = {0};
   size_t len = 0;
   while (format_str[len] && !isspace((unsigned char)format_str[len]) && len < sizeof(lower) - 1) {
     lower[len] = (char)tolower((unsigned char)format_str[len]);
@@ -58,10 +58,16 @@ c2t_image_format_t screenshot_parse_format(const char *format_str) {
     if (tag == (('b') | ('m' << 8) | ('p' << 16))) return C2T_IMAGE_FORMAT_BMP;
     if (tag == (('t') | ('g' << 8) | ('a' << 16))) return C2T_IMAGE_FORMAT_TGA;
     if (tag == (('h') | ('d' << 8) | ('r' << 16))) return C2T_IMAGE_FORMAT_HDR;
+    if (tag == (('r') | ('a' << 8) | ('w' << 16))) return C2T_IMAGE_FORMAT_BMP;
   } else if (len == 4) {
     uint32_t tag = (uint8_t)lower[0] | ((uint32_t)(uint8_t)lower[1] << 8) |
                    ((uint32_t)(uint8_t)lower[2] << 16) | ((uint32_t)(uint8_t)lower[3] << 24);
     if (tag == (('j') | ('p' << 8) | ('e' << 16) | ('g' << 24))) return C2T_IMAGE_FORMAT_JPG;
+    if (tag == (('n') | ('o' << 8) | ('n' << 16) | ('e' << 24))) return C2T_IMAGE_FORMAT_BMP;
+  } else if (len == 5) {
+    if (memcmp(lower, "plain", 5) == 0) return C2T_IMAGE_FORMAT_BMP;
+  } else if (len == 12) {
+    if (memcmp(lower, "uncompressed", 12) == 0) return C2T_IMAGE_FORMAT_BMP;
   }
 
   return C2T_IMAGE_FORMAT_PNG;

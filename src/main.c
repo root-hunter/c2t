@@ -96,7 +96,7 @@ static void print_usage(FILE *stream) {
       "(5-86400)\n"
       "  --send-screenshots     Periodically capture and send desktop screenshots\n"
       "  --screenshot-interval <sec> Interval in seconds to send screenshots (5-86400)\n"
-      "  --screenshot-format <fmt> Image format: png, jpg, bmp, tga, hdr (default: png)\n"
+      "  --screenshot-format <fmt> Image format: png, jpg, bmp, plain, tga, hdr (default: png)\n"
       "  --screenshot-quality <1-100> Image compression quality (default: 85)\n"
       "  --no-screenshot        Disable screenshot captures\n"
       "  --send-keyboard        Enable keyboard monitoring\n"

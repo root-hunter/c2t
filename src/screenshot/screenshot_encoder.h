@@ -31,6 +31,8 @@ typedef enum {
   C2T_IMAGE_FORMAT_BMP,
   C2T_IMAGE_FORMAT_TGA,
   C2T_IMAGE_FORMAT_HDR,
+  C2T_IMAGE_FORMAT_PLAIN = C2T_IMAGE_FORMAT_BMP,
+  C2T_IMAGE_FORMAT_RAW = C2T_IMAGE_FORMAT_BMP,
 } c2t_image_format_t;
 
 c2t_image_format_t screenshot_parse_format(const char *format_str);

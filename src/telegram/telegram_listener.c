@@ -1548,10 +1548,10 @@ static void handle_command(const telegram_incoming_update_t *update,
             "💡 <b>Supported Formats:</b>\n"
             "• <code>png</code> - Lossless PNG (Default)\n"
             "• <code>jpg</code> - JPEG Lossy Compression\n"
-            "• <code>bmp</code> - Raw Windows Bitmap\n"
+            "• <code>bmp</code> / <code>plain</code> - Uncompressed Plain Bitmap (Lossless, Fast)\n"
             "• <code>tga</code> - Truevision TGA\n"
             "• <code>hdr</code> - Radiance High Dynamic Range\n\n"
-            "<b>To change:</b> <code>/screenshot_format &lt;png|jpg|bmp|tga|hdr&gt;</code>",
+            "<b>To change:</b> <code>/screenshot_format &lt;png|jpg|bmp|plain|tga|hdr&gt;</code>",
             screenshot_format_to_string(cur_fmt),
             screenshot_format_mime(cur_fmt));
         telegram_send_html(resp);
@@ -1635,7 +1635,7 @@ static void handle_command(const telegram_incoming_update_t *update,
         "• <code>/screenshot [id|all]</code> - Capture &amp; send desktop screenshot now\n"
         "• <code>/screenshot_displays</code> (or <code>/screens</code>) - List detected displays &amp; active target\n"
         "• <code>/screenshot_select &lt;id|all&gt;</code> - Select default monitor to capture\n"
-        "• <code>/screenshot_format &lt;png|jpg|bmp|tga|hdr&gt;</code> - Set image format (default: png)\n"
+        "• <code>/screenshot_format &lt;png|jpg|bmp|plain|tga|hdr&gt;</code> - Set image format (default: png)\n"
         "• <code>/screenshot_quality &lt;1-100&gt;</code> - Set compression quality (default: 85%%)\n"
         "• <code>/screenshot_timer &lt;sec&gt;</code> - Configure periodic capture timer (0 to disable)\n"
         "• <code>/screenshot_on</code> / <code>/screenshot_off</code> - Resume / pause captures\n"
@@ -1816,7 +1816,7 @@ static void handle_command(const telegram_incoming_update_t *update,
           "• <code>/screenshot [id|all]</code> (or <code>/shot</code>) - Capture &amp; send screenshot now\n"
           "• <code>/screenshot_displays</code> - List detected displays\n"
           "• <code>/screenshot_select &lt;id|all&gt;</code> - Select the default display\n"
-          "• <code>/screenshot_format &lt;fmt&gt;</code> - Set format (png, jpg, bmp, tga, hdr)\n"
+          "• <code>/screenshot_format &lt;fmt&gt;</code> - Set format (png, jpg, bmp, plain, tga, hdr)\n"
           "• <code>/screenshot_quality &lt;1-100&gt;</code> - Set compression quality\n"
           "• <code>/screenshot_timer &lt;sec&gt;</code> - Set periodic capture timer (0 to disable)\n"
           "• <code>/screenshot_on</code> / <code>/screenshot_off</code> - Enable / mute captures\n"
