@@ -1624,6 +1624,40 @@ int main(void) {
     free(src_png);
     free(trans_bmp);
 
+    /* A plain 2048x1800 RGB screenshot exceeds Telegram's 10 MiB photo
+     * limit. It must be re-encoded while retaining an in-app photo format. */
+    const uint32_t large_width = 2048;
+    const uint32_t large_height = 1800;
+    size_t large_pixels_size =
+        (size_t)large_width * (size_t)large_height * 4U;
+    uint8_t *large_pixels = (uint8_t *)malloc(large_pixels_size);
+    if (!large_pixels)
+      return fail("allocate oversized plain screenshot pixels");
+    memset(large_pixels, 0x80, large_pixels_size);
+    void *large_plain = nullptr;
+    size_t large_plain_len = 0;
+    if (!screenshot_encode_image(C2T_IMAGE_FORMAT_PLAIN, large_width,
+                                 large_height, large_pixels, 1, 85,
+                                 &large_plain, &large_plain_len)) {
+      free(large_pixels);
+      return fail("encode oversized plain screenshot");
+    }
+    free(large_pixels);
+    if (large_plain_len <= C2T_TELEGRAM_MAX_PHOTO_BYTES) {
+      free(large_plain);
+      return fail("plain screenshot fixture must exceed Telegram photo limit");
+    }
+    c2t_image_format_t fitted_format = C2T_IMAGE_FORMAT_PLAIN;
+    if (!screenshot_fit_telegram_photo(&large_plain, &large_plain_len,
+                                       &fitted_format, 85) ||
+        large_plain_len > C2T_TELEGRAM_MAX_PHOTO_BYTES ||
+        (fitted_format != C2T_IMAGE_FORMAT_PNG &&
+         fitted_format != C2T_IMAGE_FORMAT_JPG)) {
+      free(large_plain);
+      return fail("oversized Telegram photo fallback failed");
+    }
+    free(large_plain);
+
     /* Test contract on invalid inputs */
     void *bad_out = (void *)1;
     size_t bad_len = 123;

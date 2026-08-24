@@ -39,6 +39,11 @@ void screenshot_set_interval(size_t interval_sec);
 [[nodiscard]] size_t screenshot_get_interval(void);
 
 #include "screenshot_encoder.h"
+#define C2T_TELEGRAM_MAX_PHOTO_BYTES (10U * 1024U * 1024U)
+
+[[nodiscard]] int
+screenshot_fit_telegram_photo(void **image_data, size_t *image_size,
+                              c2t_image_format_t *format, int quality);
 [[nodiscard]] c2t_image_format_t screenshot_get_format(void);
 void screenshot_set_format(c2t_image_format_t format);
 [[nodiscard]] int screenshot_get_quality(void);

@@ -150,6 +150,62 @@ static void format_metric_bytes(uint64_t b, char *out, size_t cap) {
 #include "../crypto/crypto.h"
 #include "screenshot_encoder.h"
 
+int screenshot_fit_telegram_photo(void **image_data, size_t *image_size,
+                                  c2t_image_format_t *format, int quality) {
+  if (!image_data || !*image_data || !image_size || !format)
+    return 0;
+  if (*image_size <= C2T_TELEGRAM_MAX_PHOTO_BYTES)
+    return 1;
+
+  c2t_image_format_t targets[7];
+  int qualities[7];
+  size_t target_count = 0;
+  if (*format == C2T_IMAGE_FORMAT_PLAIN) {
+    targets[target_count] = C2T_IMAGE_FORMAT_PNG;
+    qualities[target_count++] = quality;
+  }
+
+  int jpeg_quality = quality;
+  if (jpeg_quality <= 0 || jpeg_quality > 85)
+    jpeg_quality = 85;
+  static const int fallback_qualities[] = {75, 60, 45, 30, 15};
+  targets[target_count] = C2T_IMAGE_FORMAT_JPG;
+  qualities[target_count++] = jpeg_quality;
+  for (size_t i = 0;
+       i < sizeof(fallback_qualities) / sizeof(fallback_qualities[0]); ++i) {
+    if (fallback_qualities[i] >= jpeg_quality)
+      continue;
+    targets[target_count] = C2T_IMAGE_FORMAT_JPG;
+    qualities[target_count++] = fallback_qualities[i];
+  }
+
+  for (size_t i = 0; i < target_count; ++i) {
+    void *candidate = nullptr;
+    size_t candidate_size = 0;
+    if (!screenshot_transcode_image(*image_data, *image_size, targets[i],
+                                    qualities[i], &candidate,
+                                    &candidate_size))
+      continue;
+    if (candidate_size <= C2T_TELEGRAM_MAX_PHOTO_BYTES) {
+      c2t_secure_zero(*image_data, *image_size);
+      screenshot_free_data(*image_data);
+      *image_data = candidate;
+      *image_size = candidate_size;
+      *format = targets[i];
+      c2t_log_info("screenshot",
+                   "Oversized Telegram photo re-encoded as %s at %d%% "
+                   "(%llu bytes)",
+                   screenshot_format_to_string(*format), qualities[i],
+                   (unsigned long long)candidate_size);
+      return 1;
+    }
+    c2t_secure_zero(candidate, candidate_size);
+    screenshot_free_data(candidate);
+  }
+
+  return 0;
+}
+
 int screenshot_capture_display_and_send(const char *display_target, const char *caption) {
   void *image_data = nullptr;
   size_t image_size = 0;
@@ -181,6 +237,29 @@ int screenshot_capture_display_and_send(const char *display_target, const char *
     c2t_log_warning("screenshot", "Screenshot capture failed for target '%s'", target);
     atomic_store_explicit(&capture_in_progress, 0, memory_order_release);
     return 0;
+  }
+
+  int send_as_photo = mime_type &&
+                      (strcmp(mime_type, "image/png") == 0 ||
+                       strcmp(mime_type, "image/jpeg") == 0 ||
+                       strcmp(mime_type, "image/jpg") == 0);
+  if (send_as_photo && image_size > C2T_TELEGRAM_MAX_PHOTO_BYTES) {
+    size_t original_size = image_size;
+    if (screenshot_fit_telegram_photo(&image_data, &image_size, &format,
+                                      screenshot_get_quality())) {
+      mime_type = screenshot_format_mime(format);
+      filename = screenshot_format_filename(format);
+      c2t_log_info("screenshot",
+                   "Telegram photo reduced from %llu to %llu bytes",
+                   (unsigned long long)original_size,
+                   (unsigned long long)image_size);
+    } else {
+      send_as_photo = 0;
+      c2t_log_warning(
+          "screenshot",
+          "Screenshot remains larger than Telegram's 10 MiB photo limit; "
+          "sending it as a document");
+    }
   }
 
   c2t_clipboard_source_t source = {0};
@@ -229,8 +308,13 @@ int screenshot_capture_display_and_send(const char *display_target, const char *
 
   int send_res = 0;
   for (size_t attempt = 1; attempt <= attempts; ++attempt) {
-    send_res = telegram_send_encrypted_photo(image_data, image_size, nonce,
-                                             mime_type, filename, &source);
+    send_res = send_as_photo
+                   ? telegram_send_encrypted_photo(image_data, image_size,
+                                                   nonce, mime_type, filename,
+                                                   &source)
+                   : telegram_send_encrypted_file(image_data, image_size,
+                                                  nonce, mime_type, filename,
+                                                  &source);
     if (send_res) {
       break;
     }
