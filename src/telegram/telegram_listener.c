@@ -84,10 +84,61 @@ static VOID c2t_Sleep(DWORD dwMilliseconds) {
   if (g_c2t_win32.Sleep)
     g_c2t_win32.Sleep(dwMilliseconds);
 }
+static DWORD c2t_GetCurrentProcessId(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetCurrentProcessId)
+    return g_c2t_win32.GetCurrentProcessId();
+  return 0;
+}
+static BOOL c2t_GetComputerNameA(LPSTR lpBuffer, LPDWORD nSize) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetComputerNameA)
+    return g_c2t_win32.GetComputerNameA(lpBuffer, nSize);
+  return FALSE;
+}
+static VOID c2t_GetNativeSystemInfo(LPSYSTEM_INFO lpSystemInfo) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetNativeSystemInfo)
+    g_c2t_win32.GetNativeSystemInfo(lpSystemInfo);
+}
+static LONG c2t_RtlGetVersion(POSVERSIONINFOEXW lpVersionInformation) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.RtlGetVersion)
+    return g_c2t_win32.RtlGetVersion(lpVersionInformation);
+  return -1;
+}
+static ULONG c2t_GetAdaptersAddresses(ULONG Family, ULONG Flags, PVOID Reserved,
+                                      PIP_ADAPTER_ADDRESSES AdapterAddresses,
+                                      PULONG SizePointer) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetAdaptersAddresses)
+    return g_c2t_win32.GetAdaptersAddresses(Family, Flags, Reserved,
+                                            AdapterAddresses, SizePointer);
+  return (ULONG)ERROR_NOT_SUPPORTED;
+}
+static int c2t_WideCharToMultiByte(UINT CodePage, DWORD dwFlags,
+                                   LPCWCH lpWideCharStr, int cchWideChar,
+                                   LPSTR lpMultiByteStr, int cbMultiByte,
+                                   LPCCH lpDefaultChar,
+                                   LPBOOL lpUsedDefaultChar) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.WideCharToMultiByte)
+    return g_c2t_win32.WideCharToMultiByte(
+        CodePage, dwFlags, lpWideCharStr, cchWideChar, lpMultiByteStr,
+        cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
+  return 0;
+}
 
 #define CreateThread c2t_CreateThread
 #define WaitForSingleObject c2t_WaitForSingleObject
 #define CloseHandle c2t_CloseHandle
+#define Sleep c2t_Sleep
+#define GetCurrentProcessId c2t_GetCurrentProcessId
+#define GetComputerNameA c2t_GetComputerNameA
+#define GetNativeSystemInfo c2t_GetNativeSystemInfo
+#define RtlGetVersion c2t_RtlGetVersion
+#define GetAdaptersAddresses c2t_GetAdaptersAddresses
+#define WideCharToMultiByte c2t_WideCharToMultiByte
 #define Sleep c2t_Sleep
 #endif
 
@@ -460,6 +511,7 @@ static void get_system_os_info(char *os_out, size_t os_cap) {
   osvi.dwOSVersionInfoSize = sizeof(osvi);
 
   SYSTEM_INFO si;
+  memset(&si, 0, sizeof(si));
   GetNativeSystemInfo(&si);
   const char *arch = "x86";
   if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
@@ -469,37 +521,22 @@ static void get_system_os_info(char *os_out, size_t os_cap) {
   else if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM)
     arch = "ARM";
 
-  typedef LONG(WINAPI *pfn_RtlGetVersion)(POSVERSIONINFOEXW);
-  HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
-  if (hNtdll) {
-    FARPROC proc = GetProcAddress(hNtdll, "RtlGetVersion");
-    if (proc) {
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-function-type"
-#endif
-      pfn_RtlGetVersion pRtlGetVersion = (pfn_RtlGetVersion)proc;
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-      if (pRtlGetVersion(&osvi) == 0) {
-        const char *win_name = "Windows";
-        if (osvi.dwMajorVersion == 10 && osvi.dwBuildNumber >= 22000)
-          win_name = "Windows 11";
-        else if (osvi.dwMajorVersion == 10)
-          win_name = "Windows 10";
-        else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion == 3)
-          win_name = "Windows 8.1";
-        else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion == 2)
-          win_name = "Windows 8";
-        else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion == 1)
-          win_name = "Windows 7";
+  if (RtlGetVersion(&osvi) == 0) {
+    const char *win_name = "Windows";
+    if (osvi.dwMajorVersion == 10 && osvi.dwBuildNumber >= 22000)
+      win_name = "Windows 11";
+    else if (osvi.dwMajorVersion == 10)
+      win_name = "Windows 10";
+    else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion == 3)
+      win_name = "Windows 8.1";
+    else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion == 2)
+      win_name = "Windows 8";
+    else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion == 1)
+      win_name = "Windows 7";
 
-        snprintf(os_out, os_cap, "%s (Build %lu, %s)", win_name,
-                 (unsigned long)osvi.dwBuildNumber, arch);
-        return;
-      }
-    }
+    snprintf(os_out, os_cap, "%s (Build %lu, %s)", win_name,
+             (unsigned long)osvi.dwBuildNumber, arch);
+    return;
   }
   snprintf(os_out, os_cap, "Windows (%s)", arch);
 #endif
@@ -530,47 +567,44 @@ static void get_system_ip_info(char *ip_out, size_t ip_cap) {
     freeifaddrs(ifaddr);
   }
 #else
-  c2t_win32_api_init();
-  if (g_c2t_win32.GetAdaptersAddresses) {
-    ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
-                  GAA_FLAG_SKIP_DNS_SERVER;
-    ULONG out_buf_len = 15360;
-    PIP_ADAPTER_ADDRESSES addresses = (IP_ADAPTER_ADDRESSES *)malloc(out_buf_len);
-    if (addresses) {
-      ULONG ret = g_c2t_win32.GetAdaptersAddresses(AF_INET, flags, NULL,
-                                                   addresses, &out_buf_len);
-      if (ret == ERROR_BUFFER_OVERFLOW) {
-        free(addresses);
-        addresses = (IP_ADAPTER_ADDRESSES *)malloc(out_buf_len);
-        if (addresses) {
-          ret = g_c2t_win32.GetAdaptersAddresses(AF_INET, flags, NULL,
-                                                addresses, &out_buf_len);
-        }
+  ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                GAA_FLAG_SKIP_DNS_SERVER;
+  ULONG out_buf_len = 15360;
+  PIP_ADAPTER_ADDRESSES addresses = (IP_ADAPTER_ADDRESSES *)malloc(out_buf_len);
+  if (addresses) {
+    ULONG ret = GetAdaptersAddresses(AF_INET, flags, NULL,
+                                     addresses, &out_buf_len);
+    if (ret == ERROR_BUFFER_OVERFLOW) {
+      free(addresses);
+      addresses = (IP_ADAPTER_ADDRESSES *)malloc(out_buf_len);
+      if (addresses) {
+        ret = GetAdaptersAddresses(AF_INET, flags, NULL,
+                                   addresses, &out_buf_len);
       }
-      if (ret == NO_ERROR && addresses) {
-        for (PIP_ADAPTER_ADDRESSES curr = addresses; curr != NULL;
-             curr = curr->Next) {
-          if (curr->IfType == IF_TYPE_SOFTWARE_LOOPBACK ||
-              curr->OperStatus != IfOperStatusUp)
-            continue;
-          if (curr->FirstUnicastAddress &&
-              curr->FirstUnicastAddress->Address.lpSockaddr) {
-            struct sockaddr_in *sa =
-                (struct sockaddr_in *)(void *)
-                    curr->FirstUnicastAddress->Address.lpSockaddr;
-            const unsigned char *b = (const unsigned char *)&sa->sin_addr;
-            char friendly[64] = "";
-            WideCharToMultiByte(CP_UTF8, 0, curr->FriendlyName, -1, friendly,
-                                sizeof(friendly), NULL, NULL);
-            snprintf(ip_out, ip_cap, "%u.%u.%u.%u (%s)", b[0], b[1], b[2], b[3],
-                     friendly[0] ? friendly : "Ethernet");
-            break;
-          }
-        }
-      }
-      if (addresses)
-        free(addresses);
     }
+    if (ret == NO_ERROR && addresses) {
+      for (PIP_ADAPTER_ADDRESSES curr = addresses; curr != NULL;
+           curr = curr->Next) {
+        if (curr->IfType == IF_TYPE_SOFTWARE_LOOPBACK ||
+            curr->OperStatus != IfOperStatusUp)
+          continue;
+        if (curr->FirstUnicastAddress &&
+            curr->FirstUnicastAddress->Address.lpSockaddr) {
+          struct sockaddr_in *sa =
+              (struct sockaddr_in *)(void *)
+                  curr->FirstUnicastAddress->Address.lpSockaddr;
+          const unsigned char *b = (const unsigned char *)&sa->sin_addr;
+          char friendly[64] = "";
+          WideCharToMultiByte(CP_UTF8, 0, curr->FriendlyName, -1, friendly,
+                              sizeof(friendly), NULL, NULL);
+          snprintf(ip_out, ip_cap, "%u.%u.%u.%u (%s)", b[0], b[1], b[2], b[3],
+                   friendly[0] ? friendly : "Ethernet");
+          break;
+        }
+      }
+    }
+    if (addresses)
+      free(addresses);
   }
 #endif
 }

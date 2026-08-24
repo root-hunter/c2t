@@ -257,7 +257,11 @@ typedef BOOL(WINAPI *pfn_SleepConditionVariableCS)(
     DWORD dwMilliseconds);
 typedef VOID(WINAPI *pfn_WakeConditionVariable)(
     PCONDITION_VARIABLE ConditionVariable);
+typedef BOOL(WINAPI *pfn_GetComputerNameA)(LPSTR lpBuffer, LPDWORD nSize);
+typedef VOID(WINAPI *pfn_GetNativeSystemInfo)(LPSYSTEM_INFO lpSystemInfo);
 
+/* Ntdll APIs */
+typedef LONG(WINAPI *pfn_RtlGetVersion)(POSVERSIONINFOEXW lpVersionInformation);
 
 /* Advapi32 & BCrypt APIs */
 typedef BOOLEAN(WINAPI *pfn_RtlGenRandom)(PVOID RandomBuffer,
@@ -510,7 +514,11 @@ typedef struct {
   pfn_InitializeConditionVariable InitializeConditionVariable;
   pfn_SleepConditionVariableCS SleepConditionVariableCS;
   pfn_WakeConditionVariable WakeConditionVariable;
+  pfn_GetComputerNameA GetComputerNameA;
+  pfn_GetNativeSystemInfo GetNativeSystemInfo;
 
+  /* ntdll */
+  pfn_RtlGetVersion RtlGetVersion;
 
   /* advapi32 / bcrypt */
   pfn_RtlGenRandom RtlGenRandom;
