@@ -70,7 +70,24 @@ static int test_arena(void) {
     c2t_arena_destroy(&arena);
     return fail("arena reset reuse");
   }
+  arena.offset = SIZE_MAX;
+  c2t_arena_reset(&arena);
+  if (arena.offset != 0 || c2t_arena_alloc(&arena, 1) != first) {
+    c2t_arena_destroy(&arena);
+    return fail("arena corrupted offset recovery");
+  }
   c2t_arena_destroy(&arena);
+  if (arena.buffer || arena.capacity != 0 || arena.offset != 0 ||
+      arena.is_locked)
+    return fail("arena destroy state");
+
+  c2t_arena_t invalid = {.buffer = (unsigned char *)1,
+                         .capacity = 1,
+                         .offset = 1,
+                         .is_locked = 1};
+  if (c2t_arena_init(&invalid, 0) || invalid.buffer || invalid.capacity != 0 ||
+      invalid.offset != 0 || invalid.is_locked)
+    return fail("arena failed initialization state");
   return 0;
 }
 
@@ -966,6 +983,15 @@ int main(void) {
       strstr(unread_logs, "Error test message 42") == nullptr) {
     free(unread_logs);
     return fail("c2t_log_get_unread circular ring buffer verification");
+  }
+  char log_snapshot[32];
+  size_t snapshot_len =
+      c2t_log_copy_unread(log_snapshot, sizeof(log_snapshot));
+  if (snapshot_len != sizeof(log_snapshot) - 1U ||
+      log_snapshot[snapshot_len] != '\0' ||
+      memcmp(log_snapshot, unread_logs, snapshot_len) != 0) {
+    free(unread_logs);
+    return fail("allocation-free log snapshot verification");
   }
   c2t_log_advance_read_offset(unread_len);
   free(unread_logs);

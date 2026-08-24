@@ -65,14 +65,11 @@ static void c2t_GetSystemTime(LPSYSTEMTIME lpSystemTime) {
 #endif
 #endif
 
-#define MEMORY_LOG_MAX_BYTES (64U * 1024U)
-
 static int verbose;
 static FILE *log_file_stream;
 
 static char *memory_log_buf;
 static size_t ring_head;
-static size_t ring_total;
 static size_t ring_unread;
 
 #ifdef _WIN32
@@ -135,36 +132,52 @@ static void write_log(const char *level, const char *component,
   if (line_len > 0) {
     log_lock();
     if (!memory_log_buf) {
-      memory_log_buf = malloc(MEMORY_LOG_MAX_BYTES);
+      memory_log_buf = malloc(C2T_LOG_MEMORY_CAPACITY);
       ring_head = 0;
-      ring_total = 0;
       ring_unread = 0;
     }
     if (memory_log_buf) {
       size_t to_write = (size_t)line_len;
       const char *src = line_buf;
-      if (to_write > MEMORY_LOG_MAX_BYTES) {
-        src += (to_write - MEMORY_LOG_MAX_BYTES);
-        to_write = MEMORY_LOG_MAX_BYTES;
+      if (to_write > C2T_LOG_MEMORY_CAPACITY) {
+        src += (to_write - C2T_LOG_MEMORY_CAPACITY);
+        to_write = C2T_LOG_MEMORY_CAPACITY;
       }
-      size_t first_chunk = (MEMORY_LOG_MAX_BYTES - ring_head < to_write)
-                               ? (MEMORY_LOG_MAX_BYTES - ring_head)
+      size_t first_chunk = (C2T_LOG_MEMORY_CAPACITY - ring_head < to_write)
+                               ? (C2T_LOG_MEMORY_CAPACITY - ring_head)
                                : to_write;
       memcpy(memory_log_buf + ring_head, src, first_chunk);
       if (to_write > first_chunk) {
         memcpy(memory_log_buf, src + first_chunk, to_write - first_chunk);
       }
-      ring_head = (ring_head + to_write) % MEMORY_LOG_MAX_BYTES;
+      ring_head = (ring_head + to_write) % C2T_LOG_MEMORY_CAPACITY;
 
-      ring_total += to_write;
-      if (ring_total > MEMORY_LOG_MAX_BYTES)
-        ring_total = MEMORY_LOG_MAX_BYTES;
       ring_unread += to_write;
-      if (ring_unread > MEMORY_LOG_MAX_BYTES)
-        ring_unread = MEMORY_LOG_MAX_BYTES;
+      if (ring_unread > C2T_LOG_MEMORY_CAPACITY)
+        ring_unread = C2T_LOG_MEMORY_CAPACITY;
     }
     log_unlock();
   }
+}
+
+static size_t copy_unread_locked(char *destination, size_t capacity) {
+  size_t copied = ring_unread;
+  if (copied >= capacity)
+    copied = capacity - 1U;
+
+  if (memory_log_buf && copied > 0) {
+    size_t start =
+        (ring_head + C2T_LOG_MEMORY_CAPACITY - ring_unread) %
+        C2T_LOG_MEMORY_CAPACITY;
+    size_t first_chunk = (C2T_LOG_MEMORY_CAPACITY - start < copied)
+                             ? (C2T_LOG_MEMORY_CAPACITY - start)
+                             : copied;
+    memcpy(destination, memory_log_buf + start, first_chunk);
+    if (copied > first_chunk)
+      memcpy(destination + first_chunk, memory_log_buf, copied - first_chunk);
+  }
+  destination[copied] = '\0';
+  return copied;
 }
 
 char *c2t_log_get_unread(size_t *out_length) {
@@ -177,23 +190,23 @@ char *c2t_log_get_unread(size_t *out_length) {
   }
 
   size_t unread = ring_unread;
-  char *copy = malloc(unread + 1);
-  if (copy) {
-    size_t start =
-        (ring_head + MEMORY_LOG_MAX_BYTES - unread) % MEMORY_LOG_MAX_BYTES;
-    size_t first_chunk = (MEMORY_LOG_MAX_BYTES - start < unread)
-                             ? (MEMORY_LOG_MAX_BYTES - start)
-                             : unread;
-    memcpy(copy, memory_log_buf + start, first_chunk);
-    if (unread > first_chunk) {
-      memcpy(copy + first_chunk, memory_log_buf, unread - first_chunk);
-    }
-    copy[unread] = '\0';
-  }
+  char *copy = malloc(unread + 1U);
+  if (copy)
+    (void)copy_unread_locked(copy, unread + 1U);
   log_unlock();
   if (out_length)
     *out_length = copy ? unread : 0;
   return copy;
+}
+
+size_t c2t_log_copy_unread(char *destination, size_t capacity) {
+  if (!destination || capacity == 0)
+    return 0;
+
+  log_lock();
+  size_t copied = copy_unread_locked(destination, capacity);
+  log_unlock();
+  return copied;
 }
 
 void c2t_log_advance_read_offset(size_t bytes_consumed) {
@@ -214,7 +227,6 @@ void c2t_log_cleanup(void) {
   free(memory_log_buf);
   memory_log_buf = nullptr;
   ring_head = 0;
-  ring_total = 0;
   ring_unread = 0;
   log_unlock();
 #if defined(__GLIBC__) && !defined(_WIN32)

@@ -27,16 +27,20 @@
 #endif
 
 int c2t_arena_init(c2t_arena_t *arena, size_t capacity) {
-  if (!arena || capacity == 0)
+  if (!arena)
     return 0;
 
-  arena->capacity = capacity;
+  arena->buffer = nullptr;
+  arena->capacity = 0;
   arena->offset = 0;
-  arena->buffer = malloc(capacity);
-  if (!arena->buffer) {
-    arena->capacity = 0;
+  arena->is_locked = 0;
+  if (capacity == 0)
     return 0;
-  }
+
+  arena->buffer = malloc(capacity);
+  if (!arena->buffer)
+    return 0;
+  arena->capacity = capacity;
 
   c2t_secure_lock(arena->buffer, capacity);
   arena->is_locked = 1;
@@ -82,15 +86,22 @@ void c2t_arena_reset(c2t_arena_t *arena) {
   if (!arena || !arena->buffer)
     return;
 
-  if (arena->offset > 0) {
-    c2t_secure_zero(arena->buffer, arena->offset);
-    arena->offset = 0;
-  }
+  size_t used = arena->offset < arena->capacity ? arena->offset
+                                                : arena->capacity;
+  c2t_secure_zero(arena->buffer, used);
+  arena->offset = 0;
 }
 
 void c2t_arena_destroy(c2t_arena_t *arena) {
-  if (!arena || !arena->buffer)
+  if (!arena)
     return;
+
+  if (!arena->buffer) {
+    arena->capacity = 0;
+    arena->offset = 0;
+    arena->is_locked = 0;
+    return;
+  }
 
   c2t_secure_zero(arena->buffer, arena->capacity);
   if (arena->is_locked) {

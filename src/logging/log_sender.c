@@ -118,6 +118,30 @@ static int stopping;
 static size_t last_sent_offset;
 static uint64_t total_log_sent_bytes;
 static uint64_t total_log_dispatches;
+static char *send_buffer;
+static size_t send_buffer_capacity;
+
+static int reserve_send_buffer(size_t required) {
+  if (required <= send_buffer_capacity)
+    return 1;
+
+  size_t capacity = send_buffer_capacity ? send_buffer_capacity
+                                         : C2T_LOG_MEMORY_CAPACITY + 1U;
+  while (capacity < required) {
+    if (capacity > SIZE_MAX / 2U) {
+      capacity = required;
+      break;
+    }
+    capacity *= 2U;
+  }
+
+  char *resized = realloc(send_buffer, capacity);
+  if (!resized)
+    return 0;
+  send_buffer = resized;
+  send_buffer_capacity = capacity;
+  return 1;
+}
 
 #ifdef _WIN32
 static CRITICAL_SECTION sender_mutex;
@@ -182,9 +206,7 @@ static void sender_signal(void) {
       }
     }
 
-    char *msg = (char *)malloc(16384);
-    if (!msg)
-      return 0;
+    char msg[16384];
 
     size_t msg_idx = 0;
     const char *prefix =
@@ -220,13 +242,11 @@ static void sender_signal(void) {
     msg[msg_idx] = '\0';
 
     if (!telegram_send_html(msg)) {
-      c2t_secure_zero(msg, 16384);
-      free(msg);
+      c2t_secure_zero(msg, msg_idx);
       return 0;
     }
 
-    c2t_secure_zero(msg, 16384);
-    free(msg);
+    c2t_secure_zero(msg, msg_idx);
     offset += chunk_len;
     chunk_index++;
   }
@@ -254,8 +274,8 @@ static int send_log_payload(int on_demand) {
             if (to_read > MAX_LOG_READ_BYTES)
               to_read = MAX_LOG_READ_BYTES;
             if (fseek(stream, (long)last_sent_offset, SEEK_SET) == 0) {
-              buffer = malloc(to_read + 1);
-              if (buffer) {
+              if (reserve_send_buffer(to_read + 1U)) {
+                buffer = send_buffer;
                 unread_bytes = fread(buffer, 1, to_read, stream);
                 buffer[unread_bytes] = '\0';
               }
@@ -266,14 +286,13 @@ static int send_log_payload(int on_demand) {
       fclose(stream);
     }
   } else {
-    buffer = c2t_log_get_unread(&unread_bytes);
+    if (reserve_send_buffer(C2T_LOG_MEMORY_CAPACITY + 1U)) {
+      buffer = send_buffer;
+      unread_bytes = c2t_log_copy_unread(buffer, send_buffer_capacity);
+    }
   }
 
   if (unread_bytes == 0 || !buffer) {
-    if (buffer) {
-      c2t_secure_zero(buffer, unread_bytes);
-      free(buffer);
-    }
     if (on_demand) {
       telegram_send_html(
           "ℹ️ <b>c2t Logs</b>\n<i>No new logs since last check.</i>");
@@ -329,7 +348,6 @@ static int send_log_payload(int on_demand) {
   }
 
   c2t_secure_zero(buffer, unread_bytes);
-  free(buffer);
   return sent;
 }
 
@@ -357,13 +375,13 @@ static void *log_sender_worker_func([[maybe_unused]] void *context)
         interval = 3600;
       sender_wait(interval);
     }
-    int is_stopping = stopping;
-    sender_unlock();
-
-    if (is_stopping)
+    if (stopping) {
+      sender_unlock();
       break;
+    }
 
-    send_log_payload(0);
+    (void)send_log_payload(0);
+    sender_unlock();
   }
   telegram_http_thread_cleanup();
 #ifdef _WIN32
@@ -412,25 +430,33 @@ int c2t_log_sender_init(void) {
 }
 
 void c2t_log_sender_cleanup(void) {
-  if (!worker_started)
-    return;
-
-  sender_lock();
-  stopping = 1;
-  sender_signal();
-  sender_unlock();
+  if (worker_started) {
+    sender_lock();
+    stopping = 1;
+    sender_signal();
+    sender_unlock();
 
 #ifdef _WIN32
-  WaitForSingleObject(worker_thread, INFINITE);
-  CloseHandle(worker_thread);
-  worker_thread = nullptr;
+    WaitForSingleObject(worker_thread, INFINITE);
+    CloseHandle(worker_thread);
+    worker_thread = nullptr;
 #else
-  (void)pthread_join(worker_thread, nullptr);
+    (void)pthread_join(worker_thread, nullptr);
 #endif
 
-  worker_started = 0;
-  stopping = 0;
-  c2t_log_info("log_sender", "Periodic Telegram log sender stopped");
+    worker_started = 0;
+    stopping = 0;
+    c2t_log_info("log_sender", "Periodic Telegram log sender stopped");
+  }
+
+  sender_lock();
+  if (send_buffer) {
+    c2t_secure_zero(send_buffer, send_buffer_capacity);
+    free(send_buffer);
+    send_buffer = nullptr;
+    send_buffer_capacity = 0;
+  }
+  sender_unlock();
 }
 
 uint64_t c2t_log_sender_get_total_bytes(void) {

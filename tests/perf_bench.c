@@ -165,26 +165,24 @@ static double benchmark_logging_ring(void)
 {
     printf("=== 2. Circular Log Ring Buffer Throughput ===\n");
     c2t_log_init();
+    c2t_log_error("benchmark", "representative in-memory log record: %u", 42U);
 
     const int iterations = 100000;
-    char sample_data[256];
-    snprintf(sample_data, sizeof(sample_data),
-             "User logged in from remote session, clipboard captured 2048 bytes of text payload");
+    char snapshot[512];
+    size_t copied = 0;
+    uint64_t checksum = 0;
 
     double start = get_time_sec();
     for (int i = 0; i < iterations; i++) {
-        size_t dummy_len = 0;
-        char *unread = c2t_log_get_unread(&dummy_len);
-        if (unread) {
-            c2t_log_advance_read_offset(dummy_len);
-            free(unread);
-        }
+        copied = c2t_log_copy_unread(snapshot, sizeof(snapshot));
+        checksum += copied > 0 ? (unsigned char)snapshot[copied - 1U] : 0U;
     }
     double elapsed = get_time_sec() - start;
     double ops_sec = elapsed > 0 ? ((double)iterations / elapsed) : 0.0;
+    c2t_log_advance_read_offset(copied);
 
-    printf("  Ring Buffer Ops/sec : %.2f ops/sec (%.3f s for %d get_unread+advance cycles)\n\n",
-           ops_sec, elapsed, iterations);
+    printf("  Ring Snapshots/sec  : %.2f ops/sec (%.3f s for %d allocation-free copies, checksum=%llu)\n\n",
+           ops_sec, elapsed, iterations, (unsigned long long)checksum);
     c2t_log_cleanup();
     return ops_sec;
 }

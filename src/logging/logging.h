@@ -20,6 +20,8 @@
 
 #include <stddef.h>
 
+#define C2T_LOG_MEMORY_CAPACITY (64U * 1024U)
+
 void c2t_log_init(void);
 [[nodiscard]] int c2t_log_is_verbose(void);
 
@@ -40,6 +42,9 @@ void c2t_log_debug(const char *component, const char *format, ...)
     C2T_PRINTF_FORMAT(2, 3);
 
 [[nodiscard]] char *c2t_log_get_unread(size_t *out_length);
+/* Copies a consistent snapshot of the oldest unread bytes. The destination is
+ * always NUL-terminated when capacity is non-zero. No read offset is moved. */
+[[nodiscard]] size_t c2t_log_copy_unread(char *destination, size_t capacity);
 void c2t_log_advance_read_offset(size_t bytes_consumed);
 void c2t_log_cleanup(void);
 
