@@ -295,6 +295,116 @@ static void chacha20_init_state(uint32_t state[16], const unsigned char key[32],
 #define C2T_HAS_SSE2 1
 #endif
 
+#if defined(C2T_HAS_SSE2)
+#define ROTL32_SSE2(v, n)                                                     \
+  _mm_or_si128(_mm_slli_epi32((v), (n)), _mm_srli_epi32((v), 32 - (n)))
+#define ROTL16_SSE2(v)                                                         \
+  _mm_shufflehi_epi16(                                                        \
+      _mm_shufflelo_epi16((v), _MM_SHUFFLE(2, 3, 0, 1)),                     \
+      _MM_SHUFFLE(2, 3, 0, 1))
+#define CHACHA20_QUARTERROUND_SSE2(a, b, c, d)                                \
+  do {                                                                         \
+    (a) = _mm_add_epi32((a), (b));                                             \
+    (d) = ROTL16_SSE2(_mm_xor_si128((d), (a)));                               \
+    (c) = _mm_add_epi32((c), (d));                                             \
+    (b) = ROTL32_SSE2(_mm_xor_si128((b), (c)), 12);                           \
+    (a) = _mm_add_epi32((a), (b));                                             \
+    (d) = ROTL32_SSE2(_mm_xor_si128((d), (a)), 8);                            \
+    (c) = _mm_add_epi32((c), (d));                                             \
+    (b) = ROTL32_SSE2(_mm_xor_si128((b), (c)), 7);                            \
+  } while (0)
+
+static inline void chacha20_xor_4words(__m128i x0, __m128i x1, __m128i x2,
+                                        __m128i x3,
+                                        const unsigned char *input,
+                                        unsigned char *output) {
+  __m128i t0 = _mm_unpacklo_epi32(x0, x1);
+  __m128i t1 = _mm_unpackhi_epi32(x0, x1);
+  __m128i t2 = _mm_unpacklo_epi32(x2, x3);
+  __m128i t3 = _mm_unpackhi_epi32(x2, x3);
+  __m128i b0 = _mm_unpacklo_epi64(t0, t2);
+  __m128i b1 = _mm_unpackhi_epi64(t0, t2);
+  __m128i b2 = _mm_unpacklo_epi64(t1, t3);
+  __m128i b3 = _mm_unpackhi_epi64(t1, t3);
+
+  b0 = _mm_xor_si128(
+      b0, _mm_loadu_si128((const __m128i *)(const void *)(input + 0)));
+  b1 = _mm_xor_si128(
+      b1, _mm_loadu_si128((const __m128i *)(const void *)(input + 64)));
+  b2 = _mm_xor_si128(
+      b2, _mm_loadu_si128((const __m128i *)(const void *)(input + 128)));
+  b3 = _mm_xor_si128(
+      b3, _mm_loadu_si128((const __m128i *)(const void *)(input + 192)));
+
+  _mm_storeu_si128((__m128i *)(void *)(output + 0), b0);
+  _mm_storeu_si128((__m128i *)(void *)(output + 64), b1);
+  _mm_storeu_si128((__m128i *)(void *)(output + 128), b2);
+  _mm_storeu_si128((__m128i *)(void *)(output + 192), b3);
+}
+
+/* Process four independent blocks across the four 32-bit SIMD lanes. */
+static void chacha20_crypt_4blocks(const uint32_t state[16],
+                                   const unsigned char *input,
+                                   unsigned char *output) {
+  __m128i x0 = _mm_set1_epi32((int)state[0]);
+  __m128i x1 = _mm_set1_epi32((int)state[1]);
+  __m128i x2 = _mm_set1_epi32((int)state[2]);
+  __m128i x3 = _mm_set1_epi32((int)state[3]);
+  __m128i x4 = _mm_set1_epi32((int)state[4]);
+  __m128i x5 = _mm_set1_epi32((int)state[5]);
+  __m128i x6 = _mm_set1_epi32((int)state[6]);
+  __m128i x7 = _mm_set1_epi32((int)state[7]);
+  __m128i x8 = _mm_set1_epi32((int)state[8]);
+  __m128i x9 = _mm_set1_epi32((int)state[9]);
+  __m128i x10 = _mm_set1_epi32((int)state[10]);
+  __m128i x11 = _mm_set1_epi32((int)state[11]);
+  __m128i x12 = _mm_set_epi32((int)(state[12] + 3U),
+                              (int)(state[12] + 2U),
+                              (int)(state[12] + 1U), (int)state[12]);
+  __m128i x13 = _mm_set1_epi32((int)state[13]);
+  __m128i x14 = _mm_set1_epi32((int)state[14]);
+  __m128i x15 = _mm_set1_epi32((int)state[15]);
+
+  for (size_t i = 0; i < 10; ++i) {
+    CHACHA20_QUARTERROUND_SSE2(x0, x4, x8, x12);
+    CHACHA20_QUARTERROUND_SSE2(x1, x5, x9, x13);
+    CHACHA20_QUARTERROUND_SSE2(x2, x6, x10, x14);
+    CHACHA20_QUARTERROUND_SSE2(x3, x7, x11, x15);
+    CHACHA20_QUARTERROUND_SSE2(x0, x5, x10, x15);
+    CHACHA20_QUARTERROUND_SSE2(x1, x6, x11, x12);
+    CHACHA20_QUARTERROUND_SSE2(x2, x7, x8, x13);
+    CHACHA20_QUARTERROUND_SSE2(x3, x4, x9, x14);
+  }
+
+#define CHACHA20_ADD_ORIGINAL(n)                                               \
+  x##n = _mm_add_epi32(x##n, _mm_set1_epi32((int)state[n]))
+  CHACHA20_ADD_ORIGINAL(0);
+  CHACHA20_ADD_ORIGINAL(1);
+  CHACHA20_ADD_ORIGINAL(2);
+  CHACHA20_ADD_ORIGINAL(3);
+  CHACHA20_ADD_ORIGINAL(4);
+  CHACHA20_ADD_ORIGINAL(5);
+  CHACHA20_ADD_ORIGINAL(6);
+  CHACHA20_ADD_ORIGINAL(7);
+  CHACHA20_ADD_ORIGINAL(8);
+  CHACHA20_ADD_ORIGINAL(9);
+  CHACHA20_ADD_ORIGINAL(10);
+  CHACHA20_ADD_ORIGINAL(11);
+  x12 = _mm_add_epi32(
+      x12, _mm_set_epi32((int)(state[12] + 3U), (int)(state[12] + 2U),
+                         (int)(state[12] + 1U), (int)state[12]));
+  CHACHA20_ADD_ORIGINAL(13);
+  CHACHA20_ADD_ORIGINAL(14);
+  CHACHA20_ADD_ORIGINAL(15);
+#undef CHACHA20_ADD_ORIGINAL
+
+  chacha20_xor_4words(x0, x1, x2, x3, input + 0, output + 0);
+  chacha20_xor_4words(x4, x5, x6, x7, input + 16, output + 16);
+  chacha20_xor_4words(x8, x9, x10, x11, input + 32, output + 32);
+  chacha20_xor_4words(x12, x13, x14, x15, input + 48, output + 48);
+}
+#endif
+
 static void chacha20_crypt(const unsigned char key[32],
                            const unsigned char nonce[12], uint32_t counter,
                            const unsigned char *input, unsigned char *output,
@@ -306,6 +416,13 @@ static void chacha20_crypt(const unsigned char key[32],
   chacha20_init_state(state, key, nonce, counter);
 
   size_t offset = 0;
+#if defined(C2T_HAS_SSE2)
+  while (len - offset >= 256) {
+    chacha20_crypt_4blocks(state, input + offset, output + offset);
+    state[12] += 4U;
+    offset += 256;
+  }
+#endif
   while (offset < len) {
     chacha20_block(block, state);
     for (size_t i = 0; i < 16; ++i)
