@@ -68,6 +68,10 @@ void c2t_secure_unlock(void *ptr, size_t len);
 
 [[nodiscard]] int c2t_crypto_get_random_bytes(void *buf, size_t len);
 
+/* Runtime SIMD capabilities and the fastest compiled ChaCha20 backend. */
+[[nodiscard]] const char *c2t_crypto_simd_capabilities(void);
+[[nodiscard]] const char *c2t_crypto_chacha20_backend(void);
+
 [[nodiscard]] int
 c2t_crypto_encrypt(const void *plaintext, size_t len,
                    const unsigned char nonce[C2T_CRYPTO_NONCE_SIZE],

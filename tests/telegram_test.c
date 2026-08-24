@@ -1193,6 +1193,9 @@ int main(void) {
   /* Crypto & Secure Memory unit tests */
   if (!c2t_crypto_init())
     return fail("c2t_crypto_init");
+  if (c2t_crypto_simd_capabilities()[0] == '\0' ||
+      c2t_crypto_chacha20_backend()[0] == '\0')
+    return fail("crypto SIMD diagnostics");
 
   unsigned char test_nonce[C2T_CRYPTO_NONCE_SIZE];
   if (!c2t_crypto_get_random_bytes(test_nonce, sizeof(test_nonce)))

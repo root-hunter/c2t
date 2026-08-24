@@ -27,6 +27,10 @@
 #include "../src/telegram/telegram.h"
 
 typedef struct {
+    const char *architecture;
+    const char *compiler;
+    const char *simd_capabilities;
+    const char *chacha20_backend;
     double chacha20_mb_s;
     double logging_ops_s;
     double json_payloads_s;
@@ -37,6 +41,32 @@ typedef struct {
     uint64_t cpu_instructions;
     double ipc;
 } bench_results_t;
+
+static const char *benchmark_architecture(void)
+{
+#if defined(__x86_64__) || defined(_M_X64)
+    return "x86_64";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    return "aarch64";
+#elif defined(__i386__) || defined(_M_IX86)
+    return "x86";
+#else
+    return "unknown";
+#endif
+}
+
+static const char *benchmark_compiler(void)
+{
+#if defined(_MSC_VER)
+    return "MSVC";
+#elif defined(__clang__)
+    return "Clang";
+#elif defined(__GNUC__)
+    return "GCC";
+#else
+    return "unknown";
+#endif
+}
 
 #ifdef _WIN32
 static double get_time_sec(void)
@@ -357,6 +387,11 @@ static void write_markdown_report(const char *filepath, const bench_results_t *r
     fprintf(f, "# c2t Performance Benchmark Report\n\n");
     fprintf(f, "| Metric | Value |\n");
     fprintf(f, "| :--- | ---: |\n");
+    fprintf(f, "| **Architecture** | `%s` |\n", res->architecture);
+    fprintf(f, "| **Compiler** | `%s` |\n", res->compiler);
+    fprintf(f, "| **Runtime SIMD Features** | `%s` |\n",
+            res->simd_capabilities);
+    fprintf(f, "| **ChaCha20 Backend** | `%s` |\n", res->chacha20_backend);
     write_scaled_markdown_metric(f, "ChaCha20 Throughput",
                                  res->chacha20_mb_s * 1000000.0, "B/s", "");
     write_scaled_markdown_metric(f, "Log Ring Buffer Throughput",
@@ -388,6 +423,12 @@ static void write_json_report(const char *filepath, const bench_results_t *res)
     if (!f) return;
 
     fprintf(f, "{\n");
+    fprintf(f, "  \"architecture\": \"%s\",\n", res->architecture);
+    fprintf(f, "  \"compiler\": \"%s\",\n", res->compiler);
+    fprintf(f, "  \"simd_capabilities\": \"%s\",\n",
+            res->simd_capabilities);
+    fprintf(f, "  \"chacha20_backend\": \"%s\",\n",
+            res->chacha20_backend);
     fprintf(f, "  \"chacha20_mb_s\": %.2f,\n", res->chacha20_mb_s);
     fprintf(f, "  \"logging_ops_s\": %.2f,\n", res->logging_ops_s);
     fprintf(f, "  \"json_payloads_s\": %.2f,\n", res->json_payloads_s);
@@ -421,6 +462,15 @@ int main(int argc, char **argv)
 
     bench_results_t res;
     memset(&res, 0, sizeof(res));
+
+    res.architecture = benchmark_architecture();
+    res.compiler = benchmark_compiler();
+    res.simd_capabilities = c2t_crypto_simd_capabilities();
+    res.chacha20_backend = c2t_crypto_chacha20_backend();
+    printf("  Architecture        : %s\n", res.architecture);
+    printf("  Compiler            : %s\n", res.compiler);
+    printf("  Runtime SIMD        : %s\n", res.simd_capabilities);
+    printf("  ChaCha20 Backend    : %s\n\n", res.chacha20_backend);
 
     res.chacha20_mb_s = benchmark_crypto();
     res.logging_ops_s = benchmark_logging_ring();

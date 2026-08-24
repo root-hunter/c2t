@@ -45,6 +45,24 @@ configure_file(src/version.h.in generated/c2t_version.h @ONLY)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# MSVC has no per-function target attribute. Keep the AVX2 and AVX-512 kernels
+# in dedicated objects, while crypto.c remains at the x64 SSE2 baseline and
+# calls either object only after runtime ISA detection.
+set(C2T_MSVC_SIMD_SOURCE "")
+if(MSVC AND CMAKE_GENERATOR_PLATFORM STREQUAL "x64")
+    set(C2T_MSVC_SIMD_SOURCE
+        src/crypto/crypto_msvc_simd.c
+        src/crypto/crypto_msvc_avx512.c
+    )
+    set_source_files_properties(src/crypto/crypto_msvc_simd.c PROPERTIES
+        COMPILE_OPTIONS "/arch:AVX2"
+    )
+    set_source_files_properties(src/crypto/crypto_msvc_avx512.c PROPERTIES
+        COMPILE_OPTIONS "/arch:AVX512"
+    )
+    add_compile_definitions(C2T_MSVC_X86_SIMD=1)
+endif()
+
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
@@ -56,6 +74,7 @@ add_executable(c2t
     src/config/embedded_config.c
     src/crypto/arena.c
     src/crypto/crypto.c
+    ${C2T_MSVC_SIMD_SOURCE}
     src/files/files.c
     src/keyboard/keyboard_output.c
     src/logging/logging.c
@@ -389,6 +408,7 @@ if(BUILD_TESTING AND NOT WIN32)
         src/config/embedded_config.c
         src/crypto/arena.c
         src/crypto/crypto.c
+        ${C2T_MSVC_SIMD_SOURCE}
         src/files/files.c
         src/keyboard/keyboard_output.c
         src/logging/logging.c
@@ -470,6 +490,7 @@ if(BUILD_TESTING)
         src/config/embedded_config.c
         src/crypto/arena.c
         src/crypto/crypto.c
+        ${C2T_MSVC_SIMD_SOURCE}
         src/files/files.c
         src/keyboard/keyboard_output.c
         src/logging/logging.c

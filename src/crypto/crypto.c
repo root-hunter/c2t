@@ -304,6 +304,7 @@ static void chacha20_init_state(uint32_t state[16], const unsigned char key[32],
     (defined(__GNUC__) || defined(__clang__) || defined(__AVX2__))
 #include <immintrin.h>
 #define C2T_HAS_AVX2_DISPATCH 1
+#define C2T_HAS_AVX2_KERNEL 1
 #if defined(__GNUC__) || defined(__clang__)
 #define C2T_TARGET_AVX2 __attribute__((target("avx2")))
 #else
@@ -317,11 +318,24 @@ static void chacha20_init_state(uint32_t state[16], const unsigned char key[32],
 #include <immintrin.h>
 #endif
 #define C2T_HAS_AVX512_DISPATCH 1
+#define C2T_HAS_AVX512_KERNEL 1
 #if defined(__GNUC__) || defined(__clang__)
 #define C2T_TARGET_AVX512 __attribute__((target("avx512f")))
 #else
 #define C2T_TARGET_AVX512
 #endif
+#endif
+
+#if defined(C2T_MSVC_X86_SIMD)
+#include <immintrin.h>
+#define C2T_HAS_AVX2_DISPATCH 1
+#define C2T_HAS_AVX512_DISPATCH 1
+void c2t_chacha20_crypt_8blocks(const uint32_t state[16],
+                                const unsigned char *input,
+                                unsigned char *output);
+void c2t_chacha20_crypt_16blocks(const uint32_t state[16],
+                                 const unsigned char *input,
+                                 unsigned char *output);
 #endif
 
 #if defined(C2T_HAS_SSE2)
@@ -546,7 +560,7 @@ static void chacha20_crypt_4blocks_neon(const uint32_t state[16],
 }
 #endif
 
-#if defined(C2T_HAS_AVX512_DISPATCH)
+#if defined(C2T_HAS_AVX512_KERNEL)
 #define ROTL32_AVX512(v, n)                                                    \
   _mm512_or_si512(_mm512_slli_epi32((v), (n)),                               \
                   _mm512_srli_epi32((v), 32 - (n)))
@@ -674,16 +688,9 @@ chacha20_crypt_16blocks(const uint32_t state[restrict 16],
   _mm256_zeroupper();
 }
 
-static int chacha20_has_avx512(void) {
-#if defined(__GNUC__) || defined(__clang__)
-  return __builtin_cpu_supports("avx512f") != 0;
-#else
-  return 1;
-#endif
-}
 #endif
 
-#if defined(C2T_HAS_AVX2_DISPATCH)
+#if defined(C2T_HAS_AVX2_KERNEL)
 #define ROTL32_AVX2(v, n)                                                     \
   _mm256_or_si256(_mm256_slli_epi32((v), (n)),                               \
                   _mm256_srli_epi32((v), 32 - (n)))
@@ -802,14 +809,65 @@ chacha20_crypt_8blocks(const uint32_t state[16], const unsigned char *input,
   _mm256_zeroupper();
 }
 
-static int chacha20_has_avx2(void) {
-#if defined(__GNUC__) || defined(__clang__)
-  return __builtin_cpu_supports("avx2") != 0;
+#endif
+
+#if defined(C2T_HAS_AVX512_DISPATCH)
+static int chacha20_has_avx512(void) {
+#if defined(C2T_MSVC_X86_SIMD)
+  return __check_isa_support(__IA_SUPPORT_VECTOR512, 0) != 0;
 #else
-  return 1;
+  return __builtin_cpu_supports("avx512f") != 0;
 #endif
 }
 #endif
+
+#if defined(C2T_HAS_AVX2_DISPATCH)
+static int chacha20_has_avx2(void) {
+#if defined(C2T_MSVC_X86_SIMD)
+  return __check_isa_support(__IA_SUPPORT_VECTOR256, 0) != 0;
+#else
+  return __builtin_cpu_supports("avx2") != 0;
+#endif
+}
+#endif
+
+const char *c2t_crypto_simd_capabilities(void) {
+#if defined(C2T_HAS_AVX512_DISPATCH) && defined(C2T_HAS_AVX2_DISPATCH)
+  int avx512 = chacha20_has_avx512();
+  int avx2 = chacha20_has_avx2();
+  if (avx512 && avx2)
+    return "SSE2, AVX2, AVX-512F";
+  if (avx512)
+    return "SSE2, AVX-512F";
+  if (avx2)
+    return "SSE2, AVX2";
+  return "SSE2";
+#elif defined(C2T_HAS_NEON)
+  return "NEON";
+#elif defined(C2T_HAS_SSE2)
+  return "SSE2";
+#else
+  return "scalar";
+#endif
+}
+
+const char *c2t_crypto_chacha20_backend(void) {
+#if defined(C2T_HAS_AVX512_DISPATCH)
+  if (chacha20_has_avx512())
+    return "AVX-512F (16 blocks)";
+#endif
+#if defined(C2T_HAS_AVX2_DISPATCH)
+  if (chacha20_has_avx2())
+    return "AVX2 (8 blocks)";
+#endif
+#if defined(C2T_HAS_NEON)
+  return "NEON (4 blocks)";
+#elif defined(C2T_HAS_SSE2)
+  return "SSE2 (4 blocks)";
+#else
+  return "scalar";
+#endif
+}
 
 static void chacha20_crypt(const unsigned char key[32],
                            const unsigned char nonce[12], uint32_t counter,
@@ -825,7 +883,11 @@ static void chacha20_crypt(const unsigned char key[32],
 #if defined(C2T_HAS_AVX512_DISPATCH)
   if (chacha20_has_avx512()) {
     while (len - offset >= 1024) {
+#if defined(C2T_MSVC_X86_SIMD)
+      c2t_chacha20_crypt_16blocks(state, input + offset, output + offset);
+#else
       chacha20_crypt_16blocks(state, input + offset, output + offset);
+#endif
       state[12] += 16U;
       offset += 1024;
     }
@@ -834,7 +896,11 @@ static void chacha20_crypt(const unsigned char key[32],
 #if defined(C2T_HAS_AVX2_DISPATCH)
   if (chacha20_has_avx2()) {
     while (len - offset >= 512) {
+#if defined(C2T_MSVC_X86_SIMD)
+      c2t_chacha20_crypt_8blocks(state, input + offset, output + offset);
+#else
       chacha20_crypt_8blocks(state, input + offset, output + offset);
+#endif
       state[12] += 8U;
       offset += 512;
     }
