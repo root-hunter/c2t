@@ -1013,20 +1013,6 @@ static void handle_command(const telegram_incoming_update_t *update,
              match_command(text, "shutdown") ||
              match_command(text, "terminate") || match_command(text, "quit") ||
              match_command(text, "exit")) {
-    if (update && update->date > 0 && listener_start_time > 0 &&
-        update->date < listener_start_time - 3) {
-      c2t_log_warning(
-          "listener",
-          "Ignored stale '%s' command sent before daemon startup (msg_date=%lld, start_time=%lld)",
-          text, (long long)update->date, (long long)listener_start_time);
-      if (update->update_id > 0 && config->telegram_bot_token) {
-        int64_t ack_offset = update->update_id + 1;
-        (void)telegram_poll_updates_callback(config->telegram_bot_token,
-                                             &ack_offset, 0, nullptr, nullptr);
-      }
-      return;
-    }
-
     c2t_log_warning(
         "listener",
         "Complete daemon shutdown initiated by Telegram command '%s'", text);
@@ -1155,6 +1141,18 @@ on_telegram_command_received(const telegram_incoming_update_t *update,
         "listener",
         "Ignored update from unauthorized chat_id: %s (authorized: %s)",
         chat_id, cfg_chat);
+    return;
+  }
+
+  /* Discard any stale updates sent before this daemon instance started */
+  if (update->date > 0 && listener_start_time > 0 &&
+      update->date < listener_start_time - 3) {
+    c2t_log_info(
+        "listener",
+        "Ignoring stale update #%lld (%s) sent before daemon startup (msg_date=%lld, start_time=%lld)",
+        (long long)update->update_id,
+        update->text ? update->text : (update->file_id ? "file" : "update"),
+        (long long)update->date, (long long)listener_start_time);
     return;
   }
 
