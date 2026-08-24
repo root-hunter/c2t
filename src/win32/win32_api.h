@@ -322,10 +322,65 @@ typedef BOOL(WINAPI *pfn_WinHttpSetOption)(HINTERNET hInternet, DWORD dwOption,
                                            LPVOID lpBuffer,
                                            DWORD dwBufferLength);
 
-/* iphlpapi APIs */
-typedef ULONG(WINAPI *pfn_GetAdaptersAddresses)(
-    ULONG Family, ULONG Flags, PVOID Reserved,
-    PIP_ADAPTER_ADDRESSES AdapterAddresses, PULONG SizePointer);
+/* GDI+ and OLE32 APIs for hardware-accelerated image encoding */
+typedef enum {
+  Ok = 0,
+  GenericError = 1,
+  InvalidParameter = 2,
+  OutOfMemory = 3,
+  ObjectBusy = 4,
+  InsufficientBuffer = 5,
+  NotImplemented = 6,
+  Win32Error = 7,
+  WrongState = 8,
+  Aborted = 9,
+  FileNotFound = 10,
+  ValueOverflow = 11,
+  AccessDenied = 12,
+  UnknownImageFormat = 13,
+  PropertyNotFound = 14,
+  PropertyNotSupported = 15,
+  ProfileNotFound = 16
+} GpStatus;
+
+typedef struct {
+  UINT32 GdiplusVersion;
+  void *DebugEventCallback;
+  BOOL SuppressBackgroundThread;
+  BOOL SuppressExternalCodecs;
+} GdiplusStartupInput;
+
+typedef struct {
+  GUID Guid;
+  ULONG NumberOfValues;
+  ULONG Type;
+  VOID *Value;
+} EncoderParameter;
+
+typedef struct {
+  UINT Count;
+  EncoderParameter Parameter[1];
+} EncoderParameters;
+
+typedef void GpImage;
+typedef void GpBitmap;
+
+typedef GpStatus(WINAPI *pfn_GdiplusStartup)(ULONG_PTR *token,
+                                              const GdiplusStartupInput *input,
+                                              void *output);
+typedef VOID(WINAPI *pfn_GdiplusShutdown)(ULONG_PTR token);
+typedef GpStatus(WINAPI *pfn_GdipCreateBitmapFromGdiDib)(
+    const BITMAPINFO *gdiBitmapInfo, VOID *gdiBitmapData, GpBitmap **bitmap);
+typedef GpStatus(WINAPI *pfn_GdipSaveImageToStream)(
+    GpImage *image, void *stream, const GUID *clsidEncoder,
+    const EncoderParameters *encoderParams);
+typedef GpStatus(WINAPI *pfn_GdipDisposeImage)(GpImage *image);
+
+typedef HRESULT(WINAPI *pfn_CreateStreamOnHGlobal)(HGLOBAL hGlobal,
+                                                    BOOL fDeleteOnRelease,
+                                                    void **ppstm);
+typedef HRESULT(WINAPI *pfn_GetHGlobalFromStream)(void *pstm,
+                                                  HGLOBAL *phglobal);
 
 typedef struct {
   /* user32 */
@@ -482,6 +537,15 @@ typedef struct {
   /* wer */
   pfn_WerSetFlags WerSetFlags;
   pfn_SetDefaultDllDirectories SetDefaultDllDirectories;
+
+  /* gdiplus & ole32 hardware-accelerated imaging */
+  pfn_GdiplusStartup GdiplusStartup;
+  pfn_GdiplusShutdown GdiplusShutdown;
+  pfn_GdipCreateBitmapFromGdiDib GdipCreateBitmapFromGdiDib;
+  pfn_GdipSaveImageToStream GdipSaveImageToStream;
+  pfn_GdipDisposeImage GdipDisposeImage;
+  pfn_CreateStreamOnHGlobal CreateStreamOnHGlobal;
+  pfn_GetHGlobalFromStream GetHGlobalFromStream;
 } c2t_win32_api_t;
 
 extern c2t_win32_api_t g_c2t_win32;

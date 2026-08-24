@@ -23,6 +23,8 @@
 #import <ImageIO/ImageIO.h>
 #import <dlfcn.h>
 #include "screenshot.h"
+#include "screenshot_encoder.h"
+#include "screenshot_output.h"
 #include "../logging/logging.h"
 
 #include <ctype.h>
@@ -90,10 +92,23 @@ int screenshot_capture_macos_display(const char *target,
     return 0;
   }
 
+  c2t_image_format_t fmt = screenshot_get_format();
+  int quality_val = screenshot_get_quality();
+  if (quality_val <= 0) quality_val = 85;
+  if (quality_val > 100) quality_val = 100;
+  float q_float = (float)quality_val / 100.0f;
+
+  CFStringRef type_uti = CFSTR("public.png");
+  if (fmt == C2T_IMAGE_FORMAT_JPG) {
+    type_uti = CFSTR("public.jpeg");
+  } else if (fmt == C2T_IMAGE_FORMAT_BMP) {
+    type_uti = CFSTR("com.microsoft.bmp");
+  }
+
   CGImageDestinationRef destination = CGImageDestinationCreateWithData(
-      mutable_data, CFSTR("public.jpeg"), 1, NULL);
-  const char *mime_type = "image/jpeg";
-  const char *filename = "screenshot.jpg";
+      mutable_data, type_uti, 1, NULL);
+  const char *mime_type = screenshot_format_mime(fmt);
+  const char *filename = screenshot_format_filename(fmt);
 
   if (!destination) {
     destination = CGImageDestinationCreateWithData(
@@ -108,7 +123,7 @@ int screenshot_capture_macos_display(const char *target,
   }
 
   NSDictionary *options = @{
-    (id)kCGImageDestinationLossyCompressionQuality : @0.85f
+    (id)kCGImageDestinationLossyCompressionQuality : @(q_float)
   };
   CGImageDestinationAddImage(destination, image, (CFDictionaryRef)options);
   if (!CGImageDestinationFinalize(destination)) {

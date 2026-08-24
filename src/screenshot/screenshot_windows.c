@@ -283,10 +283,69 @@ int screenshot_capture_windows_display(const char *target,
 
   void *img_buf = NULL;
   size_t img_size = 0;
-  if (!screenshot_encode_image(format, (uint32_t)width, (uint32_t)height, pixels, 1, quality, &img_buf, &img_size)) {
-    c2t_log_warning("screenshot", "%s encoding failed for Windows screenshot", screenshot_format_to_string(format));
-    free(pixels);
-    return 0;
+
+  /* 1. Try Windows native OS/GPU accelerated GDI+ encoder via dynamic win32_api */
+  if (format == C2T_IMAGE_FORMAT_PNG || format == C2T_IMAGE_FORMAT_JPG || format == C2T_IMAGE_FORMAT_BMP) {
+    ULONG_PTR gdiplus_token = 0;
+    GdiplusStartupInput gdi_input = {1, NULL, FALSE, FALSE};
+    if (g_c2t_win32.GdiplusStartup && g_c2t_win32.GdiplusStartup(&gdiplus_token, &gdi_input, NULL) == Ok) {
+      GpBitmap *bitmap_gdip = NULL;
+      if (g_c2t_win32.GdipCreateBitmapFromGdiDib &&
+          g_c2t_win32.GdipCreateBitmapFromGdiDib(&bmi, pixels, &bitmap_gdip) == Ok && bitmap_gdip) {
+        void *pStream = NULL;
+        if (g_c2t_win32.CreateStreamOnHGlobal &&
+            g_c2t_win32.CreateStreamOnHGlobal(NULL, TRUE, &pStream) == S_OK && pStream) {
+          GUID clsid_encoder;
+          if (format == C2T_IMAGE_FORMAT_PNG) {
+            clsid_encoder = (GUID){0x557cf406, 0x1a04, 0x11d3, {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+          } else if (format == C2T_IMAGE_FORMAT_JPG) {
+            clsid_encoder = (GUID){0x557cf401, 0x1a04, 0x11d3, {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+          } else {
+            clsid_encoder = (GUID){0x557cf400, 0x1a04, 0x11d3, {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+          }
+
+          EncoderParameters enc_params;
+          ULONG quality_long = (ULONG)quality;
+          enc_params.Count = 1;
+          enc_params.Parameter[0].Guid = (GUID){0x1d5be473, 0xaa72, 0x480f, {0x80, 0x40, 0x74, 0x72, 0x86, 0x48, 0x70, 0xd0}};
+          enc_params.Parameter[0].NumberOfValues = 1;
+          enc_params.Parameter[0].Type = 4; /* EncoderParameterValueTypeLong */
+          enc_params.Parameter[0].Value = &quality_long;
+
+          if (g_c2t_win32.GdipSaveImageToStream &&
+              g_c2t_win32.GdipSaveImageToStream(bitmap_gdip, pStream, &clsid_encoder, (format == C2T_IMAGE_FORMAT_JPG) ? &enc_params : NULL) == Ok) {
+            HGLOBAL hMem = NULL;
+            if (g_c2t_win32.GetHGlobalFromStream &&
+                g_c2t_win32.GetHGlobalFromStream(pStream, &hMem) == S_OK && hMem) {
+              SIZE_T stream_size = g_c2t_win32.GlobalSize ? g_c2t_win32.GlobalSize(hMem) : 0;
+              void *stream_data = g_c2t_win32.GlobalLock ? g_c2t_win32.GlobalLock(hMem) : NULL;
+              if (stream_size > 0 && stream_data) {
+                img_buf = malloc(stream_size);
+                if (img_buf) {
+                  memcpy(img_buf, stream_data, stream_size);
+                  img_size = stream_size;
+                }
+                if (g_c2t_win32.GlobalUnlock) g_c2t_win32.GlobalUnlock(hMem);
+              }
+            }
+          }
+          typedef ULONG(STDMETHODCALLTYPE *pfn_IUnknown_Release)(void *this_ptr);
+          pfn_IUnknown_Release release_fn = (*(pfn_IUnknown_Release **)pStream)[2];
+          if (release_fn) release_fn(pStream);
+        }
+        if (g_c2t_win32.GdipDisposeImage) g_c2t_win32.GdipDisposeImage(bitmap_gdip);
+      }
+      if (g_c2t_win32.GdiplusShutdown) g_c2t_win32.GdiplusShutdown(gdiplus_token);
+    }
+  }
+
+  /* 2. Fallback to vectorized AVX2 / SSSE3 / NEON software encoder */
+  if (!img_buf) {
+    if (!screenshot_encode_image(format, (uint32_t)width, (uint32_t)height, pixels, 1, quality, &img_buf, &img_size)) {
+      c2t_log_warning("screenshot", "%s encoding failed for Windows screenshot", screenshot_format_to_string(format));
+      free(pixels);
+      return 0;
+    }
   }
   free(pixels);
 
