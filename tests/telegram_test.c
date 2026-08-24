@@ -1260,6 +1260,26 @@ int main(void) {
     return fail("screenshot_get_status_info format check failed");
   }
 
+  char disp_list_buf[1500] = {};
+  if (!screenshot_get_display_list(disp_list_buf, sizeof(disp_list_buf)) || !*disp_list_buf)
+    return fail("screenshot_get_display_list failed or returned empty");
+
+  if (!screenshot_select_display("0"))
+    return fail("screenshot_select_display('0') failed");
+  char cur_disp[64] = {};
+  screenshot_get_selected_display(cur_disp, sizeof(cur_disp));
+  if (strcmp(cur_disp, "0") != 0)
+    return fail("screenshot_get_selected_display mismatch for '0'");
+
+  if (!screenshot_select_display("all"))
+    return fail("screenshot_select_display('all') failed");
+  screenshot_get_selected_display(cur_disp, sizeof(cur_disp));
+  if (strcmp(cur_disp, "all") != 0)
+    return fail("screenshot_get_selected_display mismatch for 'all'");
+
+  if (screenshot_get_display_count() < 1)
+    return fail("screenshot_get_display_count returned less than 1");
+
   (void)screenshot_get_total_captures();
   (void)screenshot_get_total_bytes();
   screenshot_output_cleanup();

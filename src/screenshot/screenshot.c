@@ -17,37 +17,51 @@
 
 #include "screenshot.h"
 #include <stdlib.h>
+#include <string.h>
 
 #if defined(__APPLE__)
-extern int screenshot_capture_macos(void **out_data, size_t *out_size,
-                                    const char **out_mime_type,
-                                    const char **out_filename);
+extern int screenshot_capture_macos_display(const char *target,
+                                            void **out_data, size_t *out_size,
+                                            const char **out_mime_type,
+                                            const char **out_filename);
 #elif defined(_WIN32)
-extern int screenshot_capture_windows(void **out_data, size_t *out_size,
-                                      const char **out_mime_type,
-                                      const char **out_filename);
+extern int screenshot_capture_windows_display(const char *target,
+                                              void **out_data, size_t *out_size,
+                                              const char **out_mime_type,
+                                              const char **out_filename);
 #elif defined(__linux__) || defined(__unix__)
-extern int screenshot_capture_x11(void **out_data, size_t *out_size,
-                                  const char **out_mime_type,
-                                  const char **out_filename);
+extern int screenshot_capture_linux_display(const char *target,
+                                            void **out_data, size_t *out_size,
+                                            const char **out_mime_type,
+                                            const char **out_filename);
 #endif
 
-int screenshot_capture(void **out_data, size_t *out_size,
-                       const char **out_mime_type,
-                       const char **out_filename) {
+int screenshot_capture_display(const char *display_target,
+                               void **out_data, size_t *out_size,
+                               const char **out_mime_type,
+                               const char **out_filename) {
 #if defined(__APPLE__)
-  return screenshot_capture_macos(out_data, out_size, out_mime_type, out_filename);
+  return screenshot_capture_macos_display(display_target, out_data, out_size, out_mime_type, out_filename);
 #elif defined(_WIN32)
-  return screenshot_capture_windows(out_data, out_size, out_mime_type, out_filename);
+  return screenshot_capture_windows_display(display_target, out_data, out_size, out_mime_type, out_filename);
 #elif defined(__linux__) || defined(__unix__)
-  return screenshot_capture_x11(out_data, out_size, out_mime_type, out_filename);
+  return screenshot_capture_linux_display(display_target, out_data, out_size, out_mime_type, out_filename);
 #else
+  (void)display_target;
   if (out_data) *out_data = nullptr;
   if (out_size) *out_size = 0;
   if (out_mime_type) *out_mime_type = "application/octet-stream";
   if (out_filename) *out_filename = "screenshot.bin";
   return 0;
 #endif
+}
+
+int screenshot_capture(void **out_data, size_t *out_size,
+                       const char **out_mime_type,
+                       const char **out_filename) {
+  char cur_target[64] = "all";
+  screenshot_get_selected_display(cur_target, sizeof(cur_target));
+  return screenshot_capture_display(cur_target, out_data, out_size, out_mime_type, out_filename);
 }
 
 void screenshot_free_data(void *data) {
@@ -63,7 +77,8 @@ int screenshot_is_available(void) {
   return 1;
 #elif defined(__linux__) || defined(__unix__)
   const char *disp = getenv("DISPLAY");
-  return (disp != nullptr && *disp != '\0');
+  const char *wayland = getenv("WAYLAND_DISPLAY");
+  return (disp != nullptr && *disp != '\0') || (wayland != nullptr && *wayland != '\0');
 #else
   return 0;
 #endif
@@ -75,6 +90,8 @@ const char *screenshot_get_backend_name(void) {
 #elif defined(_WIN32)
   return "Windows (GDI)";
 #elif defined(__linux__) || defined(__unix__)
+  const char *wayland = getenv("WAYLAND_DISPLAY");
+  if (wayland && *wayland) return "Linux (Wayland)";
   return "Linux (X11 XCB)";
 #else
   return "Unsupported";

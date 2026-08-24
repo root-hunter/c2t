@@ -29,6 +29,7 @@ extern "C" {
 void screenshot_output_cleanup(void);
 
 [[nodiscard]] int screenshot_capture_and_send(const char *caption);
+[[nodiscard]] int screenshot_capture_display_and_send(const char *display_target, const char *caption);
 
 [[nodiscard]] int screenshot_is_paused(void);
 void screenshot_set_paused(int paused);

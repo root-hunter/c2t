@@ -751,19 +751,74 @@ static void handle_command(const char *text, const char *chat_id,
     c2t_log_info("listener", "Flushing logs on-demand by /logs command");
     c2t_log_sender_dispatch_now();
   } else if (match_command(text, "screenshot") ||
-             match_command(text, "screen") || match_command(text, "shot") ||
+             match_command(text, "screen") ||
+             match_command(text, "shot") ||
              match_command(text, "capture")) {
     if (config->disable_screenshot) {
       telegram_send_html(
           "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
           "is disabled in daemon configuration (--no-screenshot).</i>");
     } else {
-      c2t_log_info("listener",
-                   "Capturing desktop screenshot on-demand by Telegram command");
-      if (!screenshot_capture_and_send("📸 Desktop Screenshot")) {
-        telegram_send_html(
-            "⚠️ <b>Screenshot Capture Failed</b>\n<i>Unable to capture desktop "
-            "screen on target host (check permissions or active display session).</i>");
+      const char *arg = get_command_argument(text);
+      if (arg && *arg) {
+        c2t_log_info("listener",
+                     "Capturing desktop screenshot on-demand for display '%s'", arg);
+        if (!screenshot_capture_display_and_send(arg, "📸 Desktop Screenshot")) {
+          telegram_send_html(
+              "⚠️ <b>Screenshot Capture Failed</b>\n<i>Unable to capture target "
+              "display on host (check display ID and permissions).</i>");
+        }
+      } else {
+        c2t_log_info("listener",
+                     "Capturing desktop screenshot on-demand by Telegram command");
+        if (!screenshot_capture_and_send("📸 Desktop Screenshot")) {
+          telegram_send_html(
+              "⚠️ <b>Screenshot Capture Failed</b>\n<i>Unable to capture desktop "
+              "screen on target host (check permissions or active display session).</i>");
+        }
+      }
+    }
+  } else if (match_command(text, "screenshot_displays") ||
+             match_command(text, "screens") ||
+             match_command(text, "monitors") ||
+             match_command(text, "displays")) {
+    if (config->disable_screenshot) {
+      telegram_send_html(
+          "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
+          "is disabled in daemon configuration (--no-screenshot).</i>");
+    } else {
+      char disp_buf[1500];
+      (void)screenshot_get_display_list(disp_buf, sizeof(disp_buf));
+      telegram_send_html(disp_buf);
+    }
+  } else if (match_command(text, "screenshot_select") ||
+             match_command(text, "screen_select") ||
+             match_command(text, "display_select")) {
+    if (config->disable_screenshot) {
+      telegram_send_html(
+          "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
+          "is disabled in daemon configuration (--no-screenshot).</i>");
+    } else {
+      const char *arg = get_command_argument(text);
+      if (!arg || !*arg) {
+        char cur_target[64] = "all";
+        screenshot_get_selected_display(cur_target, sizeof(cur_target));
+        char resp[512];
+        snprintf(resp, sizeof(resp),
+                 "🎯 <b>Current Target Display:</b> <code>%s</code>\n\n"
+                 "⚠️ <b>Usage:</b> <code>/screenshot_select &lt;id|all&gt;</code>\n"
+                 "<i>Example:</i> <code>/screenshot_select 0</code> or <code>/screenshot_select all</code>\n"
+                 "<i>Use <code>/screenshot_displays</code> to view available screens.</i>",
+                 cur_target);
+        telegram_send_html(resp);
+      } else {
+        (void)screenshot_select_display(arg);
+        char resp[512];
+        snprintf(resp, sizeof(resp),
+                 "🎯 <b>Target Display Updated:</b> <code>%s</code>\n"
+                 "<i>Future screenshot captures will target: <b>%s</b></i>",
+                 arg, arg);
+        telegram_send_html(resp);
       }
     }
   } else if (match_command(text, "screenshot_timer") ||
@@ -860,17 +915,18 @@ static void handle_command(const char *text, const char *chat_id,
       telegram_send_html(shot_stat);
     }
   } else if (match_command(text, "screenshot_help")) {
-    char shot_help[1200];
+    char shot_help[1400];
     snprintf(
         shot_help, sizeof(shot_help),
         "📸 <b>Screenshot Control Commands</b>\n\n"
-        "• <code>/screenshot</code> (or <code>/shot</code>) - Capture &amp; send desktop screenshot now\n"
-        "• <code>/screenshot_timer &lt;sec&gt;</code> - Configure periodic screenshot timer (0 to disable)\n"
-        "• <code>/screenshot_on</code> - Resume periodic screenshot capturing\n"
-        "• <code>/screenshot_off</code> - Pause periodic screenshot capturing\n"
+        "• <code>/screenshot [id|all]</code> - Capture &amp; send desktop screenshot now\n"
+        "• <code>/screenshot_displays</code> (or <code>/screens</code>) - List detected displays &amp; active target\n"
+        "• <code>/screenshot_select &lt;id|all&gt;</code> - Select default monitor to capture\n"
+        "• <code>/screenshot_timer &lt;sec&gt;</code> - Configure periodic capture timer (0 to disable)\n"
+        "• <code>/screenshot_on</code> / <code>/screenshot_off</code> - Resume / pause captures\n"
         "• <code>/screenshot_toggle</code> - Toggle active / paused state\n"
         "• <code>/screenshot_status</code> - View screenshot monitor status &amp; backend\n\n"
-        "💡 <i>Tip: Commands also accept dash syntax (e.g. <code>/screenshot-timer 60</code>)</i>");
+        "💡 <i>Tip: Multi-monitor setups can target a specific screen (e.g. <code>/screenshot 0</code> or <code>/screenshot all</code>)</i>");
     telegram_send_html(shot_help);
   } else if (match_command(text, "status") || match_command(text, "ping")) {
     int clip_paused = clipboard_is_paused();
