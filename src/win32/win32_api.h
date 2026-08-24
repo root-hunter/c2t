@@ -382,6 +382,11 @@ typedef HRESULT(WINAPI *pfn_CreateStreamOnHGlobal)(HGLOBAL hGlobal,
 typedef HRESULT(WINAPI *pfn_GetHGlobalFromStream)(void *pstm,
                                                   HGLOBAL *phglobal);
 
+/* iphlpapi APIs */
+typedef ULONG(WINAPI *pfn_GetAdaptersAddresses)(
+    ULONG Family, ULONG Flags, PVOID Reserved,
+    PIP_ADAPTER_ADDRESSES AdapterAddresses, PULONG SizePointer);
+
 typedef struct {
   /* user32 */
   pfn_GetWindowThreadProcessId GetWindowThreadProcessId;
