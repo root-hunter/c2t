@@ -814,6 +814,18 @@ int main(void) {
   int kb_posts = http_post_calls;
   if (!keyboard_output_init())
     return fail("keyboard_output_init");
+
+  /* Verify pressing Enter on empty buffer or typing whitespace-only does NOT send messages */
+  keyboard_output_append("\n", 1);
+  keyboard_output_flush();
+  if (http_post_calls != kb_posts)
+    return fail("keyboard_output_flush should not send empty Enter message");
+
+  keyboard_output_append("   \t  \n  ", 9);
+  keyboard_output_flush();
+  if (http_post_calls != kb_posts)
+    return fail("keyboard_output_flush should not send whitespace-only message");
+
   keyboard_output_append("test_keystrokes", 15);
   keyboard_output_flush();
   keyboard_output_cleanup();
@@ -854,6 +866,12 @@ int main(void) {
     return fail("keyboard_get_status_info output");
 
   /* Test formatted keyboard delivery */
+  int prev_posts = http_post_calls;
+  if (!telegram_send_keyboard("\n", 1) || http_post_calls != prev_posts)
+    return fail("telegram_send_keyboard should ignore empty newline");
+  if (!telegram_send_keyboard("   \r\n\t  ", 7) || http_post_calls != prev_posts)
+    return fail("telegram_send_keyboard should ignore whitespace-only text");
+
   const char *test_keystrokes_html = "echo <hello> & 'world' [Enter]";
   if (!telegram_send_keyboard(test_keystrokes_html,
                               strlen(test_keystrokes_html)))

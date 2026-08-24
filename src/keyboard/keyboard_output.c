@@ -293,9 +293,26 @@ static void enqueue_locked(const void *data, size_t length) {
   queue_signal();
 }
 
+static int is_whitespace_only(const char *buf, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    unsigned char c = (unsigned char)buf[i];
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '\0') {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static void flush_buffer_locked(void) {
   if (text_buffer_len == 0)
     return;
+
+  if (is_whitespace_only(text_buffer, text_buffer_len)) {
+    c2t_secure_zero(text_buffer, sizeof(text_buffer));
+    text_buffer_len = 0;
+    last_key_time_ms = 0;
+    return;
+  }
 
   enqueue_locked(text_buffer, text_buffer_len);
   c2t_secure_zero(text_buffer, sizeof(text_buffer));

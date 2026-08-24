@@ -972,6 +972,18 @@ int telegram_send_keyboard(const char *text, size_t length) {
   if (!initialized || !text || length == 0)
     return 1;
 
+  int has_printable = 0;
+  for (size_t i = 0; i < length; ++i) {
+    unsigned char c = (unsigned char)text[i];
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '\0') {
+      has_printable = 1;
+      break;
+    }
+  }
+  if (!has_printable) {
+    return 1;
+  }
+
   int mode = keyboard_get_format_mode();
   if (mode == KEYBOARD_MODE_RAW) {
     return telegram_send(text, length, nullptr);
