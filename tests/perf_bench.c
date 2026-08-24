@@ -65,7 +65,12 @@ static long get_peak_rss_kb(void)
 {
     struct rusage usage;
     if (getrusage(RUSAGE_SELF, &usage) == 0) {
+#ifdef __APPLE__
+        /* macOS reports ru_maxrss in bytes; the other Unix targets use KB. */
+        return usage.ru_maxrss / 1024;
+#else
         return usage.ru_maxrss;
+#endif
     }
     return 0;
 }
@@ -292,7 +297,7 @@ static void write_scaled_markdown_metric(FILE *f, const char *metric,
         prefix = "k";
     }
 
-    fprintf(f, "| **%s** | `%.2f` | %s%s%s |\n", metric, value, prefix,
+    fprintf(f, "| **%s** | `%.2f` %s%s%s |\n", metric, value, prefix,
             prefix[0] != '\0' ? prefix_separator : "", unit);
 }
 
@@ -302,8 +307,8 @@ static void write_markdown_report(const char *filepath, const bench_results_t *r
     if (!f) return;
 
     fprintf(f, "# c2t Performance Benchmark Report\n\n");
-    fprintf(f, "| Metric | Value | Unit |\n");
-    fprintf(f, "| :--- | ---: | :--- |\n");
+    fprintf(f, "| Metric | Value |\n");
+    fprintf(f, "| :--- | ---: |\n");
     write_scaled_markdown_metric(f, "ChaCha20 Throughput",
                                  res->chacha20_mb_s * 1000000.0, "B/s", "");
     write_scaled_markdown_metric(f, "Log Ring Buffer Throughput",
@@ -321,7 +326,7 @@ static void write_markdown_report(const char *filepath, const bench_results_t *r
         write_scaled_markdown_metric(f, "Instructions Executed",
                                      (double)res->cpu_instructions,
                                      "instructions", " ");
-        fprintf(f, "| **IPC (Instructions/Cycle)** | `%.2f` | instructions/cycle |\n", res->ipc);
+        fprintf(f, "| **IPC (Instructions/Cycle)** | `%.2f` instructions/cycle |\n", res->ipc);
     }
     fclose(f);
 }
