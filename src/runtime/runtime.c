@@ -1793,3 +1793,110 @@ void c2t_runtime_stop_worker_watchdog(void) {
   pthread_join(worker_watchdog_thread, nullptr);
 #endif
 }
+
+static int s_saved_argc = 0;
+static char **s_saved_argv = NULL;
+
+void c2t_runtime_save_args(int argc, char **argv) {
+  if (argc <= 0 || !argv)
+    return;
+  s_saved_argc = argc;
+  s_saved_argv = argv;
+}
+
+int c2t_runtime_trigger_restart(void) {
+  c2t_log_info("runtime", "Daemon restart requested");
+
+  const c2t_config_t *config = c2t_config_get();
+  if (config && config->is_worker) {
+    c2t_log_info("runtime", "Restarting worker daemon via supervisor...");
+    c2t_runtime_stop_worker_watchdog();
+    c2t_runtime_request_stop();
+#ifdef _WIN32
+    ExitProcess(1);
+#else
+    _exit(1);
+#endif
+    return 1;
+  }
+
+  char executable[C2T_PATH_CAPACITY] = {};
+#if defined(_WIN32)
+  if (GetModuleFileNameA(nullptr, executable, sizeof(executable)) == 0) {
+    snprintf(executable, sizeof(executable), "%s",
+             (s_saved_argv && s_saved_argv[0]) ? s_saved_argv[0] : "c2t");
+  }
+  char command[C2T_PATH_CAPACITY * 2] = {};
+  snprintf(command, sizeof(command), "\"%s\" run", executable);
+  STARTUPINFOA startup = {};
+  startup.cb = sizeof(startup);
+  PROCESS_INFORMATION process;
+  c2t_runtime_release();
+  if (CreateProcessA(nullptr, command, nullptr, nullptr, FALSE,
+                     CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process)) {
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    ExitProcess(0);
+    return 1;
+  }
+  return 0;
+#else
+#if defined(__linux__)
+  ssize_t link_len =
+      readlink("/proc/self/exe", executable, sizeof(executable) - 1);
+  if (link_len > 0) {
+    executable[link_len] = '\0';
+  } else {
+    snprintf(executable, sizeof(executable), "%s",
+             (s_saved_argv && s_saved_argv[0]) ? s_saved_argv[0] : "c2t");
+  }
+#elif defined(__APPLE__)
+  uint32_t cap = (uint32_t)sizeof(executable);
+  if (_NSGetExecutablePath(executable, &cap) != 0) {
+    snprintf(executable, sizeof(executable), "%s",
+             (s_saved_argv && s_saved_argv[0]) ? s_saved_argv[0] : "c2t");
+  }
+#else
+  snprintf(executable, sizeof(executable), "%s",
+           (s_saved_argv && s_saved_argv[0]) ? s_saved_argv[0] : "c2t");
+#endif
+
+  int argc = (s_saved_argc > 0) ? s_saved_argc : 1;
+  char **sup_argv = malloc((size_t)(argc + 3) * sizeof(char *));
+  if (!sup_argv)
+    return 0;
+  int sup_argc = 0;
+  sup_argv[sup_argc++] =
+      (s_saved_argv && s_saved_argv[0]) ? s_saved_argv[0] : (char *)"c2t";
+  sup_argv[sup_argc++] = (char *)"run";
+  int start_index =
+      (argc >= 2 && s_saved_argv && s_saved_argv[1][0] != '-') ? 2 : 1;
+  for (int i = start_index; i < argc; ++i) {
+    if (s_saved_argv && s_saved_argv[i]) {
+      if (strcmp(s_saved_argv[i], "--daemon-worker") != 0 &&
+          strcmp(s_saved_argv[i], "run") != 0 &&
+          strcmp(s_saved_argv[i], "start") != 0) {
+        sup_argv[sup_argc++] = s_saved_argv[i];
+      }
+    }
+  }
+  sup_argv[sup_argc] = nullptr;
+
+  c2t_runtime_release();
+
+  pid_t pid = fork();
+  if (pid == 0) {
+    if (setsid() < 0) {
+      /* ignore */
+    }
+    execv(executable, sup_argv);
+    free(sup_argv);
+    _exit(1);
+  }
+  free(sup_argv);
+  if (pid > 0) {
+    _exit(0);
+  }
+  return 0;
+#endif
+}

