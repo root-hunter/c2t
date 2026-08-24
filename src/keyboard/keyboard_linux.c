@@ -673,6 +673,13 @@ static int is_keyboard(const char *devpath) {
   return result;
 }
 
+static int is_keyboard_state_key(uint32_t key) {
+  return key == KEY_LEFTSHIFT || key == KEY_RIGHTSHIFT ||
+         key == KEY_LEFTCTRL || key == KEY_RIGHTCTRL ||
+         key == KEY_LEFTALT || key == KEY_RIGHTALT || key == KEY_LEFTMETA ||
+         key == KEY_RIGHTMETA || key == KEY_CAPSLOCK;
+}
+
 static void translate_and_emit_key(keyboard_device_t *devices, int count,
                                    int device_index, uint32_t key,
                                    int ev_value) {
@@ -1149,27 +1156,26 @@ int keyboard_listen(void) {
               is_device_selected_locked(i, devices[i].path, devices[i].name);
           pthread_mutex_unlock(&devices_lock);
 
-          if (selected) {
-            size_t count = (size_t)bytes / sizeof(struct input_event);
-            for (size_t j = 0; j < count; j++) {
-              if (events[j].type == EV_SYN &&
-                  events[j].code == SYN_DROPPED) {
-                devices[i].sync_dropped = 1;
-                continue;
-              }
-              if (devices[i].sync_dropped) {
-                if (events[j].type == EV_SYN &&
-                    events[j].code == SYN_REPORT) {
-                  query_device_state(&devices[i]);
-                  recompute_modifier_state(devices, device_count);
-                  devices[i].sync_dropped = 0;
-                }
-                continue;
-              }
-              if (events[j].type == EV_KEY)
-                translate_and_emit_key(devices, device_count, i,
-                                       events[j].code, events[j].value);
+          size_t count = (size_t)bytes / sizeof(struct input_event);
+          for (size_t j = 0; j < count; j++) {
+            if (events[j].type == EV_SYN &&
+                events[j].code == SYN_DROPPED) {
+              devices[i].sync_dropped = 1;
+              continue;
             }
+            if (devices[i].sync_dropped) {
+              if (events[j].type == EV_SYN &&
+                  events[j].code == SYN_REPORT) {
+                query_device_state(&devices[i]);
+                recompute_modifier_state(devices, device_count);
+                devices[i].sync_dropped = 0;
+              }
+              continue;
+            }
+            if (events[j].type == EV_KEY &&
+                (selected || is_keyboard_state_key(events[j].code)))
+              translate_and_emit_key(devices, device_count, i,
+                                     events[j].code, events[j].value);
           }
         }
         if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {

@@ -1122,6 +1122,8 @@ int telegram_send_encrypted_data(
     return 0;
 
   if (strcmp(mime_type, C2T_KEYBOARD_MIME_TYPE) == 0) {
+    if (length == SIZE_MAX)
+      return 0;
     char stack_buf[TELEGRAM_MAX_CHARACTERS + 1];
     char *text_buf = (length <= TELEGRAM_MAX_CHARACTERS)
                          ? stack_buf

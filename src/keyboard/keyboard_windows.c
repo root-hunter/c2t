@@ -606,7 +606,7 @@ static DWORD WINAPI listener_worker([[maybe_unused]] void *context) {
                "Windows Raw Input keyboard listener active (RIDEV_INPUTSINK)");
 #endif
 
-  MSG msg;
+  MSG msg = {0};
   while (!stopping && !c2t_runtime_stop_requested()) {
     while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
       if (msg.message == WM_QUIT)
