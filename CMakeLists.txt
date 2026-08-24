@@ -59,8 +59,13 @@ add_executable(c2t
 target_compile_features(c2t PRIVATE c_std_23)
 target_include_directories(c2t PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
 if(MSVC)
-    # Visual Studio 2026 does not yet implement the C23 nullptr keyword.
-    target_compile_definitions(c2t PRIVATE nullptr=NULL)
+    # Visual Studio 2026 still gates parts of its C11/C23 support.
+    target_compile_definitions(c2t PRIVATE
+        $<$<COMPILE_LANGUAGE:C>:nullptr=NULL>
+    )
+    target_compile_options(c2t PRIVATE
+        $<$<COMPILE_LANGUAGE:C>:/experimental:c11atomics>
+    )
 endif()
 
 option(C2T_ENABLE_PROCESS_MASQUERADE "Enable process name cloaking/spoofing" OFF)
@@ -497,7 +502,12 @@ if(BUILD_TESTING)
     target_include_directories(perf_bench PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_compile_features(perf_bench PRIVATE c_std_23)
     if(MSVC)
-        target_compile_definitions(perf_bench PRIVATE nullptr=NULL)
+        target_compile_definitions(perf_bench PRIVATE
+            $<$<COMPILE_LANGUAGE:C>:nullptr=NULL>
+        )
+        target_compile_options(perf_bench PRIVATE
+            $<$<COMPILE_LANGUAGE:C>:/experimental:c11atomics>
+        )
     endif()
     target_compile_options(perf_bench PRIVATE
         $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-O3>
