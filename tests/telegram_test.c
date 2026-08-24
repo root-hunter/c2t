@@ -430,10 +430,10 @@ int main(void) {
   if (!telegram_send_data(coordinates, sizeof(coordinates) - 1, "text/plain",
                           nullptr) ||
       strcmp(last_method, "sendLocation") != 0 ||
-      !body_contains("latitude=45.46420000",
-                     sizeof("latitude=45.46420000") - 1) ||
-      !body_contains("longitude=9.19000000",
-                     sizeof("longitude=9.19000000") - 1))
+      !body_contains("ltd=45.46420000",
+                     sizeof("ltd=45.46420000") - 1) ||
+      !body_contains("lng=9.19000000",
+                     sizeof("lng=9.19000000") - 1))
     return fail("coordinate location card");
 
   static const char vcard[] = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Mario Rossi\r\n"
@@ -730,7 +730,7 @@ int main(void) {
 
   int cache_posts = http_post_calls;
   char cache_message[32];
-  for (size_t index = 0; index <= 1024; ++index) {
+  for (size_t index = 0; index <= 1600; ++index) {
     int cache_length = snprintf(cache_message, sizeof(cache_message),
                                 "dedup-cache-%llu", (unsigned long long)index);
     if (cache_length <= 0 ||
@@ -741,8 +741,14 @@ int main(void) {
   static const char evicted_message[] = "dedup-cache-0";
   if (!telegram_send_data(evicted_message, sizeof(evicted_message) - 1,
                           "text/plain", nullptr) ||
-      http_post_calls != cache_posts + 1026)
+      http_post_calls != cache_posts + 1602)
     return fail("oldest deduplication entry must be evicted");
+  static const char recent_cache_message[] = "dedup-cache-1024";
+  if (!telegram_send_data(recent_cache_message,
+                          sizeof(recent_cache_message) - 1, "text/plain",
+                          nullptr) ||
+      http_post_calls != cache_posts + 1602)
+    return fail("deduplication lookup must survive cache eviction");
 
   setenv("TELEGRAM_SEND_LOGS", "1", 1);
   setenv("TELEGRAM_LOG_INTERVAL_SEC", "10", 1);
@@ -1023,6 +1029,37 @@ int main(void) {
     return fail("telegram_send_keyboard multi-byte UTF-8 boundary chunking");
   }
   free(utf8_test_buf);
+
+  /* The formatted path must preserve the complete payload while escaping in
+   * fixed-size chunks, including entities adjacent to a chunk boundary. */
+  size_t escaped_test_len = 7000;
+  char *escaped_test_buf = malloc(escaped_test_len);
+  if (!escaped_test_buf)
+    return fail("allocate escaped keyboard test buffer");
+  memset(escaped_test_buf, 'q', escaped_test_len);
+  memcpy(escaped_test_buf, "FORMAT_BEGIN", 12);
+  memcpy(escaped_test_buf + 3197, "<&>\"FORMAT_MIDDLE", 17);
+  memcpy(escaped_test_buf + escaped_test_len - 10, "FORMAT_END", 10);
+  free(captured_bodies);
+  captured_bodies = nullptr;
+  captured_bodies_length = 0;
+  capture_http_bodies = 1;
+  int formatted_posts = http_post_calls;
+  int formatted_result =
+      telegram_send_keyboard(escaped_test_buf, escaped_test_len);
+  capture_http_bodies = 0;
+  free(escaped_test_buf);
+  if (!formatted_result || http_post_calls <= formatted_posts ||
+      !captured_bodies ||
+      strstr((const char *)captured_bodies, "FORMAT_BEGIN") == nullptr ||
+      strstr((const char *)captured_bodies, "FORMAT_MIDDLE") == nullptr ||
+      strstr((const char *)captured_bodies, "FORMAT_END") == nullptr ||
+      strstr((const char *)captured_bodies, "%26lt%3B%26amp%3B%26gt%3B%26quot%3B") ==
+          nullptr)
+    return fail("chunked keyboard HTML escaping lost payload data");
+  free(captured_bodies);
+  captured_bodies = nullptr;
+  captured_bodies_length = 0;
 
   /* Test keyboard backspace handling of shortcut tags and multi-byte UTF-8 */
   if (!keyboard_output_init())
@@ -1484,5 +1521,6 @@ int main(void) {
   screenshot_output_cleanup();
 
   c2t_crypto_cleanup();
+  c2t_log_cleanup();
   return 0;
 }

