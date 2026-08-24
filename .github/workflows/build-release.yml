@@ -45,7 +45,7 @@ jobs:
           fi
 
   build:
-    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }} (${{ matrix.variant }})
     needs: validate-version
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -55,24 +55,39 @@ jobs:
           - platform: linux-musl
             arch: x86_64
             runner: ubuntu-24.04
+            variant: native
           - platform: linux-musl
             arch: aarch64
             runner: ubuntu-24.04-arm
+            variant: native
           - platform: linux-glibc
             arch: x86_64
             runner: ubuntu-24.04
+            variant: native
           - platform: linux-glibc
             arch: aarch64
             runner: ubuntu-24.04-arm
+            variant: native
           - platform: windows
             arch: x86_64
             runner: windows-2025-vs2026
+            variant: msvc
+          - platform: windows
+            arch: aarch64
+            runner: windows-11-vs2026-arm
+            variant: msvc
+          - platform: windows
+            arch: x86_64
+            runner: ubuntu-24.04
+            variant: mingw-wine
           - platform: macos
             arch: x86_64
             runner: macos-26-intel
+            variant: native
           - platform: macos
             arch: aarch64
             runner: macos-26
+            variant: native
 
     steps:
       - name: Check out source
@@ -95,6 +110,20 @@ jobs:
             ninja-build \
             nodejs \
             python3
+
+      - name: Install Windows cross-build dependencies
+        if: matrix.platform == 'windows' && matrix.variant == 'mingw-wine'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            cmake \
+            mingw-w64 \
+            ninja-build \
+            nodejs \
+            wine \
+            zip
 
       - name: Build and test Linux with musl
         if: matrix.platform == 'linux-musl'
@@ -144,13 +173,23 @@ jobs:
           -DBUILD_TESTING=ON
           -DC2T_STANDALONE_LINUX=OFF
 
-      - name: Configure Windows
-        if: matrix.platform == 'windows'
+      - name: Configure native Windows
+        if: matrix.platform == 'windows' && matrix.variant == 'msvc'
         run: >-
-          cmake -S . -B build/windows -G "Visual Studio 18 2026" -A x64
+          cmake -S . -B build/windows -G "Visual Studio 18 2026"
+          -A ${{ matrix.arch == 'aarch64' && 'ARM64' || 'x64' }}
           -DBUILD_TESTING=ON
           -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           -DCMAKE_OBJDUMP="C:/Program Files/LLVM/bin/llvm-objdump.exe"
+
+      - name: Configure Windows cross-build
+        if: matrix.platform == 'windows' && matrix.variant == 'mingw-wine'
+        shell: bash
+        run: >-
+          cmake -S . -B build/windows -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=ON
+          -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake
 
       - name: Configure macOS
         if: matrix.platform == 'macos'
@@ -164,9 +203,14 @@ jobs:
         if: matrix.platform != 'linux-musl' && matrix.platform != 'windows'
         run: cmake --build build/${{ matrix.platform }} --parallel 2
 
-      - name: Build Windows
-        if: matrix.platform == 'windows'
+      - name: Build native Windows
+        if: matrix.platform == 'windows' && matrix.variant == 'msvc'
         run: cmake --build build/windows --config Release --parallel 2
+
+      - name: Build Windows cross-build
+        if: matrix.platform == 'windows' && matrix.variant == 'mingw-wine'
+        shell: bash
+        run: cmake --build build/windows --parallel 2
 
       - name: Test Linux with glibc
         if: matrix.platform == 'linux-glibc'
@@ -176,9 +220,14 @@ jobs:
         if: matrix.platform == 'macos'
         run: ctest --test-dir build/macos --output-on-failure
 
-      - name: Test browser provisioner on Windows binary
-        if: matrix.platform == 'windows'
+      - name: Test browser provisioner on native Windows binary
+        if: matrix.platform == 'windows' && matrix.variant == 'msvc'
         run: node tests/browser_provision_test.mjs build/windows/Release/c2t.exe
+
+      - name: Test browser provisioner on Windows cross-build
+        if: matrix.platform == 'windows' && matrix.variant == 'mingw-wine'
+        shell: bash
+        run: node tests/browser_provision_test.mjs build/windows/c2t.exe
 
       - name: Run benchmark (Linux glibc & macOS)
         if: matrix.platform == 'linux-glibc' || matrix.platform == 'macos'
@@ -199,21 +248,30 @@ jobs:
           echo "## Benchmark Results (${{ matrix.platform }} ${{ matrix.arch }})" >> "$GITHUB_STEP_SUMMARY"
           cat perf_report.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Run benchmark on Windows
-        if: matrix.platform == 'windows'
+      - name: Run benchmark on native Windows
+        if: matrix.platform == 'windows' && matrix.variant == 'msvc'
         shell: pwsh
         run: |
           & .\build\windows\Release\perf_bench.exe --markdown-out perf_report.md --json-out perf_report.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "## Benchmark Results (${{ matrix.platform }} ${{ matrix.arch }})" |
+          "## Benchmark Results (${{ matrix.platform }} ${{ matrix.arch }}, ${{ matrix.variant }})" |
             Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           Get-Content perf_report.md |
             Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
+      - name: Run Windows cross-build benchmark via Wine
+        if: matrix.platform == 'windows' && matrix.variant == 'mingw-wine'
+        shell: bash
+        run: |
+          set -euo pipefail
+          wine build/windows/perf_bench.exe --markdown-out perf_report.md --json-out perf_report.json
+          echo "## Benchmark Results (${{ matrix.platform }} ${{ matrix.arch }}, ${{ matrix.variant }})" >> "$GITHUB_STEP_SUMMARY"
+          cat perf_report.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-report-${{ matrix.platform }}-${{ matrix.arch }}
+          name: benchmark-report-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.variant }}
           path: |
             perf_report.md
             perf_report.json
@@ -243,19 +301,36 @@ jobs:
           mkdir -p dist
           tar -C stage -czf "dist/${package}.tar.gz" "${package}"
 
-      - name: Package Windows
-        if: matrix.platform == 'windows'
+      - name: Package native Windows
+        if: matrix.platform == 'windows' && matrix.variant == 'msvc'
         shell: pwsh
         run: |
           $project = Get-Content CMakeLists.txt -Raw
           if ($project -notmatch 'project\(c2t VERSION ([0-9]+\.[0-9]+\.[0-9]+)') {
             throw "Unable to read the project version from CMakeLists.txt"
           }
-          $package = "c2t-v$($Matches[1])-windows-x86_64"
+          $target = if ("${{ matrix.arch }}" -eq "aarch64") {
+            "windows-aarch64"
+          } else {
+            "windows-msvc-x86_64"
+          }
+          $package = "c2t-v$($Matches[1])-$target"
           New-Item -ItemType Directory -Force "stage/$package", dist | Out-Null
           Copy-Item build/windows/Release/c2t.exe "stage/$package/c2t.exe"
           Copy-Item README.md "stage/$package/README.md"
           Compress-Archive -Path "stage/$package" -DestinationPath "dist/$package.zip" -CompressionLevel Optimal
+
+      - name: Package Windows cross-build
+        if: matrix.platform == 'windows' && matrix.variant == 'mingw-wine'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -nE 's/^project\(c2t VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
+          package="c2t-v${version}-windows-x86_64"
+          install -Dm644 build/windows/c2t.exe "stage/${package}/c2t.exe"
+          install -Dm644 README.md "stage/${package}/README.md"
+          mkdir -p dist
+          (cd stage && zip -9 -r "../dist/${package}.zip" "${package}")
 
       - name: Package macOS
         if: matrix.platform == 'macos'
@@ -293,7 +368,7 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: package-${{ matrix.platform }}-${{ matrix.arch }}
+          name: package-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.variant }}
           path: dist/*
           if-no-files-found: error
           retention-days: 14
@@ -332,30 +407,22 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Scan ONLY the Windows .exe binary
-          targets=()
-          for p in dist/*windows*.zip dist/*windows*.exe; do
-            if [[ -f "$p" ]]; then
-              if [[ "$p" == *.zip ]]; then
-                unzip -o "$p" -d dist/win_unpacked
-                exe_file="$(find dist/win_unpacked -type f -name "*.exe" | head -n 1)"
-                if [[ -n "${exe_file}" ]]; then
-                  targets+=("${exe_file}")
-                else
-                  targets+=("$p")
-                fi
-              else
-                targets+=("$p")
-              fi
-            fi
-          done
-
-          if [[ ${#targets[@]} -eq 0 ]]; then
-            echo "[!] No Windows executable found to scan."
-            exit 0
+          # Scan only the x86_64 MinGW build produced on Ubuntu and tested via Wine.
+          shopt -s nullglob
+          packages=(dist/c2t-v*-windows-x86_64.zip)
+          if [[ ${#packages[@]} -ne 1 ]]; then
+            echo "[!] Expected exactly one Ubuntu/MinGW Windows package, found ${#packages[@]}." >&2
+            exit 1
           fi
 
-          python3 tools/vt_scan.py "${targets[@]}" --output-markdown virustotal-report.md || true
+          unzip -o "${packages[0]}" -d dist/win_mingw_unpacked
+          exe_file="$(find dist/win_mingw_unpacked -type f -name 'c2t.exe' -print -quit)"
+          if [[ -z "${exe_file}" ]]; then
+            echo "[!] c2t.exe is missing from ${packages[0]}." >&2
+            exit 1
+          fi
+
+          python3 tools/vt_scan.py "${exe_file}" --output-markdown virustotal-report.md || true
 
 
           # If on a release tag, append VT report to GitHub Release notes asynchronously

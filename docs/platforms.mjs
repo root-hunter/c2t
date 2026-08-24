@@ -23,6 +23,14 @@ export const PLATFORMS = Object.freeze({
     formatChoice: false,
     configMode: "embedded",
   }),
+  "windows-aarch64": Object.freeze({
+    asset: "c2t-windows-aarch64.exe",
+    label: "Windows ARM64",
+    filenameSuffix: "windows-aarch64.exe",
+    archive: false,
+    formatChoice: false,
+    configMode: "embedded",
+  }),
   "macos-x86_64": Object.freeze({
     asset: "c2t-macos-x86_64",
     label: "macOS Intel",
@@ -43,7 +51,24 @@ export const PLATFORMS = Object.freeze({
 
 export function inferPlatform(binary) {
   if (binary.length >= 2 && binary[0] === 0x4d && binary[1] === 0x5a) {
-    return "windows-x86_64";
+    if (binary.length >= 0x40) {
+      const peOffset = (
+        binary[0x3c] |
+        (binary[0x3d] << 8) |
+        (binary[0x3e] << 16) |
+        (binary[0x3f] << 24)
+      ) >>> 0;
+      if (
+        peOffset <= binary.length - 6 &&
+        binary[peOffset] === 0x50 && binary[peOffset + 1] === 0x45 &&
+        binary[peOffset + 2] === 0 && binary[peOffset + 3] === 0
+      ) {
+        const machine = binary[peOffset + 4] | (binary[peOffset + 5] << 8);
+        if (machine === 0x8664) return "windows-x86_64";
+        if (machine === 0xaa64) return "windows-aarch64";
+      }
+    }
+    throw new Error("The local file is not a supported c2t platform binary");
   }
   if (
     binary.length >= 20 &&
@@ -84,7 +109,14 @@ export function detectUserPlatform(nav = typeof navigator !== "undefined" ? navi
     ua.includes("win32") ||
     ua.includes("win64")
   ) {
-    return "windows-x86_64";
+    const architecture = String(nav.userAgentData?.architecture || "").toLowerCase();
+    const isArm =
+      architecture.includes("arm") ||
+      ua.includes("arm64") ||
+      ua.includes("aarch64") ||
+      platform.includes("arm64") ||
+      platform.includes("aarch64");
+    return isArm ? "windows-aarch64" : "windows-x86_64";
   }
 
   // macOS detection

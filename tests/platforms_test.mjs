@@ -29,6 +29,16 @@ function elf(machine) {
   return binary;
 }
 
+function pe(machine) {
+  const binary = new Uint8Array(0x46);
+  binary.set([0x4d, 0x5a]);
+  binary[0x3c] = 0x40;
+  binary.set([0x50, 0x45, 0, 0], 0x40);
+  binary[0x44] = machine & 0xff;
+  binary[0x45] = machine >>> 8;
+  return binary;
+}
+
 test("all published site assets have distinct names", () => {
   const names = Object.values(PLATFORMS).map(({ asset }) => asset);
   assert.equal(new Set(names).size, names.length);
@@ -38,6 +48,7 @@ test("Unix outputs are executable archives and Windows remains a direct executab
   assert.equal(PLATFORMS["linux-x86_64"].archive, true);
   assert.equal(PLATFORMS["linux-aarch64"].archive, true);
   assert.equal(PLATFORMS["windows-x86_64"].archive, false);
+  assert.equal(PLATFORMS["windows-aarch64"].archive, false);
   assert.equal(PLATFORMS["macos-x86_64"].archive, true);
   assert.equal(PLATFORMS["macos-aarch64"].archive, true);
   assert.equal(PLATFORMS["macos-aarch64"].configMode, "sidecar");
@@ -48,8 +59,10 @@ test("ELF machine type selects x86_64 or ARM64", () => {
   assert.equal(inferPlatform(elf(183)), "linux-aarch64");
 });
 
-test("PE files select Windows and unknown files are rejected", () => {
-  assert.equal(inferPlatform(Uint8Array.from([0x4d, 0x5a])), "windows-x86_64");
+test("PE machine type selects Windows x86_64 or ARM64", () => {
+  assert.equal(inferPlatform(pe(0x8664)), "windows-x86_64");
+  assert.equal(inferPlatform(pe(0xaa64)), "windows-aarch64");
+  assert.throws(() => inferPlatform(Uint8Array.from([0x4d, 0x5a])), /not a supported/);
   assert.throws(() => inferPlatform(new Uint8Array(20)), /not a supported/);
 });
 
@@ -72,6 +85,20 @@ test("detectUserPlatform identifies the visitor platform correctly", () => {
       platform: "Win32",
     }),
     "windows-x86_64",
+  );
+  assert.equal(
+    detectUserPlatform({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; ARM64) AppleWebKit/537.36",
+      platform: "Win32",
+    }),
+    "windows-aarch64",
+  );
+  assert.equal(
+    detectUserPlatform({
+      userAgent: "Mozilla/5.0",
+      userAgentData: { platform: "Windows", architecture: "arm" },
+    }),
+    "windows-aarch64",
   );
   assert.equal(
     detectUserPlatform({
