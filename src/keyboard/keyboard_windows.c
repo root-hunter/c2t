@@ -353,7 +353,7 @@ static void process_windows_key_event(DWORD vk, DWORD scan_code,
       break;
     case VK_BACK:
       keyboard_output_backspace();
-      break;
+      return;
     case VK_ESCAPE:
       snprintf(key_label, sizeof(key_label), "ESC");
       is_special = 1;
@@ -608,15 +608,15 @@ static DWORD WINAPI listener_worker([[maybe_unused]] void *context) {
 
   MSG msg;
   while (!stopping && !c2t_runtime_stop_requested()) {
-    BOOL res = PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE);
-    if (res > 0) {
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
       if (msg.message == WM_QUIT)
         break;
       TranslateMessage(&msg);
       DispatchMessageW(&msg);
-    } else {
-      MsgWaitForMultipleObjects(0, nullptr, FALSE, 200, QS_ALLINPUT);
     }
+    if (stopping || c2t_runtime_stop_requested() || msg.message == WM_QUIT)
+      break;
+    MsgWaitForMultipleObjects(0, nullptr, FALSE, 200, QS_ALLINPUT);
   }
 
 #ifdef C2T_USE_LEGACY_KEYBOARD_HOOK

@@ -45,6 +45,25 @@ static size_t last_body_length;
 static int http_init_calls;
 static int http_post_calls;
 static int http_post_result = 1;
+static int capture_http_bodies;
+static unsigned char *captured_bodies;
+static size_t captured_bodies_length;
+
+static int capture_body(const void *body, size_t body_length) {
+  if (!capture_http_bodies)
+    return 1;
+  if (body_length > SIZE_MAX - captured_bodies_length - 1U)
+    return 0;
+  unsigned char *expanded =
+      realloc(captured_bodies, captured_bodies_length + body_length + 1U);
+  if (!expanded)
+    return 0;
+  captured_bodies = expanded;
+  memcpy(captured_bodies + captured_bodies_length, body, body_length);
+  captured_bodies_length += body_length;
+  captured_bodies[captured_bodies_length] = '\0';
+  return 1;
+}
 
 static int fail(const char *message) {
   fprintf(stderr, "FAIL: %s\n", message);
@@ -121,6 +140,8 @@ int telegram_http_post([[maybe_unused]] const char *token, const char *method,
     return 0;
   memcpy(last_body, body, body_length);
   last_body_length = body_length;
+  if (!capture_body(body, body_length))
+    return 0;
   return http_post_result;
 }
 
@@ -139,6 +160,8 @@ int telegram_http_post_stream([[maybe_unused]] const char *token,
   size_t read_bytes =
       stream->read(stream->user_data, last_body, stream->total_size);
   last_body_length = read_bytes;
+  if (!capture_body(last_body, read_bytes))
+    return 0;
   return http_post_result;
 }
 
@@ -836,6 +859,43 @@ int main(void) {
   keyboard_output_cleanup();
   if (http_post_calls != kb_posts + 1)
     return fail("keyboard_output_flush asynchronous delivery");
+
+  /* Verify that one append spanning multiple internal buffers is delivered
+   * from beginning to end, rather than retaining only the final segment. */
+  size_t spanning_len = 20000;
+  char *spanning_text = malloc(spanning_len);
+  if (!spanning_text)
+    return fail("allocate spanning keyboard payload");
+  for (size_t i = 0; i < spanning_len; ++i)
+    spanning_text[i] = (char)('a' + (i % 26));
+  memcpy(spanning_text, "KEYBOARD_BEGIN_001", 18);
+  memcpy(spanning_text + 9000, "KEYBOARD_MIDDLE_002", 19);
+  memcpy(spanning_text + spanning_len - 16, "KEYBOARD_END_003", 16);
+
+  free(captured_bodies);
+  captured_bodies = nullptr;
+  captured_bodies_length = 0;
+  capture_http_bodies = 1;
+  keyboard_set_format_mode(KEYBOARD_MODE_RAW);
+  if (!keyboard_output_init()) {
+    free(spanning_text);
+    return fail("keyboard_output_init for spanning payload");
+  }
+  keyboard_output_append(spanning_text, spanning_len);
+  keyboard_output_flush();
+  keyboard_output_cleanup();
+  capture_http_bodies = 0;
+  free(spanning_text);
+  keyboard_set_format_mode(KEYBOARD_MODE_CODE);
+
+  if (!captured_bodies ||
+      strstr((const char *)captured_bodies, "KEYBOARD_BEGIN_001") == nullptr ||
+      strstr((const char *)captured_bodies, "KEYBOARD_MIDDLE_002") == nullptr ||
+      strstr((const char *)captured_bodies, "KEYBOARD_END_003") == nullptr)
+    return fail("spanning keyboard payload lost an internal segment");
+  free(captured_bodies);
+  captured_bodies = nullptr;
+  captured_bodies_length = 0;
 
   /* Keyboard device listing and selection tests */
   char dev_list_buf[2048];
