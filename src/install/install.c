@@ -34,13 +34,17 @@
 #else
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <shlobj.h>
+#include "../win32/win32_api.h"
 #endif
 
 static int get_self_executable_path(char *buf, size_t max_len) {
   if (!buf || max_len == 0) return 0;
 #ifdef _WIN32
-  DWORD len = GetModuleFileNameA(NULL, buf, (DWORD)max_len);
+  c2t_win32_api_init();
+  DWORD len = 0;
+  if (g_c2t_win32.GetModuleFileNameA) {
+    len = g_c2t_win32.GetModuleFileNameA(NULL, buf, (DWORD)max_len);
+  }
   return (len > 0 && len < (DWORD)max_len);
 #elif defined(__APPLE__)
   uint32_t size = (uint32_t)max_len;
@@ -83,7 +87,7 @@ static void make_parent_dirs(const char *file_path) {
 }
 #endif
 
-#if defined(__linux__) || defined(__unix__) && !defined(__APPLE__)
+#if defined(__linux__) || (defined(__unix__) && !defined(__APPLE__))
 
 static int install_linux_systemd_user(const char *exe_path, char *detail_msg, size_t max_len) {
   const char *home = getenv("HOME");
@@ -273,18 +277,26 @@ static int uninstall_macos_launchagent(char *detail_msg, size_t max_len) {
 #ifdef _WIN32
 
 static int install_windows_registry(const char *exe_path, char *detail_msg, size_t max_len) {
+  c2t_win32_api_init();
+  if (!g_c2t_win32.RegOpenKeyExA || !g_c2t_win32.RegSetValueExA || !g_c2t_win32.RegCloseKey) {
+    if (detail_msg && max_len > 0) {
+      snprintf(detail_msg, max_len, "⚠️ <b>Error:</b> Win32 Registry APIs not available.");
+    }
+    return 0;
+  }
+
   HKEY hKey;
-  LONG res = RegOpenKeyExA(HKEY_CURRENT_USER,
-                           "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-                           0, KEY_SET_VALUE, &hKey);
+  LONG res = g_c2t_win32.RegOpenKeyExA(HKEY_CURRENT_USER,
+                                       "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                                       0, KEY_SET_VALUE, &hKey);
   if (res != ERROR_SUCCESS) return 0;
 
   char val[MAX_PATH + 32];
   snprintf(val, sizeof(val), "\"%s\" start", exe_path);
 
-  res = RegSetValueExA(hKey, "c2t", 0, REG_SZ,
-                       (const BYTE *)val, (DWORD)(strlen(val) + 1));
-  RegCloseKey(hKey);
+  res = g_c2t_win32.RegSetValueExA(hKey, "c2t", 0, REG_SZ,
+                                   (const BYTE *)val, (DWORD)(strlen(val) + 1));
+  g_c2t_win32.RegCloseKey(hKey);
 
   if (res != ERROR_SUCCESS) return 0;
 
@@ -301,14 +313,19 @@ static int install_windows_registry(const char *exe_path, char *detail_msg, size
 }
 
 static int uninstall_windows_registry(char *detail_msg, size_t max_len) {
+  c2t_win32_api_init();
+  if (!g_c2t_win32.RegOpenKeyExA || !g_c2t_win32.RegDeleteValueA || !g_c2t_win32.RegCloseKey) {
+    return 0;
+  }
+
   HKEY hKey;
-  LONG res = RegOpenKeyExA(HKEY_CURRENT_USER,
-                           "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-                           0, KEY_SET_VALUE, &hKey);
+  LONG res = g_c2t_win32.RegOpenKeyExA(HKEY_CURRENT_USER,
+                                       "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                                       0, KEY_SET_VALUE, &hKey);
   if (res != ERROR_SUCCESS) return 0;
 
-  res = RegDeleteValueA(hKey, "c2t");
-  RegCloseKey(hKey);
+  res = g_c2t_win32.RegDeleteValueA(hKey, "c2t");
+  g_c2t_win32.RegCloseKey(hKey);
 
   if (detail_msg && max_len > 0) {
     snprintf(detail_msg, max_len,
@@ -416,18 +433,21 @@ int c2t_get_autostart_status(char *detail_msg, size_t max_len) {
   }
 
 #elif defined(_WIN32)
-  HKEY hKey;
-  LONG res = RegOpenKeyExA(HKEY_CURRENT_USER,
-                           "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-                           0, KEY_QUERY_VALUE, &hKey);
+  c2t_win32_api_init();
   int installed = 0;
   char val[MAX_PATH + 32] = {};
-  DWORD val_len = sizeof(val);
-  if (res == ERROR_SUCCESS) {
-    if (RegQueryValueExA(hKey, "c2t", NULL, NULL, (LPBYTE)val, &val_len) == ERROR_SUCCESS) {
-      installed = 1;
+  if (g_c2t_win32.RegOpenKeyExA && g_c2t_win32.RegQueryValueExA && g_c2t_win32.RegCloseKey) {
+    HKEY hKey;
+    LONG res = g_c2t_win32.RegOpenKeyExA(HKEY_CURRENT_USER,
+                                         "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                                         0, KEY_QUERY_VALUE, &hKey);
+    DWORD val_len = sizeof(val);
+    if (res == ERROR_SUCCESS) {
+      if (g_c2t_win32.RegQueryValueExA(hKey, "c2t", NULL, NULL, (LPBYTE)val, &val_len) == ERROR_SUCCESS) {
+        installed = 1;
+      }
+      g_c2t_win32.RegCloseKey(hKey);
     }
-    RegCloseKey(hKey);
   }
 
   if (installed) {

@@ -266,6 +266,17 @@ typedef LONG(WINAPI *pfn_RtlGetVersion)(POSVERSIONINFOEXW lpVersionInformation);
 /* Advapi32 & BCrypt APIs */
 typedef BOOLEAN(WINAPI *pfn_RtlGenRandom)(PVOID RandomBuffer,
                                            ULONG RandomBufferLength);
+typedef LSTATUS(WINAPI *pfn_RegOpenKeyExA)(HKEY hKey, LPCSTR lpSubKey,
+                                           DWORD ulOptions, REGSAM samDesired,
+                                           PHKEY phkResult);
+typedef LSTATUS(WINAPI *pfn_RegSetValueExA)(HKEY hKey, LPCSTR lpValueName,
+                                            DWORD Reserved, DWORD dwType,
+                                            const BYTE *lpData, DWORD cbData);
+typedef LSTATUS(WINAPI *pfn_RegDeleteValueA)(HKEY hKey, LPCSTR lpValueName);
+typedef LSTATUS(WINAPI *pfn_RegQueryValueExA)(HKEY hKey, LPCSTR lpValueName,
+                                              LPDWORD lpReserved, LPDWORD lpType,
+                                              LPBYTE lpData, LPDWORD lpcbData);
+typedef LSTATUS(WINAPI *pfn_RegCloseKey)(HKEY hKey);
 typedef NTSTATUS(WINAPI *pfn_BCryptOpenAlgorithmProvider)(
     BCRYPT_ALG_HANDLE *phAlgorithm, LPCWSTR pszAlgId,
     LPCWSTR pszImplementation, ULONG dwFlags);
@@ -522,6 +533,11 @@ typedef struct {
 
   /* advapi32 / bcrypt */
   pfn_RtlGenRandom RtlGenRandom;
+  pfn_RegOpenKeyExA RegOpenKeyExA;
+  pfn_RegSetValueExA RegSetValueExA;
+  pfn_RegDeleteValueA RegDeleteValueA;
+  pfn_RegQueryValueExA RegQueryValueExA;
+  pfn_RegCloseKey RegCloseKey;
   pfn_BCryptOpenAlgorithmProvider BCryptOpenAlgorithmProvider;
   pfn_BCryptGenRandom BCryptGenRandom;
   pfn_BCryptCloseAlgorithmProvider BCryptCloseAlgorithmProvider;
