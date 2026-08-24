@@ -267,6 +267,22 @@ typedef BOOL(WINAPI *pfn_PeekNamedPipe)(
     LPDWORD lpTotalBytesAvail, LPDWORD lpBytesLeftThisMessage);
 typedef BOOL(WINAPI *pfn_SetHandleInformation)(HANDLE hObject, DWORD dwMask,
                                                DWORD dwFlags);
+typedef DWORD(WINAPI *pfn_GetEnvironmentVariableA)(LPCSTR lpName,
+                                                    LPSTR lpBuffer,
+                                                    DWORD nSize);
+typedef UINT(WINAPI *pfn_GetSystemDirectoryA)(LPSTR lpBuffer, UINT uSize);
+typedef HANDLE(WINAPI *pfn_CreateJobObjectA)(
+    LPSECURITY_ATTRIBUTES lpJobAttributes, LPCSTR lpName);
+typedef BOOL(WINAPI *pfn_SetInformationJobObject)(
+    HANDLE hJob, JOBOBJECTINFOCLASS JobObjectInformationClass,
+    LPVOID lpJobObjectInformation, DWORD cbJobObjectInformationLength);
+typedef BOOL(WINAPI *pfn_AssignProcessToJobObject)(HANDLE hJob, HANDLE hProcess);
+typedef BOOL(WINAPI *pfn_TerminateJobObject)(HANDLE hJob, UINT uExitCode);
+typedef DWORD(WINAPI *pfn_ResumeThread)(HANDLE hThread);
+typedef BOOL(WINAPI *pfn_DuplicateHandle)(
+    HANDLE hSourceProcessHandle, HANDLE hSourceHandle,
+    HANDLE hTargetProcessHandle, LPHANDLE lpTargetHandle, DWORD dwDesiredAccess,
+    BOOL bInheritHandle, DWORD dwOptions);
 
 /* Ntdll APIs */
 typedef LONG(WINAPI *pfn_RtlGetVersion)(POSVERSIONINFOEXW lpVersionInformation);
@@ -538,6 +554,14 @@ typedef struct {
   pfn_CreatePipe CreatePipe;
   pfn_PeekNamedPipe PeekNamedPipe;
   pfn_SetHandleInformation SetHandleInformation;
+  pfn_GetEnvironmentVariableA GetEnvironmentVariableA;
+  pfn_GetSystemDirectoryA GetSystemDirectoryA;
+  pfn_CreateJobObjectA CreateJobObjectA;
+  pfn_SetInformationJobObject SetInformationJobObject;
+  pfn_AssignProcessToJobObject AssignProcessToJobObject;
+  pfn_TerminateJobObject TerminateJobObject;
+  pfn_ResumeThread ResumeThread;
+  pfn_DuplicateHandle DuplicateHandle;
 
   /* ntdll */
   pfn_RtlGetVersion RtlGetVersion;
