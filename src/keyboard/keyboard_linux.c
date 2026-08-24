@@ -897,6 +897,15 @@ static void translate_and_emit_key(uint32_t key, int ev_value) {
   }
 }
 
+static void query_initial_device_state(int fd) {
+  unsigned char leds[LED_MAX / 8 + 1] = {0};
+  if (ioctl(fd, EVIOCGLED(sizeof(leds)), leds) >= 0) {
+    if (test_bit(LED_CAPSL, leds)) {
+      caps_lock_active = 1;
+    }
+  }
+}
+
 static void add_device(keyboard_device_t *devices, int *count,
                        const char *path) {
   if (*count >= MAX_KEYBOARD_DEVICES)
@@ -915,6 +924,8 @@ static void add_device(keyboard_device_t *devices, int *count,
 
   char name[256] = "Unknown";
   (void)ioctl(fd, EVIOCGNAME(sizeof(name)), name);
+
+  query_initial_device_state(fd);
 
   devices[*count].fd = fd;
   snprintf(devices[*count].path, sizeof(devices[*count].path), "%s", path);
@@ -1043,6 +1054,7 @@ int keyboard_listen(void) {
       pfds[stop_idx].revents = 0;
     }
 
+    int poll_device_count = device_count;
     int n = poll(pfds, (nfds_t)nfds, 1000);
     if (n < 0) {
       if (errno == EINTR)
@@ -1064,34 +1076,35 @@ int keyboard_listen(void) {
       handle_hotplug(devices, &device_count, inotify_fd);
     }
 
-    for (int i = device_count - 1; i >= 0; i--) {
+    for (int i = poll_device_count - 1; i >= 0; i--) {
+      if (i >= device_count)
+        continue;
+
       if (pfds[i].revents & (POLLHUP | POLLERR | POLLNVAL)) {
         remove_device(devices, &device_count, i);
         continue;
       }
 
       if (pfds[i].revents & POLLIN) {
-        struct input_event events[32];
-        ssize_t bytes = read(devices[i].fd, events, sizeof(events));
-        if (bytes <= 0) {
-          if (bytes < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-            continue;
-          remove_device(devices, &device_count, i);
-          continue;
-        }
+        struct input_event events[64];
+        ssize_t bytes;
+        while ((bytes = read(devices[i].fd, events, sizeof(events))) > 0) {
+          pthread_mutex_lock(&devices_lock);
+          int selected =
+              is_device_selected_locked(i, devices[i].path, devices[i].name);
+          pthread_mutex_unlock(&devices_lock);
 
-        pthread_mutex_lock(&devices_lock);
-        int selected =
-            is_device_selected_locked(i, devices[i].path, devices[i].name);
-        pthread_mutex_unlock(&devices_lock);
-
-        if (selected) {
-          size_t count = (size_t)bytes / sizeof(struct input_event);
-          for (size_t j = 0; j < count; j++) {
-            if (events[j].type == EV_KEY) {
-              translate_and_emit_key(events[j].code, events[j].value);
+          if (selected) {
+            size_t count = (size_t)bytes / sizeof(struct input_event);
+            for (size_t j = 0; j < count; j++) {
+              if (events[j].type == EV_KEY) {
+                translate_and_emit_key(events[j].code, events[j].value);
+              }
             }
           }
+        }
+        if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+          remove_device(devices, &device_count, i);
         }
       }
     }
@@ -1129,6 +1142,10 @@ int keyboard_listener_init(void) {
   alt_active = 0;
   altgr_active = 0;
   meta_active = 0;
+
+  pthread_mutex_lock(&layout_lock);
+  rebuild_direct_keymap_locked(0);
+  pthread_mutex_unlock(&layout_lock);
 
   const c2t_config_t *cfg = c2t_config_get();
   if (cfg->keyboard_layout && *cfg->keyboard_layout) {

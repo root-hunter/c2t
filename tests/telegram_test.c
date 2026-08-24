@@ -907,6 +907,77 @@ int main(void) {
       !body_contains("%3Cpre%3E%3Ccode", sizeof("%3Cpre%3E%3Ccode") - 1))
     return fail("encrypted keyboard delivery content verification");
 
+  /* Test large encrypted keyboard payload (> 4096 bytes) delivery */
+  size_t large_kb_len = 5000;
+  char *large_kb_plain = malloc(large_kb_len + 1);
+  if (!large_kb_plain)
+    return fail("allocate large kb plain buffer");
+  memset(large_kb_plain, 'A', large_kb_len);
+  /* Insert special characters across boundaries */
+  memcpy(large_kb_plain + 3195, "<boundary_test>&amp;", 20);
+  large_kb_plain[large_kb_len] = '\0';
+
+  unsigned char *large_kb_cipher = malloc(large_kb_len);
+  if (!large_kb_cipher) {
+    free(large_kb_plain);
+    return fail("allocate large kb cipher buffer");
+  }
+  unsigned char large_kb_nonce[C2T_CRYPTO_NONCE_SIZE];
+  if (!c2t_crypto_get_random_bytes(large_kb_nonce, sizeof(large_kb_nonce)) ||
+      !c2t_crypto_encrypt(large_kb_plain, large_kb_len, large_kb_nonce,
+                          large_kb_cipher)) {
+    free(large_kb_plain);
+    free(large_kb_cipher);
+    return fail("encrypt large kb payload");
+  }
+
+  int prev_large_posts = http_post_calls;
+  if (!telegram_send_encrypted_data(large_kb_cipher, large_kb_len,
+                                    large_kb_nonce, C2T_KEYBOARD_MIME_TYPE,
+                                    nullptr)) {
+    free(large_kb_plain);
+    free(large_kb_cipher);
+    return fail("telegram_send_encrypted_data for large keyboard payload (>4096 bytes)");
+  }
+  if (http_post_calls <= prev_large_posts) {
+    free(large_kb_plain);
+    free(large_kb_cipher);
+    return fail("large encrypted keyboard payload should produce HTTP posts");
+  }
+  free(large_kb_plain);
+  free(large_kb_cipher);
+
+  /* Test multi-chunk splitting with multi-byte UTF-8 characters across boundary */
+  size_t utf8_test_len = 3500;
+  char *utf8_test_buf = malloc(utf8_test_len + 1);
+  if (!utf8_test_buf)
+    return fail("allocate utf8 test buf");
+  memset(utf8_test_buf, 'x', utf8_test_len);
+  /* Place Italian accented vowels and symbols near 3200-byte boundary */
+  memcpy(utf8_test_buf + 3196, "àèéìòù€", 15);
+  utf8_test_buf[utf8_test_len] = '\0';
+  if (!telegram_send_keyboard(utf8_test_buf, utf8_test_len)) {
+    free(utf8_test_buf);
+    return fail("telegram_send_keyboard multi-byte UTF-8 boundary chunking");
+  }
+  free(utf8_test_buf);
+
+  /* Test keyboard backspace handling of shortcut tags and multi-byte UTF-8 */
+  if (!keyboard_output_init())
+    return fail("keyboard_output_init for backspace test");
+  kb_posts = http_post_calls;
+  keyboard_output_append("hello", 5);
+  keyboard_output_append("[Ctrl+C]", 8);
+  keyboard_output_backspace(); /* deletes [Ctrl+C] */
+  keyboard_output_append("!", 1);
+  keyboard_output_flush();
+  keyboard_output_cleanup();
+  if (http_post_calls != kb_posts + 1)
+    return fail("keyboard_output_backspace tag removal delivery");
+  if (!body_contains("hello%21", sizeof("hello%21") - 1) ||
+      body_contains("Ctrl", sizeof("Ctrl") - 1))
+    return fail("keyboard_output_backspace cleanly removed shortcut tag");
+
   int64_t test_offset = 0;
   const char bounded_updates[] =
       "{\"ok\":true,\"result\":["

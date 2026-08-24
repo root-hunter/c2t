@@ -306,6 +306,7 @@ static void flush_buffer_locked(void) {
 void keyboard_output_flush(void) {
   queue_lock();
   flush_buffer_locked();
+  queue_signal();
   queue_unlock();
 }
 
@@ -348,6 +349,22 @@ void keyboard_output_backspace(void) {
   total_keyboard_keystrokes++;
   if (text_buffer_len > 0) {
     size_t pos = text_buffer_len;
+    if (text_buffer[pos - 1] == ']') {
+      size_t tag_start = pos - 1;
+      while (tag_start > 0 && text_buffer[tag_start] != '[' &&
+             (pos - 1 - tag_start) < 48) {
+        tag_start--;
+      }
+      if (text_buffer[tag_start] == '[') {
+        memset(text_buffer + tag_start, 0, text_buffer_len - tag_start);
+        text_buffer_len = tag_start;
+        last_key_time_ms = get_monotonic_ms();
+        queue_signal();
+        queue_unlock();
+        return;
+      }
+    }
+
     --pos;
     while (pos > 0 && ((unsigned char)text_buffer[pos] & 0xC0) == 0x80) {
       --pos;
@@ -355,6 +372,7 @@ void keyboard_output_backspace(void) {
     memset(text_buffer + pos, 0, text_buffer_len - pos);
     text_buffer_len = pos;
     last_key_time_ms = get_monotonic_ms();
+    queue_signal();
   }
   queue_unlock();
 }
