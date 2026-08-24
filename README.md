@@ -189,6 +189,7 @@ C2T_DELIVERY_ATTEMPTS=5 C2T_RETRY_DELAY_MS=1000 c2t
 - `/fileinfo <path>`: Displays filesystem item metadata and timestamps.
 - `/logs` (or `/log`): Drains and retrieves buffered execution logs.
 - `/status` (or `/ping`): Returns daemon status, monitoring state, metrics, and throughput.
+- `/process_name [name]` (or `/rename`, `/procname`): Views or dynamically changes the daemon's process title and identification.
 - `/help`: Displays available commands.
 
 All commands and file transfers from unauthorized chat IDs are discarded.

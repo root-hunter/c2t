@@ -975,11 +975,9 @@ void c2t_runtime_hide_console(void) {
 void c2t_runtime_set_process_name([[maybe_unused]] const char *name,
                                   [[maybe_unused]] int argc,
                                   [[maybe_unused]] char **argv) {
-#ifdef C2T_ENABLE_PROCESS_MASQUERADE
   if (!name || !*name)
     return;
   SetConsoleTitleA(name);
-#endif
 }
 
 #else
@@ -1557,12 +1555,21 @@ int c2t_runtime_run_supervisor(int argc, char **argv) {
 
 void c2t_runtime_hide_console(void) { (void)redirect_background_io(); }
 
+static char **s_process_argv = NULL;
+static size_t s_process_argv0_max_len = 0;
+
 void c2t_runtime_set_process_name([[maybe_unused]] const char *name,
                                   [[maybe_unused]] int argc,
                                   [[maybe_unused]] char **argv) {
-#ifdef C2T_ENABLE_PROCESS_MASQUERADE
   if (!name || !*name)
     return;
+
+  if (argv && argv[0]) {
+    s_process_argv = argv;
+    if (s_process_argv0_max_len == 0) {
+      s_process_argv0_max_len = strlen(argv[0]);
+    }
+  }
 
 #if defined(__linux__)
   (void)prctl(PR_SET_NAME, name, 0, 0, 0);
@@ -1573,17 +1580,19 @@ void c2t_runtime_set_process_name([[maybe_unused]] const char *name,
   setprogname(name);
 #endif
 
-  if (argv && argv[0]) {
+  char *target_argv0 =
+      (argv && argv[0]) ? argv[0] : (s_process_argv ? s_process_argv[0] : NULL);
+  if (target_argv0) {
     size_t name_len = strlen(name);
-    size_t old_len = strlen(argv[0]);
+    size_t old_len = s_process_argv0_max_len > 0 ? s_process_argv0_max_len
+                                                 : strlen(target_argv0);
     if (name_len <= old_len) {
-      memcpy(argv[0], name, name_len);
-      memset(argv[0] + name_len, '\0', old_len - name_len);
+      memcpy(target_argv0, name, name_len);
+      memset(target_argv0 + name_len, '\0', old_len - name_len);
     } else {
-      memcpy(argv[0], name, old_len);
+      memcpy(target_argv0, name, old_len);
     }
   }
-#endif
 }
 
 #endif

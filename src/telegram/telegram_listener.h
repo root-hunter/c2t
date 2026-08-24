@@ -18,9 +18,12 @@
 #ifndef C2T_TELEGRAM_LISTENER_H
 #define C2T_TELEGRAM_LISTENER_H
 
+#include "telegram.h"
+
 [[nodiscard]] int c2t_telegram_listener_init(void);
 void c2t_telegram_listener_cleanup(void);
 
 [[nodiscard]] int telegram_send_start_info(void);
+void c2t_telegram_listener_handle_update(const telegram_incoming_update_t *update);
 
 #endif
