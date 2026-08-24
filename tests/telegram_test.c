@@ -1498,7 +1498,10 @@ int main(void) {
         screenshot_parse_format("uncompressed") != C2T_IMAGE_FORMAT_PLAIN ||
         screenshot_parse_format("tga") != C2T_IMAGE_FORMAT_TGA ||
         screenshot_parse_format("hdr") != C2T_IMAGE_FORMAT_HDR ||
-        screenshot_parse_format(nullptr) != C2T_IMAGE_FORMAT_PNG)
+        screenshot_parse_format(nullptr) != C2T_IMAGE_FORMAT_PNG ||
+        strcmp(screenshot_format_mime(C2T_IMAGE_FORMAT_PLAIN), "image/png") != 0 ||
+        strcmp(screenshot_format_filename(C2T_IMAGE_FORMAT_PLAIN),
+               "screenshot.png") != 0)
       return fail("screenshot_parse_format mapping failed");
 
     uint8_t test_pixels[16 * 16 * 4];
@@ -1558,15 +1561,61 @@ int main(void) {
     }
     free(hdr_out);
 
-    /* 6. Test Transcode from PNG to Plain BMP */
+    /* 6. Test Plain format (Uncompressed PNG for In-App Telegram View) */
+    void *plain_out = nullptr;
+    size_t plain_len = 0;
+    if (!screenshot_encode_image(C2T_IMAGE_FORMAT_PLAIN, 16, 16, test_pixels, 1, 85, &plain_out, &plain_len) || !plain_out || plain_len < 32)
+      return fail("screenshot_encode_image PLAIN failed");
+    if (memcmp(plain_out, "\x89PNG\r\n\x1a\n", 8) != 0) {
+      free(plain_out);
+      return fail("screenshot_encode_image invalid PLAIN PNG magic header");
+    }
+    int has_stored_deflate = 0;
+    const uint8_t stored_idat[] = {'I', 'D', 'A', 'T', 0x78, 0x01};
+    for (size_t i = 0; i + sizeof(stored_idat) <= plain_len; ++i) {
+      if (memcmp((const uint8_t *)plain_out + i, stored_idat,
+                 sizeof(stored_idat)) == 0) {
+        has_stored_deflate = 1;
+        break;
+      }
+    }
+    if (!has_stored_deflate) {
+      free(plain_out);
+      return fail("screenshot_encode_image PLAIN must use stored DEFLATE blocks");
+    }
+    void *plain_decode = nullptr;
+    size_t plain_decode_len = 0;
+    if (!screenshot_transcode_image(plain_out, plain_len,
+                                    C2T_IMAGE_FORMAT_BMP, 85,
+                                    &plain_decode, &plain_decode_len) ||
+        !plain_decode || plain_decode_len < 32 ||
+        memcmp(plain_decode, "BM", 2) != 0) {
+      free(plain_out);
+      free(plain_decode);
+      return fail("screenshot_encode_image PLAIN produced an invalid PNG");
+    }
+    free(plain_decode);
+    free(plain_out);
+
+    /* 7. Test Transcode from PNG to Plain PNG and BMP */
     void *src_png = nullptr;
     size_t src_png_len = 0;
     if (!screenshot_encode_image(C2T_IMAGE_FORMAT_PNG, 16, 16, test_pixels, 1, 85, &src_png, &src_png_len) || !src_png)
       return fail("screenshot_encode_image helper for transcode failed");
 
+    void *trans_plain = nullptr;
+    size_t trans_plain_len = 0;
+    if (!screenshot_transcode_image(src_png, src_png_len, C2T_IMAGE_FORMAT_PLAIN, 85, &trans_plain, &trans_plain_len) ||
+        !trans_plain || trans_plain_len < 32 || memcmp(trans_plain, "\x89PNG\r\n\x1a\n", 8) != 0) {
+      free(src_png);
+      if (trans_plain) free(trans_plain);
+      return fail("screenshot_transcode_image from PNG to PLAIN failed");
+    }
+    free(trans_plain);
+
     void *trans_bmp = nullptr;
     size_t trans_bmp_len = 0;
-    if (!screenshot_transcode_image(src_png, src_png_len, C2T_IMAGE_FORMAT_PLAIN, 85, &trans_bmp, &trans_bmp_len) ||
+    if (!screenshot_transcode_image(src_png, src_png_len, C2T_IMAGE_FORMAT_BMP, 85, &trans_bmp, &trans_bmp_len) ||
         !trans_bmp || trans_bmp_len < 32 || memcmp(trans_bmp, "BM", 2) != 0) {
       free(src_png);
       if (trans_bmp) free(trans_bmp);

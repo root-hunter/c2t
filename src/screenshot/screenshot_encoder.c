@@ -69,16 +69,16 @@ c2t_image_format_t screenshot_parse_format(const char *format_str) {
     if (tag == (('b') | ('m' << 8) | ('p' << 16))) return C2T_IMAGE_FORMAT_BMP;
     if (tag == (('t') | ('g' << 8) | ('a' << 16))) return C2T_IMAGE_FORMAT_TGA;
     if (tag == (('h') | ('d' << 8) | ('r' << 16))) return C2T_IMAGE_FORMAT_HDR;
-    if (tag == (('r') | ('a' << 8) | ('w' << 16))) return C2T_IMAGE_FORMAT_BMP;
+    if (tag == (('r') | ('a' << 8) | ('w' << 16))) return C2T_IMAGE_FORMAT_PLAIN;
   } else if (len == 4) {
     uint32_t tag = (uint8_t)lower[0] | ((uint32_t)(uint8_t)lower[1] << 8) |
                    ((uint32_t)(uint8_t)lower[2] << 16) | ((uint32_t)(uint8_t)lower[3] << 24);
     if (tag == (('j') | ('p' << 8) | ('e' << 16) | ('g' << 24))) return C2T_IMAGE_FORMAT_JPG;
-    if (tag == (('n') | ('o' << 8) | ('n' << 16) | ('e' << 24))) return C2T_IMAGE_FORMAT_BMP;
+    if (tag == (('n') | ('o' << 8) | ('n' << 16) | ('e' << 24))) return C2T_IMAGE_FORMAT_PLAIN;
   } else if (len == 5) {
-    if (memcmp(lower, "plain", 5) == 0) return C2T_IMAGE_FORMAT_BMP;
+    if (memcmp(lower, "plain", 5) == 0) return C2T_IMAGE_FORMAT_PLAIN;
   } else if (len == 12) {
-    if (memcmp(lower, "uncompressed", 12) == 0) return C2T_IMAGE_FORMAT_BMP;
+    if (memcmp(lower, "uncompressed", 12) == 0) return C2T_IMAGE_FORMAT_PLAIN;
   }
 
   return C2T_IMAGE_FORMAT_PNG;
@@ -94,6 +94,8 @@ const char *screenshot_format_to_string(c2t_image_format_t format) {
     return "tga";
   case C2T_IMAGE_FORMAT_HDR:
     return "hdr";
+  case C2T_IMAGE_FORMAT_PLAIN:
+    return "plain";
   case C2T_IMAGE_FORMAT_PNG:
   default:
     return "png";
@@ -110,6 +112,7 @@ const char *screenshot_format_mime(c2t_image_format_t format) {
     return "image/x-tga";
   case C2T_IMAGE_FORMAT_HDR:
     return "image/vnd.radiance";
+  case C2T_IMAGE_FORMAT_PLAIN:
   case C2T_IMAGE_FORMAT_PNG:
   default:
     return "image/png";
@@ -126,6 +129,7 @@ const char *screenshot_format_filename(c2t_image_format_t format) {
     return "screenshot.tga";
   case C2T_IMAGE_FORMAT_HDR:
     return "screenshot.hdr";
+  case C2T_IMAGE_FORMAT_PLAIN:
   case C2T_IMAGE_FORMAT_PNG:
   default:
     return "screenshot.png";
@@ -139,15 +143,18 @@ typedef struct {
   int error;
 } img_mem_context_t;
 
-static void img_write_callback(void *context, void *data, int size) {
-  if (size <= 0 || !data || !context)
+static void img_write_bytes(img_mem_context_t *ctx, const void *data,
+                            size_t write_len) {
+  if (write_len == 0 || !data || !ctx)
     return;
 
-  img_mem_context_t *ctx = (img_mem_context_t *)context;
   if (ctx->error)
     return;
 
-  size_t write_len = (size_t)size;
+  if (write_len > SIZE_MAX - ctx->size) {
+    ctx->error = 1;
+    return;
+  }
   if (ctx->size + write_len > ctx->capacity) {
     size_t new_capacity = ctx->capacity ? ctx->capacity * 2 : 65536;
     while (ctx->size + write_len > new_capacity) {
@@ -169,6 +176,139 @@ static void img_write_callback(void *context, void *data, int size) {
 
   memcpy(ctx->data + ctx->size, data, write_len);
   ctx->size += write_len;
+}
+
+static void img_write_callback(void *context, void *data, int size) {
+  if (size > 0)
+    img_write_bytes((img_mem_context_t *)context, data, (size_t)size);
+}
+
+static void write_u32_be(uint8_t output[4], uint32_t value) {
+  output[0] = (uint8_t)(value >> 24);
+  output[1] = (uint8_t)(value >> 16);
+  output[2] = (uint8_t)(value >> 8);
+  output[3] = (uint8_t)value;
+}
+
+static uint32_t png_crc32_update(uint32_t crc, const uint8_t *data,
+                                 size_t size) {
+  static const uint32_t table[16] = {
+      0x00000000U, 0x1db71064U, 0x3b6e20c8U, 0x26d930acU,
+      0x76dc4190U, 0x6b6b51f4U, 0x4db26158U, 0x5005713cU,
+      0xedb88320U, 0xf00f9344U, 0xd6d6a3e8U, 0xcb61b38cU,
+      0x9b64c2b0U, 0x86d3d2d4U, 0xa00ae278U, 0xbdbdf21cU};
+  for (size_t i = 0; i < size; ++i) {
+    crc ^= data[i];
+    crc = table[crc & 0x0fU] ^ (crc >> 4);
+    crc = table[crc & 0x0fU] ^ (crc >> 4);
+  }
+  return crc;
+}
+
+static int png_write_chunk(img_mem_context_t *ctx, const char type[4],
+                           const uint8_t *data, size_t size) {
+  if (size > UINT32_MAX || (size != 0 && !data))
+    return 0;
+
+  uint8_t length_bytes[4];
+  uint8_t crc_bytes[4];
+  write_u32_be(length_bytes, (uint32_t)size);
+  img_write_bytes(ctx, length_bytes, 4);
+  img_write_bytes(ctx, type, 4);
+  if (size != 0)
+    img_write_bytes(ctx, data, size);
+
+  uint32_t crc = png_crc32_update(UINT32_MAX, (const uint8_t *)type, 4);
+  crc = png_crc32_update(crc, data, size) ^ UINT32_MAX;
+  write_u32_be(crc_bytes, crc);
+  img_write_bytes(ctx, crc_bytes, 4);
+  return !ctx->error;
+}
+
+/* Encode a standards-compliant PNG whose DEFLATE stream uses stored blocks.
+ * Telegram can therefore render the image through sendPhoto while the
+ * "plain" mode retains the low-CPU, no-compression behavior it promises. */
+static int encode_plain_png(img_mem_context_t *ctx, uint32_t width,
+                            uint32_t height, const uint8_t *rgb_data) {
+  if (width > (UINT32_MAX - 1U) / 3U)
+    return 0;
+  size_t row_size = (size_t)width * 3U + 1U;
+  if ((size_t)height > SIZE_MAX / row_size)
+    return 0;
+  size_t raw_size = row_size * (size_t)height;
+  size_t block_count = raw_size / 65535U + (raw_size % 65535U != 0U);
+  if (block_count > (SIZE_MAX - raw_size - 6U) / 5U)
+    return 0;
+  size_t zlib_size = 2U + raw_size + block_count * 5U + 4U;
+  if (zlib_size > UINT32_MAX)
+    return 0;
+
+  uint8_t *raw = (uint8_t *)malloc(raw_size);
+  uint8_t *zlib = (uint8_t *)malloc(zlib_size);
+  if (!raw || !zlib) {
+    free(raw);
+    free(zlib);
+    return 0;
+  }
+
+  for (uint32_t row = 0; row < height; ++row) {
+    size_t offset = (size_t)row * row_size;
+    raw[offset] = 0; /* PNG filter type: None. */
+    memcpy(raw + offset + 1U, rgb_data + (size_t)row * (size_t)width * 3U,
+           (size_t)width * 3U);
+  }
+
+  size_t output_offset = 0;
+  zlib[output_offset++] = 0x78;
+  zlib[output_offset++] = 0x01; /* Valid zlib header, fastest algorithm. */
+  size_t input_offset = 0;
+  while (input_offset < raw_size) {
+    size_t remaining = raw_size - input_offset;
+    uint16_t block_size =
+        (uint16_t)(remaining > 65535U ? 65535U : remaining);
+    zlib[output_offset++] = remaining <= 65535U ? 1U : 0U;
+    zlib[output_offset++] = (uint8_t)block_size;
+    zlib[output_offset++] = (uint8_t)(block_size >> 8);
+    uint16_t inverse_size = (uint16_t)~block_size;
+    zlib[output_offset++] = (uint8_t)inverse_size;
+    zlib[output_offset++] = (uint8_t)(inverse_size >> 8);
+    memcpy(zlib + output_offset, raw + input_offset, block_size);
+    output_offset += block_size;
+    input_offset += block_size;
+  }
+
+  uint32_t adler_a = 1;
+  uint32_t adler_b = 0;
+  for (size_t offset = 0; offset < raw_size;) {
+    size_t chunk = raw_size - offset;
+    if (chunk > 5552U)
+      chunk = 5552U;
+    for (size_t i = 0; i < chunk; ++i) {
+      adler_a += raw[offset + i];
+      adler_b += adler_a;
+    }
+    adler_a %= 65521U;
+    adler_b %= 65521U;
+    offset += chunk;
+  }
+  write_u32_be(zlib + output_offset, (adler_b << 16) | adler_a);
+  output_offset += 4U;
+
+  static const uint8_t signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n',
+                                       0x1a, '\n'};
+  uint8_t ihdr[13] = {0};
+  write_u32_be(ihdr, width);
+  write_u32_be(ihdr + 4, height);
+  ihdr[8] = 8; /* bit depth */
+  ihdr[9] = 2; /* truecolor RGB */
+
+  img_write_bytes(ctx, signature, sizeof(signature));
+  int success = png_write_chunk(ctx, "IHDR", ihdr, sizeof(ihdr)) &&
+                png_write_chunk(ctx, "IDAT", zlib, output_offset) &&
+                png_write_chunk(ctx, "IEND", NULL, 0);
+  free(raw);
+  free(zlib);
+  return success;
 }
 
 #if defined(__ARM_NEON) || defined(__aarch64__) || defined(_M_ARM64)
@@ -405,6 +545,11 @@ int screenshot_encode_image(c2t_image_format_t format,
                                        (int)height, 3, hdr_buffer);
       free(hdr_buffer);
     }
+    break;
+  }
+
+  case C2T_IMAGE_FORMAT_PLAIN: {
+    success = encode_plain_png(&ctx, width, height, rgb_buffer);
     break;
   }
 

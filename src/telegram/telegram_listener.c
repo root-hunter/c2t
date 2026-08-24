@@ -1541,17 +1541,18 @@ static void handle_command(const telegram_incoming_update_t *update,
       const char *arg = get_command_argument(text);
       if (!arg || !*arg) {
         c2t_image_format_t cur_fmt = screenshot_get_format();
-        char resp[512];
+        char resp[768];
         snprintf(
             resp, sizeof(resp),
             "📸 <b>Screenshot Format:</b> <code>%s</code> (MIME: <code>%s</code>)\n\n"
             "💡 <b>Supported Formats:</b>\n"
-            "• <code>png</code> - Lossless PNG (Default)\n"
-            "• <code>jpg</code> - JPEG Lossy Compression\n"
-            "• <code>bmp</code> / <code>plain</code> - Uncompressed Plain Bitmap (Lossless, Fast)\n"
-            "• <code>tga</code> - Truevision TGA\n"
-            "• <code>hdr</code> - Radiance High Dynamic Range\n\n"
-            "<b>To change:</b> <code>/screenshot_format &lt;png|jpg|bmp|plain|tga|hdr&gt;</code>",
+            "• <code>png</code> - Lossless PNG (Compressed, In-App View)\n"
+            "• <code>plain</code> - Uncompressed Fast PNG (Lossless, In-App View)\n"
+            "• <code>jpg</code> - JPEG Lossy Compression (In-App View)\n"
+            "• <code>bmp</code> - Raw Windows Bitmap (Document File)\n"
+            "• <code>tga</code> - Truevision TGA (Document File)\n"
+            "• <code>hdr</code> - Radiance High Dynamic Range (Document File)\n\n"
+            "<b>To change:</b> <code>/screenshot_format &lt;png|plain|jpg|bmp|tga|hdr&gt;</code>",
             screenshot_format_to_string(cur_fmt),
             screenshot_format_mime(cur_fmt));
         telegram_send_html(resp);
