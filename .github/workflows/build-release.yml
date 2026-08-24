@@ -66,13 +66,13 @@ jobs:
             runner: ubuntu-24.04-arm
           - platform: windows
             arch: x86_64
-            runner: ubuntu-24.04
+            runner: windows-2025-vs2026
           - platform: macos
             arch: x86_64
-            runner: macos-15
+            runner: macos-26-intel
           - platform: macos
             arch: aarch64
-            runner: macos-15
+            runner: macos-26
 
     steps:
       - name: Check out source
@@ -95,18 +95,6 @@ jobs:
             ninja-build \
             nodejs \
             python3
-
-      - name: Install Windows build dependencies
-        if: matrix.platform == 'windows'
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends \
-            cmake \
-            mingw-w64 \
-            ninja-build \
-            nodejs \
-            zip
 
       - name: Build and test Linux with musl
         if: matrix.platform == 'linux-musl'
@@ -159,10 +147,10 @@ jobs:
       - name: Configure Windows
         if: matrix.platform == 'windows'
         run: >-
-          cmake -S . -B build/windows -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DBUILD_TESTING=OFF
-          -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake
+          cmake -S . -B build/windows -G "Visual Studio 18 2026" -A x64
+          -DBUILD_TESTING=ON
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          -DCMAKE_OBJDUMP="C:/Program Files/LLVM/bin/llvm-objdump.exe"
 
       - name: Configure macOS
         if: matrix.platform == 'macos'
@@ -173,8 +161,12 @@ jobs:
           -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch == 'aarch64' && 'arm64' || 'x86_64' }}
 
       - name: Build
-        if: matrix.platform != 'linux-musl'
+        if: matrix.platform != 'linux-musl' && matrix.platform != 'windows'
         run: cmake --build build/${{ matrix.platform }} --parallel 2
+
+      - name: Build Windows
+        if: matrix.platform == 'windows'
+        run: cmake --build build/windows --config Release --parallel 2
 
       - name: Test Linux with glibc
         if: matrix.platform == 'linux-glibc'
@@ -186,7 +178,7 @@ jobs:
 
       - name: Test browser provisioner on Windows binary
         if: matrix.platform == 'windows'
-        run: node tests/browser_provision_test.mjs build/windows/c2t.exe
+        run: node tests/browser_provision_test.mjs build/windows/Release/c2t.exe
 
       - name: Run benchmark (Linux glibc & macOS)
         if: matrix.platform == 'linux-glibc' || matrix.platform == 'macos'
@@ -207,17 +199,16 @@ jobs:
           echo "## Benchmark Results (${{ matrix.platform }} ${{ matrix.arch }})" >> "$GITHUB_STEP_SUMMARY"
           cat perf_report.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Run benchmark for Windows via Wine
+      - name: Run benchmark on Windows
         if: matrix.platform == 'windows'
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          sudo apt-get update && sudo apt-get install -y wine || true
-          wine build/windows/perf_bench.exe --markdown-out perf_report.md --json-out perf_report.json || true
-          if [ -f perf_report.md ]; then
-            echo "## Benchmark Results (${{ matrix.platform }} ${{ matrix.arch }})" >> "$GITHUB_STEP_SUMMARY"
-            cat perf_report.md >> "$GITHUB_STEP_SUMMARY"
-          fi
+          & .\build\windows\Release\perf_bench.exe --markdown-out perf_report.md --json-out perf_report.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "## Benchmark Results (${{ matrix.platform }} ${{ matrix.arch }})" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Get-Content perf_report.md |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
@@ -254,15 +245,17 @@ jobs:
 
       - name: Package Windows
         if: matrix.platform == 'windows'
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          version="$(sed -nE 's/^project\(c2t VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
-          package="c2t-v${version}-windows-x86_64"
-          install -Dm644 build/windows/c2t.exe "stage/${package}/c2t.exe"
-          install -Dm644 README.md "stage/${package}/README.md"
-          mkdir -p dist
-          (cd stage && zip -9 -r "../dist/${package}.zip" "${package}")
+          $project = Get-Content CMakeLists.txt -Raw
+          if ($project -notmatch 'project\(c2t VERSION ([0-9]+\.[0-9]+\.[0-9]+)') {
+            throw "Unable to read the project version from CMakeLists.txt"
+          }
+          $package = "c2t-v$($Matches[1])-windows-x86_64"
+          New-Item -ItemType Directory -Force "stage/$package", dist | Out-Null
+          Copy-Item build/windows/Release/c2t.exe "stage/$package/c2t.exe"
+          Copy-Item README.md "stage/$package/README.md"
+          Compress-Archive -Path "stage/$package" -DestinationPath "dist/$package.zip" -CompressionLevel Optimal
 
       - name: Package macOS
         if: matrix.platform == 'macos'
