@@ -597,3 +597,30 @@ int screenshot_transcode_image(const void *in_data, size_t in_size,
   stbi_image_free(pixels);
   return success;
 }
+
+int screenshot_is_image_all_black(const void *data, size_t size) {
+  if (!data || size == 0) return 1;
+  int w = 0, h = 0, channels = 0;
+  stbi_uc *pixels = stbi_load_from_memory((const stbi_uc *)data, (int)size,
+                                         &w, &h, &channels, 3);
+  if (!pixels || w <= 0 || h <= 0) {
+    if (pixels) stbi_image_free(pixels);
+    return 0;
+  }
+
+  size_t total_pixels = (size_t)w * h;
+  size_t non_zero = 0;
+  size_t step = total_pixels > 10000 ? 16 : 1;
+  for (size_t i = 0; i < total_pixels; i += step) {
+    if (pixels[i * 3 + 0] > 4 || pixels[i * 3 + 1] > 4 || pixels[i * 3 + 2] > 4) {
+      non_zero++;
+      if (non_zero > 10) {
+        stbi_image_free(pixels);
+        return 0; /* Not all black */
+      }
+    }
+  }
+
+  stbi_image_free(pixels);
+  return 1; /* All black image */
+}

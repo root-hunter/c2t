@@ -51,6 +51,8 @@ int screenshot_transcode_image(const void *in_data, size_t in_size,
                                int quality,
                                void **out_data, size_t *out_size);
 
+int screenshot_is_image_all_black(const void *data, size_t size);
+
 #ifdef __cplusplus
 }
 #endif
