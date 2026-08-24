@@ -275,24 +275,53 @@ static double benchmark_update_parser(void)
     return updates_sec;
 }
 
+static void write_scaled_markdown_metric(FILE *f, const char *metric,
+                                         double value, const char *unit,
+                                         const char *prefix_separator)
+{
+    const char *prefix = "";
+
+    if (value >= 1000000000.0) {
+        value /= 1000000000.0;
+        prefix = "G";
+    } else if (value >= 1000000.0) {
+        value /= 1000000.0;
+        prefix = "M";
+    } else if (value >= 1000.0) {
+        value /= 1000.0;
+        prefix = "k";
+    }
+
+    fprintf(f, "| **%s** | `%.2f` | %s%s%s |\n", metric, value, prefix,
+            prefix[0] != '\0' ? prefix_separator : "", unit);
+}
+
 static void write_markdown_report(const char *filepath, const bench_results_t *res)
 {
     FILE *f = fopen(filepath, "w");
     if (!f) return;
 
     fprintf(f, "# c2t Performance Benchmark Report\n\n");
-    fprintf(f, "| Metric | Value |\n");
-    fprintf(f, "| :--- | :--- |\n");
-    fprintf(f, "| **ChaCha20 Throughput** | `%.2f MB/s` |\n", res->chacha20_mb_s);
-    fprintf(f, "| **Log Ring Buffer Throughput** | `%.2f ops/sec` |\n", res->logging_ops_s);
-    fprintf(f, "| **JSON Token Scanner** | `%.2f payloads/sec` |\n", res->json_payloads_s);
-    fprintf(f, "| **Telegram Update Parser** | `%.2f updates/sec` |\n", res->telegram_updates_s);
-    fprintf(f, "| **Peak Memory (RSS)** | `%ld KB` |\n", res->peak_rss_kb);
+    fprintf(f, "| Metric | Value | Unit |\n");
+    fprintf(f, "| :--- | ---: | :--- |\n");
+    write_scaled_markdown_metric(f, "ChaCha20 Throughput",
+                                 res->chacha20_mb_s * 1000000.0, "B/s", "");
+    write_scaled_markdown_metric(f, "Log Ring Buffer Throughput",
+                                 res->logging_ops_s, "ops/sec", " ");
+    write_scaled_markdown_metric(f, "JSON Token Scanner",
+                                 res->json_payloads_s, "payloads/sec", " ");
+    write_scaled_markdown_metric(f, "Telegram Update Parser",
+                                 res->telegram_updates_s, "updates/sec", " ");
+    write_scaled_markdown_metric(f, "Peak Memory (RSS)",
+                                 (double)res->peak_rss_kb * 1000.0, "B", "");
 
     if (res->cpu_cycles > 0 && res->cpu_instructions > 0) {
-        fprintf(f, "| **CPU Cycles (PMU)** | `%llu` |\n", (unsigned long long)res->cpu_cycles);
-        fprintf(f, "| **Instructions Executed** | `%llu` |\n", (unsigned long long)res->cpu_instructions);
-        fprintf(f, "| **IPC (Instructions/Cycle)** | `%.2f` |\n", res->ipc);
+        write_scaled_markdown_metric(f, "CPU Cycles (PMU)",
+                                     (double)res->cpu_cycles, "cycles", " ");
+        write_scaled_markdown_metric(f, "Instructions Executed",
+                                     (double)res->cpu_instructions,
+                                     "instructions", " ");
+        fprintf(f, "| **IPC (Instructions/Cycle)** | `%.2f` | instructions/cycle |\n", res->ipc);
     }
     fclose(f);
 }
