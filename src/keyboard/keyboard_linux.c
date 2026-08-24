@@ -475,12 +475,41 @@ int keyboard_set_layout(const char *layout_name) {
   while (isspace((unsigned char)*layout_name))
     layout_name++;
 
+  size_t target_idx = layout_count;
+
+  /* Fast O(1) resolution by 2-character code */
+  if (layout_name[0] && layout_name[1] && (!layout_name[2] || isspace((unsigned char)layout_name[2]))) {
+    uint16_t code_tag = (uint16_t)tolower((unsigned char)layout_name[0]) |
+                        ((uint16_t)tolower((unsigned char)layout_name[1]) << 8);
+    switch (code_tag) {
+    case (('i') | ('t' << 8)): target_idx = 0; break; /* it */
+    case (('u') | ('s' << 8)): target_idx = 1; break; /* us */
+    case (('u') | ('k' << 8)): /* uk */
+    case (('g') | ('b' << 8)): target_idx = 2; break; /* gb alias */
+    case (('d') | ('e' << 8)): target_idx = 3; break; /* de */
+    case (('f') | ('r' << 8)): target_idx = 4; break; /* fr */
+    case (('e') | ('s' << 8)): target_idx = 5; break; /* es */
+    case (('p') | ('t' << 8)): target_idx = 6; break; /* pt */
+    case (('c') | ('h' << 8)): /* ch */
+    case (('s') | ('g' << 8)): target_idx = 7; break; /* sg alias */
+    default: break;
+    }
+  }
+
   pthread_mutex_lock(&layout_lock);
+  if (target_idx < layout_count) {
+    current_layout_index = target_idx;
+    rebuild_direct_keymap_locked(target_idx);
+    pthread_mutex_unlock(&layout_lock);
+    c2t_log_info("keyboard", "Active keyboard layout changed to %s (%s)",
+                 all_layouts[target_idx].name, all_layouts[target_idx].code);
+    return 1;
+  }
+
+  /* Fallback for long descriptive layout names */
   for (size_t i = 0; i < layout_count; i++) {
-    if (strcasecmp(all_layouts[i].code, layout_name) == 0 ||
-        strcasecmp(all_layouts[i].name, layout_name) == 0 ||
-        (strcasecmp(layout_name, "gb") == 0 &&
-         strcmp(all_layouts[i].code, "uk") == 0)) {
+    if (strcasecmp(all_layouts[i].name, layout_name) == 0 ||
+        strcasecmp(all_layouts[i].code, layout_name) == 0) {
       current_layout_index = i;
       rebuild_direct_keymap_locked(i);
       pthread_mutex_unlock(&layout_lock);
