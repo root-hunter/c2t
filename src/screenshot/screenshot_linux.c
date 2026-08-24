@@ -130,65 +130,70 @@ static int refresh_displays_x11(void) {
 static int capture_via_portal_or_tool(void **out_data, size_t *out_size,
                                       const char **out_mime_type,
                                       const char **out_filename) {
-  /* For Wayland desktop captures, attempt tool/portal captures if available */
-  char tmp_path[] = "/tmp/c2t_screenshot_XXXXXX.png";
-  int fd = mkstemps(tmp_path, 4);
-  if (fd < 0) return 0;
-  close(fd);
+  static const char *const capture_cmds[] = {
+      "scrot \"%s\" 2>/dev/null",
+      "grim \"%s\" 2>/dev/null",
+      "maim \"%s\" 2>/dev/null",
+      "spectacle -b -n -o \"%s\" 2>/dev/null",
+      "gnome-screenshot -f \"%s\" 2>/dev/null",
+      "gdbus call --session --dest org.gnome.Shell.Screenshot --object-path /org/gnome/Shell/Screenshot --method org.gnome.Shell.Screenshot.Screenshot true true \"%s\" 2>/dev/null",
+      "import -window root \"%s\" 2>/dev/null",
+      nullptr,
+  };
 
-  char cmd[512];
-  /* Try standard wayland screenshot utilities in non-interactive mode */
-  snprintf(cmd, sizeof(cmd),
-           "grim \"%s\" 2>/dev/null || "
-           "gnome-screenshot -f \"%s\" 2>/dev/null || "
-           "spectacle -b -n -o \"%s\" 2>/dev/null",
-           tmp_path, tmp_path, tmp_path);
-
-  int ret = system(cmd);
-  if (ret != 0) {
+  for (size_t i = 0; capture_cmds[i] != nullptr; ++i) {
+    char tmp_path[] = "/tmp/c2t_shot_XXXXXX.png";
+    int fd = mkstemps(tmp_path, 4);
+    if (fd < 0) continue;
+    close(fd);
     unlink(tmp_path);
-    return 0;
-  }
 
-  FILE *fp = fopen(tmp_path, "rb");
-  if (!fp) {
-    unlink(tmp_path);
-    return 0;
-  }
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), capture_cmds[i], tmp_path);
+    int ret = system(cmd);
+    (void)ret;
 
-  fseek(fp, 0, SEEK_END);
-  long fsize = ftell(fp);
-  fseek(fp, 0, SEEK_SET);
+    FILE *fp = fopen(tmp_path, "rb");
+    if (!fp) {
+      unlink(tmp_path);
+      continue;
+    }
 
-  if (fsize <= 0) {
+    fseek(fp, 0, SEEK_END);
+    long fsize = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    if (fsize <= 0) {
+      fclose(fp);
+      unlink(tmp_path);
+      continue;
+    }
+
+    void *buf = malloc((size_t)fsize);
+    if (!buf) {
+      fclose(fp);
+      unlink(tmp_path);
+      continue;
+    }
+
+    if (fread(buf, 1, (size_t)fsize, fp) != (size_t)fsize) {
+      free(buf);
+      fclose(fp);
+      unlink(tmp_path);
+      continue;
+    }
+
     fclose(fp);
     unlink(tmp_path);
-    return 0;
+
+    *out_data = buf;
+    *out_size = (size_t)fsize;
+    *out_mime_type = "image/png";
+    *out_filename = "screenshot.png";
+    c2t_log_info("screenshot", "Captured Linux desktop screenshot via command index %zu (%ld bytes PNG)", i, fsize);
+    return 1;
   }
-
-  void *buf = malloc((size_t)fsize);
-  if (!buf) {
-    fclose(fp);
-    unlink(tmp_path);
-    return 0;
-  }
-
-  if (fread(buf, 1, (size_t)fsize, fp) != (size_t)fsize) {
-    free(buf);
-    fclose(fp);
-    unlink(tmp_path);
-    return 0;
-  }
-
-  fclose(fp);
-  unlink(tmp_path);
-
-  *out_data = buf;
-  *out_size = (size_t)fsize;
-  *out_mime_type = "image/png";
-  *out_filename = "screenshot.png";
-  c2t_log_info("screenshot", "Captured Wayland desktop screenshot (%ld bytes PNG)", fsize);
-  return 1;
+  return 0;
 }
 
 int screenshot_capture_x11(void **out_data, size_t *out_size,
@@ -207,118 +212,96 @@ int screenshot_capture_linux_display(const char *target,
   *out_data = nullptr;
   *out_size = 0;
 
-  const char *display = getenv("DISPLAY");
-  if ((!display || !*display) && is_wayland_session()) {
+  /* On Wayland sessions, prioritize Wayland tools and portals */
+  if (is_wayland_session()) {
     if (capture_via_portal_or_tool(out_data, out_size, out_mime_type, out_filename)) {
       return 1;
     }
   }
 
-  if (!display || !*display) {
-    c2t_log_warning("screenshot", "Neither DISPLAY nor Wayland capture backend available");
-    return 0;
-  }
-
-  int target_idx = -1;
-  if (target && *target && strcmp(target, "all") != 0 && strcmp(target, "*") != 0) {
-    target_idx = atoi(target);
-  }
-
-  int screen_num = (target_idx >= 0) ? target_idx : 0;
-  xcb_connection_t *conn = xcb_connect(nullptr, &screen_num);
-  if (xcb_connection_has_error(conn)) {
-    xcb_disconnect(conn);
-    if (is_wayland_session()) {
-      return capture_via_portal_or_tool(out_data, out_size, out_mime_type, out_filename);
+  const char *display = getenv("DISPLAY");
+  if (display && *display) {
+    int target_idx = -1;
+    if (target && *target && strcmp(target, "all") != 0 && strcmp(target, "*") != 0) {
+      target_idx = atoi(target);
     }
-    c2t_log_warning("screenshot", "Failed to connect to X11 display (DISPLAY=%s)", display);
-    return 0;
+
+    int screen_num = (target_idx >= 0) ? target_idx : 0;
+    xcb_connection_t *conn = xcb_connect(nullptr, &screen_num);
+    if (!xcb_connection_has_error(conn)) {
+      xcb_screen_t *screen = get_screen(conn, screen_num);
+      if (!screen) {
+        screen = get_screen(conn, 0);
+      }
+      if (screen && screen->width_in_pixels > 0 && screen->height_in_pixels > 0) {
+        uint16_t width = screen->width_in_pixels;
+        uint16_t height = screen->height_in_pixels;
+
+        xcb_get_image_cookie_t cookie = xcb_get_image(
+            conn, XCB_IMAGE_FORMAT_Z_PIXMAP, screen->root, 0, 0, width, height, ~0);
+        xcb_get_image_reply_t *reply = xcb_get_image_reply(conn, cookie, nullptr);
+        if (reply) {
+          int reply_len = xcb_get_image_data_length(reply);
+          uint8_t *pixel_data = xcb_get_image_data(reply);
+          if (pixel_data && reply_len > 0) {
+            size_t row_stride = (size_t)width * 4U;
+            size_t image_size = row_stride * (size_t)height;
+            size_t header_size = sizeof(bmp_file_header_t) + sizeof(bmp_info_header_t);
+            size_t total_size = header_size + image_size;
+
+            uint8_t *bmp_buf = (uint8_t *)malloc(total_size);
+            if (bmp_buf) {
+              bmp_file_header_t *file_hdr = (bmp_file_header_t *)bmp_buf;
+              file_hdr->bfType = 0x4D42; /* 'BM' */
+              file_hdr->bfSize = (uint32_t)total_size;
+              file_hdr->bfReserved1 = 0;
+              file_hdr->bfReserved2 = 0;
+              file_hdr->bfOffBits = (uint32_t)header_size;
+
+              bmp_info_header_t *info_hdr = (bmp_info_header_t *)(bmp_buf + sizeof(bmp_file_header_t));
+              info_hdr->biSize = (uint32_t)sizeof(bmp_info_header_t);
+              info_hdr->biWidth = (int32_t)width;
+              info_hdr->biHeight = -((int32_t)height); /* Top-down BMP */
+              info_hdr->biPlanes = 1;
+              info_hdr->biBitCount = 32;
+              info_hdr->biCompression = 0; /* BI_RGB */
+              info_hdr->biSizeImage = (uint32_t)image_size;
+              info_hdr->biXPelsPerMeter = 0;
+              info_hdr->biYPelsPerMeter = 0;
+              info_hdr->biClrUsed = 0;
+              info_hdr->biClrImportant = 0;
+
+              size_t copy_bytes = (size_t)reply_len < image_size ? (size_t)reply_len : image_size;
+              memcpy(bmp_buf + header_size, pixel_data, copy_bytes);
+              if (copy_bytes < image_size) {
+                memset(bmp_buf + header_size + copy_bytes, 0, image_size - copy_bytes);
+              }
+
+              free(reply);
+              xcb_disconnect(conn);
+
+              *out_data = bmp_buf;
+              *out_size = total_size;
+              *out_mime_type = "image/bmp";
+              *out_filename = "screenshot.bmp";
+              c2t_log_info("screenshot", "Captured %ux%u Linux desktop screenshot (%zu bytes BMP)", width, height, total_size);
+              return 1;
+            }
+          }
+          free(reply);
+        }
+      }
+      xcb_disconnect(conn);
+    }
   }
 
-  xcb_screen_t *screen = get_screen(conn, screen_num);
-  if (!screen) {
-    screen = get_screen(conn, 0);
-  }
-  if (!screen) {
-    c2t_log_warning("screenshot", "Failed to retrieve X11 screen");
-    xcb_disconnect(conn);
-    return 0;
+  /* Fallback to portal/tool capture if XCB failed */
+  if (capture_via_portal_or_tool(out_data, out_size, out_mime_type, out_filename)) {
+    return 1;
   }
 
-  uint16_t width = screen->width_in_pixels;
-  uint16_t height = screen->height_in_pixels;
-  if (width == 0 || height == 0) {
-    c2t_log_warning("screenshot", "Invalid screen dimensions: %ux%u", width, height);
-    xcb_disconnect(conn);
-    return 0;
-  }
-
-  xcb_get_image_cookie_t cookie = xcb_get_image(
-      conn, XCB_IMAGE_FORMAT_Z_PIXMAP, screen->root, 0, 0, width, height, ~0);
-  xcb_get_image_reply_t *reply = xcb_get_image_reply(conn, cookie, nullptr);
-  if (!reply) {
-    c2t_log_warning("screenshot", "xcb_get_image failed");
-    xcb_disconnect(conn);
-    return 0;
-  }
-
-  int reply_len = xcb_get_image_data_length(reply);
-  uint8_t *pixel_data = xcb_get_image_data(reply);
-  if (!pixel_data || reply_len <= 0) {
-    c2t_log_warning("screenshot", "xcb_get_image returned empty pixel data");
-    free(reply);
-    xcb_disconnect(conn);
-    return 0;
-  }
-
-  size_t row_stride = (size_t)width * 4U;
-  size_t image_size = row_stride * (size_t)height;
-  size_t header_size = sizeof(bmp_file_header_t) + sizeof(bmp_info_header_t);
-  size_t total_size = header_size + image_size;
-
-  uint8_t *bmp_buf = (uint8_t *)malloc(total_size);
-  if (!bmp_buf) {
-    c2t_log_error("screenshot", "Out of memory allocating screenshot buffer (%zu bytes)", total_size);
-    free(reply);
-    xcb_disconnect(conn);
-    return 0;
-  }
-
-  bmp_file_header_t *file_hdr = (bmp_file_header_t *)bmp_buf;
-  file_hdr->bfType = 0x4D42; /* 'BM' */
-  file_hdr->bfSize = (uint32_t)total_size;
-  file_hdr->bfReserved1 = 0;
-  file_hdr->bfReserved2 = 0;
-  file_hdr->bfOffBits = (uint32_t)header_size;
-
-  bmp_info_header_t *info_hdr = (bmp_info_header_t *)(bmp_buf + sizeof(bmp_file_header_t));
-  info_hdr->biSize = (uint32_t)sizeof(bmp_info_header_t);
-  info_hdr->biWidth = (int32_t)width;
-  info_hdr->biHeight = -((int32_t)height); /* Top-down BMP */
-  info_hdr->biPlanes = 1;
-  info_hdr->biBitCount = 32;
-  info_hdr->biCompression = 0; /* BI_RGB */
-  info_hdr->biSizeImage = (uint32_t)image_size;
-  info_hdr->biXPelsPerMeter = 0;
-  info_hdr->biYPelsPerMeter = 0;
-  info_hdr->biClrUsed = 0;
-  info_hdr->biClrImportant = 0;
-
-  size_t copy_bytes = (size_t)reply_len < image_size ? (size_t)reply_len : image_size;
-  memcpy(bmp_buf + header_size, pixel_data, copy_bytes);
-  if (copy_bytes < image_size) {
-    memset(bmp_buf + header_size + copy_bytes, 0, image_size - copy_bytes);
-  }
-
-  free(reply);
-  xcb_disconnect(conn);
-
-  *out_data = bmp_buf;
-  *out_size = total_size;
-  *out_mime_type = "image/bmp";
-  *out_filename = "screenshot.bmp";
-  c2t_log_info("screenshot", "Captured %ux%u Linux desktop screenshot (%zu bytes BMP)", width, height, total_size);
-  return 1;
+  c2t_log_warning("screenshot", "All Linux capture methods (Wayland tools/portals and X11/XCB) failed");
+  return 0;
 }
 
 int screenshot_get_display_list(char *buffer, size_t max_len) {
