@@ -21,7 +21,6 @@
 #include <windows.h>
 #include "screenshot.h"
 #include "screenshot_jpeg.h"
-#include "screenshot_png.h"
 #include "../logging/logging.h"
 #include "../win32/win32_api.h"
 
@@ -278,17 +277,8 @@ int screenshot_capture_windows_display(const char *target,
 
   void *img_buf = NULL;
   size_t img_size = 0;
-  const char *mime_type = "image/jpeg";
-  const char *filename = "screenshot.jpg";
-
-  if (screenshot_encode_jpeg_rgba((uint32_t)width, (uint32_t)height, pixels, 1, 85, &img_buf, &img_size)) {
-    c2t_log_info("screenshot", "Captured %dx%d Windows desktop screenshot (%llu bytes JPEG)", width, height, (unsigned long long)img_size);
-  } else if (screenshot_encode_png_rgba((uint32_t)width, (uint32_t)height, pixels, 1, &img_buf, &img_size)) {
-    mime_type = "image/png";
-    filename = "screenshot.png";
-    c2t_log_info("screenshot", "Captured %dx%d Windows desktop screenshot (%llu bytes PNG fallback)", width, height, (unsigned long long)img_size);
-  } else {
-    c2t_log_warning("screenshot", "Image encoding failed for Windows screenshot");
+  if (!screenshot_encode_jpeg_rgba((uint32_t)width, (uint32_t)height, pixels, 1, 85, &img_buf, &img_size)) {
+    c2t_log_warning("screenshot", "JPEG encoding failed for Windows screenshot");
     free(pixels);
     return 0;
   }
@@ -296,8 +286,9 @@ int screenshot_capture_windows_display(const char *target,
 
   *out_data = img_buf;
   *out_size = img_size;
-  *out_mime_type = mime_type;
-  *out_filename = filename;
+  *out_mime_type = "image/jpeg";
+  *out_filename = "screenshot.jpg";
+  c2t_log_info("screenshot", "Captured %dx%d Windows desktop screenshot (%llu bytes JPEG)", width, height, (unsigned long long)img_size);
   return 1;
 }
 
