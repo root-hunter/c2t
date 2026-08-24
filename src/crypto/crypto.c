@@ -311,6 +311,19 @@ static void chacha20_init_state(uint32_t state[16], const unsigned char key[32],
 #endif
 #endif
 
+#if defined(C2T_HAS_SSE2) &&                                                   \
+    (defined(__GNUC__) || defined(__clang__) || defined(__AVX512F__))
+#if !defined(C2T_HAS_AVX2_DISPATCH)
+#include <immintrin.h>
+#endif
+#define C2T_HAS_AVX512_DISPATCH 1
+#if defined(__GNUC__) || defined(__clang__)
+#define C2T_TARGET_AVX512 __attribute__((target("avx512f")))
+#else
+#define C2T_TARGET_AVX512
+#endif
+#endif
+
 #if defined(C2T_HAS_SSE2)
 #define ROTL32_SSE2(v, n)                                                     \
   _mm_or_si128(_mm_slli_epi32((v), (n)), _mm_srli_epi32((v), 32 - (n)))
@@ -533,6 +546,143 @@ static void chacha20_crypt_4blocks_neon(const uint32_t state[16],
 }
 #endif
 
+#if defined(C2T_HAS_AVX512_DISPATCH)
+#define ROTL32_AVX512(v, n)                                                    \
+  _mm512_or_si512(_mm512_slli_epi32((v), (n)),                               \
+                  _mm512_srli_epi32((v), 32 - (n)))
+#define CHACHA20_QUARTERROUND_AVX512(a, b, c, d)                              \
+  do {                                                                         \
+    (a) = _mm512_add_epi32((a), (b));                                          \
+    (d) = ROTL32_AVX512(_mm512_xor_si512((d), (a)), 16);                      \
+    (c) = _mm512_add_epi32((c), (d));                                          \
+    (b) = ROTL32_AVX512(_mm512_xor_si512((b), (c)), 12);                      \
+    (a) = _mm512_add_epi32((a), (b));                                          \
+    (d) = ROTL32_AVX512(_mm512_xor_si512((d), (a)), 8);                       \
+    (c) = _mm512_add_epi32((c), (d));                                          \
+    (b) = ROTL32_AVX512(_mm512_xor_si512((b), (c)), 7);                       \
+  } while (0)
+#define CHACHA20_COUNTERS_AVX512(counter)                                      \
+  _mm512_set_epi32(                                                            \
+      (int)((counter) + 15U), (int)((counter) + 14U),                         \
+      (int)((counter) + 13U), (int)((counter) + 12U),                         \
+      (int)((counter) + 11U), (int)((counter) + 10U),                         \
+      (int)((counter) + 9U), (int)((counter) + 8U),                           \
+      (int)((counter) + 7U), (int)((counter) + 6U),                           \
+      (int)((counter) + 5U), (int)((counter) + 4U),                           \
+      (int)((counter) + 3U), (int)((counter) + 2U),                           \
+      (int)((counter) + 1U), (int)(counter))
+
+static C2T_TARGET_AVX512 inline void
+chacha20_xor_16words(__m512i x0, __m512i x1, __m512i x2, __m512i x3,
+                     const unsigned char *input, unsigned char *output) {
+  __m512i t0 = _mm512_unpacklo_epi32(x0, x1);
+  __m512i t1 = _mm512_unpackhi_epi32(x0, x1);
+  __m512i t2 = _mm512_unpacklo_epi32(x2, x3);
+  __m512i t3 = _mm512_unpackhi_epi32(x2, x3);
+  __m512i b0 = _mm512_unpacklo_epi64(t0, t2);
+  __m512i b1 = _mm512_unpackhi_epi64(t0, t2);
+  __m512i b2 = _mm512_unpacklo_epi64(t1, t3);
+  __m512i b3 = _mm512_unpackhi_epi64(t1, t3);
+
+#define CHACHA20_XOR_AVX512_BLOCK(block, vector, lane)                         \
+  do {                                                                         \
+    __m128i block_words = _mm512_extracti32x4_epi32((vector), (lane));         \
+    __m128i in = _mm_loadu_si128(                                              \
+        (const __m128i *)(const void *)(input + (block) * 64));                \
+    _mm_storeu_si128((__m128i *)(void *)(output + (block) * 64),               \
+                     _mm_xor_si128(in, block_words));                          \
+  } while (0)
+  CHACHA20_XOR_AVX512_BLOCK(0, b0, 0);
+  CHACHA20_XOR_AVX512_BLOCK(1, b1, 0);
+  CHACHA20_XOR_AVX512_BLOCK(2, b2, 0);
+  CHACHA20_XOR_AVX512_BLOCK(3, b3, 0);
+  CHACHA20_XOR_AVX512_BLOCK(4, b0, 1);
+  CHACHA20_XOR_AVX512_BLOCK(5, b1, 1);
+  CHACHA20_XOR_AVX512_BLOCK(6, b2, 1);
+  CHACHA20_XOR_AVX512_BLOCK(7, b3, 1);
+  CHACHA20_XOR_AVX512_BLOCK(8, b0, 2);
+  CHACHA20_XOR_AVX512_BLOCK(9, b1, 2);
+  CHACHA20_XOR_AVX512_BLOCK(10, b2, 2);
+  CHACHA20_XOR_AVX512_BLOCK(11, b3, 2);
+  CHACHA20_XOR_AVX512_BLOCK(12, b0, 3);
+  CHACHA20_XOR_AVX512_BLOCK(13, b1, 3);
+  CHACHA20_XOR_AVX512_BLOCK(14, b2, 3);
+  CHACHA20_XOR_AVX512_BLOCK(15, b3, 3);
+#undef CHACHA20_XOR_AVX512_BLOCK
+}
+
+/* Process sixteen independent blocks across the sixteen 32-bit SIMD lanes. */
+static C2T_TARGET_AVX512 void
+chacha20_crypt_16blocks(const uint32_t state[restrict 16],
+                        const unsigned char *input, unsigned char *output) {
+  __m512i x0 = _mm512_set1_epi32((int)state[0]);
+  __m512i x1 = _mm512_set1_epi32((int)state[1]);
+  __m512i x2 = _mm512_set1_epi32((int)state[2]);
+  __m512i x3 = _mm512_set1_epi32((int)state[3]);
+  __m512i x4 = _mm512_set1_epi32((int)state[4]);
+  __m512i x5 = _mm512_set1_epi32((int)state[5]);
+  __m512i x6 = _mm512_set1_epi32((int)state[6]);
+  __m512i x7 = _mm512_set1_epi32((int)state[7]);
+  __m512i x8 = _mm512_set1_epi32((int)state[8]);
+  __m512i x9 = _mm512_set1_epi32((int)state[9]);
+  __m512i x10 = _mm512_set1_epi32((int)state[10]);
+  __m512i x11 = _mm512_set1_epi32((int)state[11]);
+  __m512i x12 = CHACHA20_COUNTERS_AVX512(state[12]);
+  __m512i x13 = _mm512_set1_epi32((int)state[13]);
+  __m512i x14 = _mm512_set1_epi32((int)state[14]);
+  __m512i x15 = _mm512_set1_epi32((int)state[15]);
+
+  for (size_t i = 0; i < 10; ++i) {
+    CHACHA20_QUARTERROUND_AVX512(x0, x4, x8, x12);
+    CHACHA20_QUARTERROUND_AVX512(x1, x5, x9, x13);
+    CHACHA20_QUARTERROUND_AVX512(x2, x6, x10, x14);
+    CHACHA20_QUARTERROUND_AVX512(x3, x7, x11, x15);
+    CHACHA20_QUARTERROUND_AVX512(x0, x5, x10, x15);
+    CHACHA20_QUARTERROUND_AVX512(x1, x6, x11, x12);
+    CHACHA20_QUARTERROUND_AVX512(x2, x7, x8, x13);
+    CHACHA20_QUARTERROUND_AVX512(x3, x4, x9, x14);
+  }
+
+  /* Reload the compact scalar state after the rounds instead of keeping a
+   * second copy in ZMM registers, which would force round-state spills. */
+  const volatile uint32_t *original = state;
+#define CHACHA20_ADD_ORIGINAL_AVX512(n)                                       \
+  x##n = _mm512_add_epi32(x##n, _mm512_set1_epi32((int)original[n]))
+  CHACHA20_ADD_ORIGINAL_AVX512(0);
+  CHACHA20_ADD_ORIGINAL_AVX512(1);
+  CHACHA20_ADD_ORIGINAL_AVX512(2);
+  CHACHA20_ADD_ORIGINAL_AVX512(3);
+  CHACHA20_ADD_ORIGINAL_AVX512(4);
+  CHACHA20_ADD_ORIGINAL_AVX512(5);
+  CHACHA20_ADD_ORIGINAL_AVX512(6);
+  CHACHA20_ADD_ORIGINAL_AVX512(7);
+  CHACHA20_ADD_ORIGINAL_AVX512(8);
+  CHACHA20_ADD_ORIGINAL_AVX512(9);
+  CHACHA20_ADD_ORIGINAL_AVX512(10);
+  CHACHA20_ADD_ORIGINAL_AVX512(11);
+  uint32_t final_counter = original[12];
+  x12 = _mm512_add_epi32(x12, CHACHA20_COUNTERS_AVX512(final_counter));
+  CHACHA20_ADD_ORIGINAL_AVX512(13);
+  CHACHA20_ADD_ORIGINAL_AVX512(14);
+  CHACHA20_ADD_ORIGINAL_AVX512(15);
+#undef CHACHA20_ADD_ORIGINAL_AVX512
+
+  chacha20_xor_16words(x0, x1, x2, x3, input + 0, output + 0);
+  chacha20_xor_16words(x4, x5, x6, x7, input + 16, output + 16);
+  chacha20_xor_16words(x8, x9, x10, x11, input + 32, output + 32);
+  chacha20_xor_16words(x12, x13, x14, x15, input + 48, output + 48);
+  _mm256_zeroupper();
+}
+
+static int chacha20_has_avx512(void) {
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_cpu_supports("avx512f") != 0;
+#else
+  return 1;
+#endif
+}
+#endif
+
 #if defined(C2T_HAS_AVX2_DISPATCH)
 #define ROTL32_AVX2(v, n)                                                     \
   _mm256_or_si256(_mm256_slli_epi32((v), (n)),                               \
@@ -672,6 +822,15 @@ static void chacha20_crypt(const unsigned char key[32],
   chacha20_init_state(state, key, nonce, counter);
 
   size_t offset = 0;
+#if defined(C2T_HAS_AVX512_DISPATCH)
+  if (chacha20_has_avx512()) {
+    while (len - offset >= 1024) {
+      chacha20_crypt_16blocks(state, input + offset, output + offset);
+      state[12] += 16U;
+      offset += 1024;
+    }
+  }
+#endif
 #if defined(C2T_HAS_AVX2_DISPATCH)
   if (chacha20_has_avx2()) {
     while (len - offset >= 512) {
