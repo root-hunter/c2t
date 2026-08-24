@@ -21,6 +21,7 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <ImageIO/ImageIO.h>
+#import <dlfcn.h>
 #include "screenshot.h"
 #include "../logging/logging.h"
 
@@ -33,6 +34,8 @@ static CGDirectDisplayID mac_displays[MAX_MAC_DISPLAYS];
 static uint32_t mac_display_count = 0;
 static char selected_display_target[64] = "all";
 static int selected_display_index = -1;
+
+typedef CGImageRef (*c2t_CGWindowListCreateImage_t)(CGRect, CGWindowListOption, CGWindowID, CGWindowImageOption);
 
 static void refresh_macos_displays(void) {
   mac_display_count = 0;
@@ -63,15 +66,21 @@ int screenshot_capture_macos_display(const char *target,
     capture_rect = CGRectInfinite;
   }
 
-  /* CGWindowListCreateImage is compatible with modern macOS (macOS 10.5 through macOS 15+) */
-  CGImageRef image = CGWindowListCreateImage(
-      capture_rect,
-      kCGWindowListOptionOnScreenOnly,
-      kCGNullWindowID,
-      kCGWindowImageDefault);
+  CGImageRef image = NULL;
+
+  /* 1. Dynamic fallback to CGWindowListCreateImage via dlsym to prevent compile-time SDK deprecation/obsoletion errors on Xcode 16/26 / macOS 15+ */
+  c2t_CGWindowListCreateImage_t pCGWindowListCreateImage =
+      (c2t_CGWindowListCreateImage_t)dlsym(RTLD_DEFAULT, "CGWindowListCreateImage");
+  if (pCGWindowListCreateImage) {
+    image = pCGWindowListCreateImage(
+        capture_rect,
+        kCGWindowListOptionOnScreenOnly,
+        kCGNullWindowID,
+        kCGWindowImageDefault);
+  }
 
   if (!image) {
-    c2t_log_warning("screenshot", "CGWindowListCreateImage failed; check Screen Recording permissions in System Settings");
+    c2t_log_warning("screenshot", "Screen capture failed on macOS; verify Screen Recording permissions in System Settings");
     return 0;
   }
 
