@@ -149,41 +149,94 @@ static int is_png_empty_or_black(const void *data, size_t size) {
   return 0;
 }
 
-/* Attempt XDG Desktop Portal Screenshot via inline Python/DBus script */
-static int capture_via_xdg_portal(void **out_data, size_t *out_size) {
-  const char *cmd =
-      "python3 -c \""
-      "import dbus, urllib.parse, sys\\n"
-      "from dbus.mainloop.glib import DBusGMainLoop\\n"
-      "from gi.repository import GLib\\n"
-      "DBusGMainLoop(set_as_default=True)\\n"
-      "try:\\n"
-      "    bus = dbus.SessionBus()\\n"
-      "    loop = GLib.MainLoop()\\n"
-      "    def on_r(res, d):\\n"
-      "        if res == 0 and 'uri' in d:\\n"
-      "            u = str(d['uri'])\\n"
-      "            p = urllib.parse.unquote(u[7:]) if u.startswith('file://') else u\\n"
-      "            print(p)\\n"
-      "        loop.quit()\\n"
-      "    portal = bus.get_object('org.freedesktop.portal.Desktop', '/org/freedesktop/portal/desktop')\\n"
-      "    iface = dbus.Interface(portal, 'org.freedesktop.portal.Screenshot')\\n"
-      "    req = iface.Screenshot('', {'interactive': dbus.Boolean(False), 'handle_token': dbus.String('c2t_sh')})\\n"
-      "    bus.add_signal_receiver(on_r, signal_name='Response', dbus_interface='org.freedesktop.portal.Request', path=req)\\n"
-      "    GLib.timeout_add_seconds(2, loop.quit)\\n"
-      "    loop.run()\\n"
-      "except Exception:\\n"
-      "    sys.exit(1)\" 2>/dev/null";
+static void ensure_desktop_session_env(void) {
+  uid_t uid = getuid();
+  char runtime_dir[128];
+  snprintf(runtime_dir, sizeof(runtime_dir), "/run/user/%u", (unsigned int)uid);
 
+  if (!getenv("XDG_RUNTIME_DIR") && access(runtime_dir, F_OK) == 0) {
+    setenv("XDG_RUNTIME_DIR", runtime_dir, 0);
+  }
+
+  if (!getenv("DBUS_SESSION_BUS_ADDRESS")) {
+    char bus_path[160];
+    snprintf(bus_path, sizeof(bus_path), "unix:path=%s/bus", runtime_dir);
+    if (access(runtime_dir, F_OK) == 0) {
+      setenv("DBUS_SESSION_BUS_ADDRESS", bus_path, 0);
+    }
+  }
+
+  if (!getenv("WAYLAND_DISPLAY")) {
+    char wayland_sock[160];
+    snprintf(wayland_sock, sizeof(wayland_sock), "%s/wayland-0", runtime_dir);
+    if (access(wayland_sock, F_OK) == 0) {
+      setenv("WAYLAND_DISPLAY", "wayland-0", 0);
+    }
+  }
+
+  if (!getenv("DISPLAY")) {
+    if (access("/tmp/.X11-unix/X0", F_OK) == 0) {
+      setenv("DISPLAY", ":0", 0);
+    } else if (access("/tmp/.X11-unix/X1", F_OK) == 0) {
+      setenv("DISPLAY", ":1", 0);
+    }
+  }
+}
+
+/* Attempt XDG Desktop Portal Screenshot via Python/DBus script with unique handle token */
+static int capture_via_xdg_portal(void **out_data, size_t *out_size) {
+  ensure_desktop_session_env();
+
+  static const char script[] =
+      "import dbus, urllib.parse, sys, time\n"
+      "from dbus.mainloop.glib import DBusGMainLoop\n"
+      "from gi.repository import GLib\n"
+      "DBusGMainLoop(set_as_default=True)\n"
+      "try:\n"
+      "    bus = dbus.SessionBus()\n"
+      "    loop = GLib.MainLoop()\n"
+      "    def on_r(res, d):\n"
+      "        if res == 0 and 'uri' in d:\n"
+      "            u = str(d['uri'])\n"
+      "            p = urllib.parse.unquote(u[7:]) if u.startswith('file://') else u\n"
+      "            print(p)\n"
+      "            sys.stdout.flush()\n"
+      "        loop.quit()\n"
+      "    portal = bus.get_object('org.freedesktop.portal.Desktop', '/org/freedesktop/portal/desktop')\n"
+      "    iface = dbus.Interface(portal, 'org.freedesktop.portal.Screenshot')\n"
+      "    req = iface.Screenshot('', {'interactive': dbus.Boolean(False), 'handle_token': dbus.String(f'c2t_{int(time.time()*1000)}')})\n"
+      "    bus.add_signal_receiver(on_r, signal_name='Response', dbus_interface='org.freedesktop.portal.Request', path=req)\n"
+      "    GLib.timeout_add_seconds(4, loop.quit)\n"
+      "    loop.run()\n"
+      "except Exception:\n"
+      "    sys.exit(1)\n";
+
+  char tmp_script[] = "/tmp/c2t_portal_XXXXXX.py";
+  int fd = mkstemps(tmp_script, 3);
+  if (fd < 0) return 0;
+  if (write(fd, script, sizeof(script) - 1) < 0) {
+    close(fd);
+    unlink(tmp_script);
+    return 0;
+  }
+  close(fd);
+
+  char cmd[512];
+  snprintf(cmd, sizeof(cmd), "python3 %s 2>/dev/null", tmp_script);
   FILE *pipe = popen(cmd, "r");
-  if (!pipe) return 0;
+  if (!pipe) {
+    unlink(tmp_script);
+    return 0;
+  }
 
   char captured_path[1024] = {};
   if (fgets(captured_path, sizeof(captured_path), pipe) == nullptr) {
     pclose(pipe);
+    unlink(tmp_script);
     return 0;
   }
   pclose(pipe);
+  unlink(tmp_script);
 
   size_t len = strlen(captured_path);
   while (len > 0 && (captured_path[len - 1] == '\r' || captured_path[len - 1] == '\n')) {
