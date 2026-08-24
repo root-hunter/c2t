@@ -26,7 +26,18 @@
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#pragma GCC diagnostic ignored "-Wshadow"
 #endif
+
+#define STB_IMAGE_STATIC
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_BMP
+#include "stb_image.h"
 
 #define STB_IMAGE_WRITE_STATIC
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -414,4 +425,30 @@ int screenshot_encode_image(c2t_image_format_t format,
   *out_data = ctx.data;
   *out_size = ctx.size;
   return 1;
+}
+
+int screenshot_transcode_image(const void *in_data, size_t in_size,
+                               c2t_image_format_t target_format,
+                               int quality,
+                               void **out_data, size_t *out_size) {
+  if (out_data)
+    *out_data = NULL;
+  if (out_size)
+    *out_size = 0;
+  if (!in_data || in_size == 0 || !out_data || !out_size || in_size > (size_t)INT_MAX)
+    return 0;
+
+  int w = 0, h = 0, comp = 0;
+  stbi_uc *pixels = stbi_load_from_memory((const stbi_uc *)in_data, (int)in_size,
+                                         &w, &h, &comp, 4);
+  if (!pixels || w <= 0 || h <= 0) {
+    if (pixels)
+      stbi_image_free(pixels);
+    return 0;
+  }
+
+  int success = screenshot_encode_image(target_format, (uint32_t)w, (uint32_t)h,
+                                       pixels, 0, quality, out_data, out_size);
+  stbi_image_free(pixels);
+  return success;
 }

@@ -46,6 +46,11 @@ int screenshot_encode_image(c2t_image_format_t format,
                             int quality, void **out_data,
                             size_t *out_size);
 
+int screenshot_transcode_image(const void *in_data, size_t in_size,
+                               c2t_image_format_t target_format,
+                               int quality,
+                               void **out_data, size_t *out_size);
+
 #ifdef __cplusplus
 }
 #endif

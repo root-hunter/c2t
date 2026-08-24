@@ -480,10 +480,6 @@ static int capture_via_xdg_portal(void **out_data, size_t *out_size) {
         if (captured) {
           dbus_connection_close(connection);
           dbus_connection_unref(connection);
-          c2t_log_info("screenshot",
-                       "Captured Linux Wayland desktop screenshot via native "
-                       "XDG Portal (%zu bytes PNG)",
-                       *out_size);
           return 1;
         }
         goto cleanup_connection;
@@ -498,16 +494,77 @@ cleanup_connection:
   return 0;
 }
 
+static int finalize_portal_capture(void **out_data, size_t *out_size,
+                                   const char **out_mime_type,
+                                   const char **out_filename,
+                                   const char *backend_name) {
+  if (!out_data || !*out_data || !out_size || *out_size == 0)
+    return 0;
+
+  c2t_image_format_t format = screenshot_get_format();
+  int quality = screenshot_get_quality();
+  if (quality <= 0) quality = 85;
+
+  if (format != C2T_IMAGE_FORMAT_PNG) {
+    void *trans_data = nullptr;
+    size_t trans_size = 0;
+    if (screenshot_transcode_image(*out_data, *out_size, format, quality,
+                                   &trans_data, &trans_size)) {
+      free(*out_data);
+      *out_data = trans_data;
+      *out_size = trans_size;
+    }
+  }
+
+  if (out_mime_type) *out_mime_type = screenshot_format_mime(format);
+  if (out_filename) *out_filename = screenshot_format_filename(format);
+
+  c2t_log_info("screenshot",
+               "Captured Linux Wayland desktop screenshot via %s (%zu bytes %s)",
+               backend_name, *out_size, screenshot_format_to_string(format));
+  return 1;
+}
+
 static int capture_via_portal(void **out_data, size_t *out_size,
                               const char **out_mime_type,
                               const char **out_filename) {
   if (!capture_via_xdg_portal(out_data, out_size)) return 0;
-  *out_mime_type = "image/png";
-  *out_filename = "screenshot.png";
-  return 1;
+  return finalize_portal_capture(out_data, out_size, out_mime_type,
+                                 out_filename, "native XDG Portal");
 }
 
 #else
+
+static int finalize_portal_capture(void **out_data, size_t *out_size,
+                                   const char **out_mime_type,
+                                   const char **out_filename,
+                                   const char *backend_name) {
+  if (!out_data || !*out_data || !out_size || *out_size == 0)
+    return 0;
+
+  c2t_image_format_t format = screenshot_get_format();
+  int quality = screenshot_get_quality();
+  if (quality <= 0) quality = 85;
+
+  if (format != C2T_IMAGE_FORMAT_PNG) {
+    void *trans_data = nullptr;
+    size_t trans_size = 0;
+    if (screenshot_transcode_image(*out_data, *out_size, format, quality,
+                                   &trans_data, &trans_size)) {
+      free(*out_data);
+      *out_data = trans_data;
+      *out_size = trans_size;
+    }
+  }
+
+  if (out_mime_type) *out_mime_type = screenshot_format_mime(format);
+  if (out_filename) *out_filename = screenshot_format_filename(format);
+
+  c2t_log_info("screenshot",
+               "Captured Linux Wayland desktop screenshot via %s (%zu bytes %s)",
+               backend_name, *out_size, screenshot_format_to_string(format));
+  return 1;
+}
 
 static int capture_via_portal(void **out_data, size_t *out_size,
                               const char **out_mime_type,
@@ -634,13 +691,8 @@ static int capture_via_python_portal(void **out_data, size_t *out_size,
   unlink(captured_path);
   if (!captured) return 0;
 
-  *out_mime_type = "image/png";
-  *out_filename = "screenshot.png";
-  c2t_log_info("screenshot",
-               "Captured Linux Wayland desktop screenshot via Python XDG "
-               "Portal fallback (%zu bytes PNG)",
-               *out_size);
-  return 1;
+  return finalize_portal_capture(out_data, out_size, out_mime_type,
+                                 out_filename, "Python XDG Portal fallback");
 }
 
 int screenshot_capture_x11(void **out_data, size_t *out_size,

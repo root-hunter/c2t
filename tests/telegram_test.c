@@ -1558,12 +1558,33 @@ int main(void) {
     }
     free(hdr_out);
 
+    /* 6. Test Transcode from PNG to Plain BMP */
+    void *src_png = nullptr;
+    size_t src_png_len = 0;
+    if (!screenshot_encode_image(C2T_IMAGE_FORMAT_PNG, 16, 16, test_pixels, 1, 85, &src_png, &src_png_len) || !src_png)
+      return fail("screenshot_encode_image helper for transcode failed");
+
+    void *trans_bmp = nullptr;
+    size_t trans_bmp_len = 0;
+    if (!screenshot_transcode_image(src_png, src_png_len, C2T_IMAGE_FORMAT_PLAIN, 85, &trans_bmp, &trans_bmp_len) ||
+        !trans_bmp || trans_bmp_len < 32 || memcmp(trans_bmp, "BM", 2) != 0) {
+      free(src_png);
+      if (trans_bmp) free(trans_bmp);
+      return fail("screenshot_transcode_image from PNG to BMP failed");
+    }
+    free(src_png);
+    free(trans_bmp);
+
     /* Test contract on invalid inputs */
     void *bad_out = (void *)1;
     size_t bad_len = 123;
     if (screenshot_encode_image(C2T_IMAGE_FORMAT_PNG, 0, 16, test_pixels, 0, 85, &bad_out, &bad_len) ||
         bad_out != nullptr || bad_len != 0)
       return fail("screenshot_encode_image invalid-input contract mismatch");
+
+    if (screenshot_transcode_image(nullptr, 0, C2T_IMAGE_FORMAT_PLAIN, 85, &bad_out, &bad_len) ||
+        bad_out != nullptr || bad_len != 0)
+      return fail("screenshot_transcode_image invalid-input contract mismatch");
   }
 
   (void)screenshot_get_total_captures();
