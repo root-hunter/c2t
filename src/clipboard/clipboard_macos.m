@@ -181,9 +181,15 @@ int clipboard_listen(void) {
   @autoreleasepool {
     NSPasteboard *pasteboard = NSPasteboard.generalPasteboard;
     NSInteger change_count = pasteboard.changeCount;
+    time_t last_heartbeat = 0;
     c2t_log_info("macos", "Listening for clipboard changes");
 
     while (!c2t_runtime_stop_requested()) {
+      time_t now = time(NULL);
+      if (now != last_heartbeat) {
+        c2t_runtime_heartbeat();
+        last_heartbeat = now;
+      }
       struct timespec delay = {.tv_sec = 0,
                                .tv_nsec = C2T_PASTEBOARD_POLL_MS * 1000000L};
       while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {

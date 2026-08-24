@@ -30,14 +30,20 @@
 #endif
 #include <errno.h>
 #include <limits.h>
+#include <poll.h>
 #include <pthread.h>
+#include <signal.h>
+#include <spawn.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <xcb/xcb.h>
+
+extern char **environ;
 
 static pthread_mutex_t display_lock = PTHREAD_MUTEX_INITIALIZER;
 #ifdef C2T_HAS_DBUS_ABI
@@ -115,8 +121,6 @@ static int refresh_displays_x11(void) {
   return cached_display_count;
 }
 
-#ifdef C2T_HAS_DBUS_ABI
-
 /* Fast helper to read an image file from disk and return its allocated buffer */
 static int read_image_file_to_buffer(const char *filepath, void **out_data, size_t *out_size) {
   if (!filepath || !*filepath) return 0;
@@ -184,6 +188,8 @@ static void ensure_desktop_session_env(void) {
     }
   }
 }
+
+#ifdef C2T_HAS_DBUS_ABI
 
 #define C2T_DBUS_SYMBOLS(X)                                                   \
   X(dbus_threads_init_default)                                               \
@@ -515,6 +521,128 @@ static int capture_via_portal(void **out_data, size_t *out_size,
 
 #endif
 
+/* Last-resort Wayland fallback. It intentionally stays outside the normal
+ * path: no shell is involved and Python is started only after native portal
+ * capture has failed. */
+static int capture_via_python_portal(void **out_data, size_t *out_size,
+                                     const char **out_mime_type,
+                                     const char **out_filename) {
+  static const char script[] =
+      "import dbus, urllib.parse, sys, time\n"
+      "from dbus.mainloop.glib import DBusGMainLoop\n"
+      "from gi.repository import GLib\n"
+      "DBusGMainLoop(set_as_default=True)\n"
+      "try:\n"
+      " bus=dbus.SessionBus(); loop=GLib.MainLoop()\n"
+      " def done(code,data):\n"
+      "  if code==0 and 'uri' in data:\n"
+      "   uri=str(data['uri']); print(urllib.parse.unquote(uri[7:]) if uri.startswith('file://') else uri, flush=True)\n"
+      "  loop.quit()\n"
+      " portal=bus.get_object('org.freedesktop.portal.Desktop','/org/freedesktop/portal/desktop')\n"
+      " iface=dbus.Interface(portal,'org.freedesktop.portal.Screenshot')\n"
+      " token='c2t_py_%d_%d' % (time.time_ns(), id(loop))\n"
+      " request=iface.Screenshot('',{'interactive':dbus.Boolean(False),'handle_token':dbus.String(token)})\n"
+      " bus.add_signal_receiver(done,signal_name='Response',dbus_interface='org.freedesktop.portal.Request',path=request)\n"
+      " GLib.timeout_add_seconds(15,loop.quit); loop.run()\n"
+      "except Exception:\n"
+      " sys.exit(1)\n";
+
+  ensure_desktop_session_env();
+  int output_pipe[2];
+  if (pipe(output_pipe) != 0) return 0;
+
+  posix_spawn_file_actions_t actions;
+  int spawn_error = posix_spawn_file_actions_init(&actions);
+  int actions_initialized = spawn_error == 0;
+  if (spawn_error == 0)
+    spawn_error = posix_spawn_file_actions_addclose(&actions, output_pipe[0]);
+  if (spawn_error == 0)
+    spawn_error = posix_spawn_file_actions_adddup2(
+        &actions, output_pipe[1], STDOUT_FILENO);
+  if (spawn_error == 0)
+    spawn_error = posix_spawn_file_actions_addclose(&actions, output_pipe[1]);
+
+  char *const arguments[] = {(char *)"python3", (char *)"-c",
+                             (char *)script, nullptr};
+  pid_t child = -1;
+  if (spawn_error == 0)
+    spawn_error = posix_spawnp(&child, arguments[0], &actions, nullptr,
+                               arguments, environ);
+  if (actions_initialized) posix_spawn_file_actions_destroy(&actions);
+  if (spawn_error != 0) {
+    close(output_pipe[0]);
+    close(output_pipe[1]);
+    return 0;
+  }
+
+  close(output_pipe[1]);
+  char captured_path[PATH_MAX] = {};
+  size_t used = 0;
+  int remaining_ms = 20000;
+  int child_status = 0;
+  int child_finished = 0;
+  while (remaining_ms > 0 && used + 1 < sizeof(captured_path)) {
+    struct pollfd descriptor = {
+        .fd = output_pipe[0], .events = POLLIN | POLLHUP, .revents = 0};
+    int slice_ms = remaining_ms < 250 ? remaining_ms : 250;
+    int ready = poll(&descriptor, 1, slice_ms);
+    remaining_ms -= slice_ms;
+    if (ready > 0 && (descriptor.revents & (POLLIN | POLLHUP))) {
+      ssize_t count = read(output_pipe[0], captured_path + used,
+                           sizeof(captured_path) - used - 1);
+      if (count > 0) {
+        used += (size_t)count;
+        captured_path[used] = '\0';
+        if (strchr(captured_path, '\n')) break;
+      } else if (count == 0) {
+        break;
+      }
+    } else if (ready < 0 && errno != EINTR) {
+      break;
+    }
+    pid_t waited = waitpid(child, &child_status, WNOHANG);
+    if (waited == child) {
+      child_finished = 1;
+      if (used == 0) break;
+    }
+  }
+  close(output_pipe[0]);
+
+  if (!child_finished) {
+    pid_t waited = waitpid(child, &child_status, WNOHANG);
+    child_finished = waited == child;
+    for (unsigned int attempt = 0; !child_finished && attempt < 20;
+         ++attempt) {
+      struct timespec delay = {.tv_sec = 0, .tv_nsec = 50000000L};
+      while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {
+      }
+      waited = waitpid(child, &child_status, WNOHANG);
+      child_finished = waited == child;
+    }
+    if (!child_finished) {
+      kill(child, SIGKILL);
+      while (waitpid(child, &child_status, 0) < 0 && errno == EINTR) {
+      }
+    }
+  }
+
+  char *line_end = strpbrk(captured_path, "\r\n");
+  if (line_end) *line_end = '\0';
+  if (!captured_path[0]) return 0;
+
+  int captured = read_image_file_to_buffer(captured_path, out_data, out_size);
+  unlink(captured_path);
+  if (!captured) return 0;
+
+  *out_mime_type = "image/png";
+  *out_filename = "screenshot.png";
+  c2t_log_info("screenshot",
+               "Captured Linux Wayland desktop screenshot via Python XDG "
+               "Portal fallback (%zu bytes PNG)",
+               *out_size);
+  return 1;
+}
+
 int screenshot_capture_x11(void **out_data, size_t *out_size,
                            const char **out_mime_type,
                            const char **out_filename) {
@@ -593,7 +721,14 @@ int screenshot_capture_linux_display(const char *target,
     return 1;
   }
 
-  c2t_log_warning("screenshot", "Native Linux capture methods (XDG Portal and X11/XCB) failed");
+  if (portal_attempted && capture_via_python_portal(
+                              out_data, out_size, out_mime_type, out_filename)) {
+    return 1;
+  }
+
+  c2t_log_warning("screenshot",
+                  "Linux capture methods (native XDG Portal, X11/XCB and "
+                  "Wayland Python fallback) failed");
   return 0;
 }
 

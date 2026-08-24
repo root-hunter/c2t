@@ -482,6 +482,7 @@ static int clipboard_listen_once(void) {
   xcb_generic_event_t *event;
 
   while (!c2t_runtime_stop_requested()) {
+    c2t_runtime_heartbeat();
     event = xcb_poll_for_event(connection);
     if (!event) {
       if (xcb_connection_has_error(connection))
@@ -500,7 +501,7 @@ static int clipboard_listen_once(void) {
         nfds = 2;
       }
 
-      int polled = poll(fds, (nfds_t)nfds, -1);
+      int polled = poll(fds, (nfds_t)nfds, 1000);
       if (polled < 0 && errno != EINTR)
         break;
       continue;
@@ -575,9 +576,12 @@ int clipboard_listen(void) {
     if (retry < 5)
       ++retry;
     c2t_log_warning("x11", "Reconnecting to X11 in %u seconds", delay);
-    struct timespec duration = {.tv_sec = (time_t)delay, .tv_nsec = 0};
-    while (!c2t_runtime_stop_requested() &&
-           nanosleep(&duration, &duration) != 0 && errno == EINTR) {
+    for (unsigned int elapsed = 0;
+         elapsed < delay && !c2t_runtime_stop_requested(); ++elapsed) {
+      c2t_runtime_heartbeat();
+      struct timespec duration = {.tv_sec = 1, .tv_nsec = 0};
+      while (nanosleep(&duration, &duration) != 0 && errno == EINTR) {
+      }
     }
   }
   return 0;
