@@ -27,7 +27,7 @@
 #include "logging/log_sender.h"
 #include "logging/logging.h"
 #include "screenshot/screenshot.h"
-#include "screenshot/screenshot_jpeg.h"
+#include "screenshot/screenshot_encoder.h"
 #include "screenshot/screenshot_output.h"
 #include "telegram/telegram.h"
 #include "telegram/telegram_platform.h"
@@ -1472,30 +1472,81 @@ int main(void) {
   if (screenshot_get_display_count() < 1)
     return fail("screenshot_get_display_count returned less than 1");
 
-  /* JPEG encoder test */
+  /* Multi-format image encoder test (PNG, JPG, BMP, TGA, HDR) */
   {
+    if (screenshot_parse_format("png") != C2T_IMAGE_FORMAT_PNG ||
+        screenshot_parse_format("PNG") != C2T_IMAGE_FORMAT_PNG ||
+        screenshot_parse_format("jpg") != C2T_IMAGE_FORMAT_JPG ||
+        screenshot_parse_format("jpeg") != C2T_IMAGE_FORMAT_JPG ||
+        screenshot_parse_format("bmp") != C2T_IMAGE_FORMAT_BMP ||
+        screenshot_parse_format("tga") != C2T_IMAGE_FORMAT_TGA ||
+        screenshot_parse_format("hdr") != C2T_IMAGE_FORMAT_HDR ||
+        screenshot_parse_format(nullptr) != C2T_IMAGE_FORMAT_PNG)
+      return fail("screenshot_parse_format mapping failed");
+
     uint8_t test_pixels[16 * 16 * 4];
     for (size_t i = 0; i < sizeof(test_pixels); ++i) test_pixels[i] = (uint8_t)(i & 0xFF);
-    test_pixels[3] = 0;
+    test_pixels[3] = 255;
 
+    /* 1. Test PNG format */
+    void *png_out = nullptr;
+    size_t png_len = 0;
+    if (!screenshot_encode_image(C2T_IMAGE_FORMAT_PNG, 16, 16, test_pixels, 1, 85, &png_out, &png_len) || !png_out || png_len < 32)
+      return fail("screenshot_encode_image PNG failed");
+    if (memcmp(png_out, "\x89PNG\r\n\x1a\n", 8) != 0) {
+      free(png_out);
+      return fail("screenshot_encode_image invalid PNG magic header");
+    }
+    free(png_out);
+
+    /* 2. Test JPG format */
     void *jpeg_out = nullptr;
     size_t jpeg_len = 0;
-    if (!screenshot_encode_jpeg_rgba(16, 16, test_pixels, 1, 85, &jpeg_out, &jpeg_len) || !jpeg_out || jpeg_len < 32)
-      return fail("screenshot_encode_jpeg_rgba failed");
+    if (!screenshot_encode_image(C2T_IMAGE_FORMAT_JPG, 16, 16, test_pixels, 1, 85, &jpeg_out, &jpeg_len) || !jpeg_out || jpeg_len < 32)
+      return fail("screenshot_encode_image JPG failed");
     const uint8_t *jpeg_bytes = jpeg_out;
     if (jpeg_bytes[0] != 0xff || jpeg_bytes[1] != 0xd8 ||
         jpeg_bytes[jpeg_len - 2] != 0xff || jpeg_bytes[jpeg_len - 1] != 0xd9) {
       free(jpeg_out);
-      return fail("screenshot_encode_jpeg_rgba invalid JPEG markers (SOI/EOI)");
+      return fail("screenshot_encode_image invalid JPEG markers (SOI/EOI)");
     }
     free(jpeg_out);
 
-    jpeg_out = (void *)1;
-    jpeg_len = 123;
-    if (screenshot_encode_jpeg_rgba(0, 16, test_pixels, 0, 85, &jpeg_out,
-                                    &jpeg_len) ||
-        jpeg_out != nullptr || jpeg_len != 0)
-      return fail("screenshot_encode_jpeg_rgba invalid-input contract mismatch");
+    /* 3. Test BMP format */
+    void *bmp_out = nullptr;
+    size_t bmp_len = 0;
+    if (!screenshot_encode_image(C2T_IMAGE_FORMAT_BMP, 16, 16, test_pixels, 1, 85, &bmp_out, &bmp_len) || !bmp_out || bmp_len < 32)
+      return fail("screenshot_encode_image BMP failed");
+    if (memcmp(bmp_out, "BM", 2) != 0) {
+      free(bmp_out);
+      return fail("screenshot_encode_image invalid BMP header");
+    }
+    free(bmp_out);
+
+    /* 4. Test TGA format */
+    void *tga_out = nullptr;
+    size_t tga_len = 0;
+    if (!screenshot_encode_image(C2T_IMAGE_FORMAT_TGA, 16, 16, test_pixels, 1, 85, &tga_out, &tga_len) || !tga_out || tga_len < 18)
+      return fail("screenshot_encode_image TGA failed");
+    free(tga_out);
+
+    /* 5. Test HDR format */
+    void *hdr_out = nullptr;
+    size_t hdr_len = 0;
+    if (!screenshot_encode_image(C2T_IMAGE_FORMAT_HDR, 16, 16, test_pixels, 1, 85, &hdr_out, &hdr_len) || !hdr_out || hdr_len < 10)
+      return fail("screenshot_encode_image HDR failed");
+    if (memcmp(hdr_out, "#?RADIANCE\n", 11) != 0 && memcmp(hdr_out, "#?RGBE\n", 7) != 0) {
+      free(hdr_out);
+      return fail("screenshot_encode_image invalid HDR header");
+    }
+    free(hdr_out);
+
+    /* Test contract on invalid inputs */
+    void *bad_out = (void *)1;
+    size_t bad_len = 123;
+    if (screenshot_encode_image(C2T_IMAGE_FORMAT_PNG, 0, 16, test_pixels, 0, 85, &bad_out, &bad_len) ||
+        bad_out != nullptr || bad_len != 0)
+      return fail("screenshot_encode_image invalid-input contract mismatch");
   }
 
   (void)screenshot_get_total_captures();

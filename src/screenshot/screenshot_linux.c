@@ -18,7 +18,8 @@
 #if defined(__linux__) || defined(__unix__)
 
 #include "screenshot.h"
-#include "screenshot_jpeg.h"
+#include "screenshot_encoder.h"
+#include "../config/config.h"
 #include "../logging/logging.h"
 
 #include <ctype.h>
@@ -359,16 +360,20 @@ int screenshot_capture_linux_display(const char *target,
         if (reply) {
           uint8_t *pixel_data = xcb_get_image_data(reply);
           if (pixel_data) {
+            c2t_image_format_t format = screenshot_parse_format(c2t_config_get()->screenshot_format);
+            int quality = c2t_config_get()->screenshot_quality;
+            if (quality <= 0) quality = 85;
+
             void *img_buf = nullptr;
             size_t img_size = 0;
-            if (screenshot_encode_jpeg_rgba((uint32_t)width, (uint32_t)height, pixel_data, 1, 85, &img_buf, &img_size)) {
+            if (screenshot_encode_image(format, (uint32_t)width, (uint32_t)height, pixel_data, 1, quality, &img_buf, &img_size)) {
               free(reply);
               xcb_disconnect(conn);
               *out_data = img_buf;
               *out_size = img_size;
-              *out_mime_type = "image/jpeg";
-              *out_filename = "screenshot.jpg";
-              c2t_log_info("screenshot", "Captured %ux%u Linux X11 desktop screenshot (%zu bytes JPEG)", width, height, img_size);
+              *out_mime_type = screenshot_format_mime(format);
+              *out_filename = screenshot_format_filename(format);
+              c2t_log_info("screenshot", "Captured %ux%u Linux X11 desktop screenshot (%zu bytes %s)", width, height, img_size, screenshot_format_to_string(format));
               return 1;
             }
           }

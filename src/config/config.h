@@ -43,6 +43,8 @@ typedef struct {
   int disable_keyboard;
   int disable_clipboard;
   int disable_screenshot;
+  const char *screenshot_format;
+  int screenshot_quality;
   size_t keyboard_flush_ms;
   int keyboard_shortcuts;
   const char *keyboard_layout;

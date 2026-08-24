@@ -23,7 +23,7 @@
 
 #include "../src/crypto/crypto.h"
 #include "../src/logging/logging.h"
-#include "../src/screenshot/screenshot_jpeg.h"
+#include "../src/screenshot/screenshot_encoder.h"
 #include "../src/telegram/telegram.h"
 
 typedef struct {
@@ -331,14 +331,33 @@ static double benchmark_screenshot_encoder(void)
     }
 
     const size_t iterations = 8;
+
+    /* 1. Benchmark default PNG encoder */
+    double start_png = get_time_sec();
+    size_t png_encoded_bytes = 0;
+    int png_succeeded = 1;
+    for (size_t iteration = 0; iteration < iterations; ++iteration) {
+        void *png = NULL;
+        size_t png_size = 0;
+        if (!screenshot_encode_image(C2T_IMAGE_FORMAT_PNG, width, height, pixels, 1, 85, &png,
+                                     &png_size)) {
+            png_succeeded = 0;
+            break;
+        }
+        png_encoded_bytes += png_size;
+        free(png);
+    }
+    double elapsed_png = get_time_sec() - start_png;
+
+    /* 2. Benchmark JPG encoder (Q85) */
     double start_jpeg = get_time_sec();
     size_t jpeg_encoded_bytes = 0;
     int jpeg_succeeded = 1;
     for (size_t iteration = 0; iteration < iterations; ++iteration) {
         void *jpeg = NULL;
         size_t jpeg_size = 0;
-        if (!screenshot_encode_jpeg_rgba(width, height, pixels, 1, 85, &jpeg,
-                                         &jpeg_size)) {
+        if (!screenshot_encode_image(C2T_IMAGE_FORMAT_JPG, width, height, pixels, 1, 85, &jpeg,
+                                     &jpeg_size)) {
             jpeg_succeeded = 0;
             break;
         }
@@ -348,19 +367,27 @@ static double benchmark_screenshot_encoder(void)
     double elapsed_jpeg = get_time_sec() - start_jpeg;
     free(pixels);
 
-    if (!jpeg_succeeded || elapsed_jpeg <= 0.0)
+    if (!png_succeeded || elapsed_png <= 0.0)
         return 0.0;
 
-    double mpix_s_jpeg = ((double)width * height * iterations / 1000000.0) / elapsed_jpeg;
+    double mpix_s_png = ((double)width * height * iterations / 1000000.0) / elapsed_png;
+    double mpix_s_jpeg = (jpeg_succeeded && elapsed_jpeg > 0.0)
+                             ? ((double)width * height * iterations / 1000000.0) / elapsed_jpeg
+                             : 0.0;
 
-    printf("=== 5. Screenshot JPEG Encoder Performance ===\n");
-    printf("  JPEG (Q85) Speed    : %.2f MPix/s (%.3f s for %zu frames)\n",
+    printf("=== 5. Screenshot Multi-Format Encoder Performance ===\n");
+    printf("  PNG (Default) Speed : %.2f MPix/s (%.3f s for %zu frames)\n",
+           mpix_s_png, elapsed_png, iterations);
+    printf("  PNG Payload Size    : %.2f KB/frame (Total: %.2f MB)\n",
+           (double)png_encoded_bytes / (double)iterations / 1024.0,
+           (double)png_encoded_bytes / (1024.0 * 1024.0));
+    printf("  JPG (Q85) Speed     : %.2f MPix/s (%.3f s for %zu frames)\n",
            mpix_s_jpeg, elapsed_jpeg, iterations);
-    printf("  JPEG Payload Size   : %.2f KB/frame (Total: %.2f MB)\n\n",
+    printf("  JPG Payload Size    : %.2f KB/frame (Total: %.2f MB)\n\n",
            (double)jpeg_encoded_bytes / (double)iterations / 1024.0,
            (double)jpeg_encoded_bytes / (1024.0 * 1024.0));
 
-    return mpix_s_jpeg;
+    return mpix_s_png;
 }
 
 static void write_scaled_markdown_metric(FILE *f, const char *metric,
@@ -405,7 +432,7 @@ static void write_markdown_report(const char *filepath, const bench_results_t *r
                                  res->json_payloads_s, "payloads/sec", " ");
     write_scaled_markdown_metric(f, "Telegram Update Parser",
                                  res->telegram_updates_s, "updates/sec", " ");
-    write_scaled_markdown_metric(f, "Screenshot JPEG Encoder",
+    write_scaled_markdown_metric(f, "Screenshot Image Encoder",
                                  res->screenshot_encode_mpix_s * 1000000.0,
                                  "pixels/sec", " ");
     write_scaled_markdown_metric(f, "Peak Memory (RSS)",

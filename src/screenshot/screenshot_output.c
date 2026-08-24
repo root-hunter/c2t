@@ -146,12 +146,14 @@ static void format_metric_bytes(uint64_t b, char *out, size_t cap) {
 }
 
 #include "../crypto/crypto.h"
+#include "screenshot_encoder.h"
 
 int screenshot_capture_display_and_send(const char *display_target, const char *caption) {
   void *image_data = nullptr;
   size_t image_size = 0;
-  const char *mime_type = "image/jpeg";
-  const char *filename = "screenshot.jpg";
+  c2t_image_format_t format = screenshot_parse_format(c2t_config_get()->screenshot_format);
+  const char *mime_type = screenshot_format_mime(format);
+  const char *filename = screenshot_format_filename(format);
 
   char target[64] = "all";
   if (display_target && *display_target) {

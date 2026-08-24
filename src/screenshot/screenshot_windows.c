@@ -20,7 +20,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include "screenshot.h"
-#include "screenshot_jpeg.h"
+#include "screenshot_encoder.h"
+#include "../config/config.h"
 #include "../logging/logging.h"
 #include "../win32/win32_api.h"
 
@@ -275,10 +276,14 @@ int screenshot_capture_windows_display(const char *target,
   DeleteDC(memory);
   ReleaseDC(NULL, screen);
 
+  c2t_image_format_t format = screenshot_parse_format(c2t_config_get()->screenshot_format);
+  int quality = c2t_config_get()->screenshot_quality;
+  if (quality <= 0) quality = 85;
+
   void *img_buf = NULL;
   size_t img_size = 0;
-  if (!screenshot_encode_jpeg_rgba((uint32_t)width, (uint32_t)height, pixels, 1, 85, &img_buf, &img_size)) {
-    c2t_log_warning("screenshot", "JPEG encoding failed for Windows screenshot");
+  if (!screenshot_encode_image(format, (uint32_t)width, (uint32_t)height, pixels, 1, quality, &img_buf, &img_size)) {
+    c2t_log_warning("screenshot", "%s encoding failed for Windows screenshot", screenshot_format_to_string(format));
     free(pixels);
     return 0;
   }
@@ -286,9 +291,9 @@ int screenshot_capture_windows_display(const char *target,
 
   *out_data = img_buf;
   *out_size = img_size;
-  *out_mime_type = "image/jpeg";
-  *out_filename = "screenshot.jpg";
-  c2t_log_info("screenshot", "Captured %dx%d Windows desktop screenshot (%llu bytes JPEG)", width, height, (unsigned long long)img_size);
+  *out_mime_type = screenshot_format_mime(format);
+  *out_filename = screenshot_format_filename(format);
+  c2t_log_info("screenshot", "Captured %dx%d Windows desktop screenshot (%llu bytes %s)", width, height, (unsigned long long)img_size, screenshot_format_to_string(format));
   return 1;
 }
 

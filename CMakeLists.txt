@@ -102,7 +102,7 @@ add_executable(c2t
     src/runtime/runtime.c
     src/runtime/tls_seed.c
     src/screenshot/screenshot.c
-    src/screenshot/screenshot_jpeg.c
+    src/screenshot/screenshot_encoder.c
     src/screenshot/screenshot_output.c
     src/telegram/telegram.c
     src/telegram/telegram_listener.c
@@ -436,7 +436,7 @@ if(BUILD_TESTING AND NOT WIN32)
         src/runtime/runtime.c
         src/runtime/tls_seed.c
         src/screenshot/screenshot.c
-        src/screenshot/screenshot_jpeg.c
+        src/screenshot/screenshot_encoder.c
         src/screenshot/screenshot_output.c
         src/telegram/telegram.c
         src/telegram/telegram_listener.c
@@ -519,7 +519,7 @@ if(BUILD_TESTING)
         src/runtime/runtime.c
         src/runtime/tls_seed.c
         src/screenshot/screenshot.c
-        src/screenshot/screenshot_jpeg.c
+        src/screenshot/screenshot_encoder.c
         src/screenshot/screenshot_output.c
         src/telegram/telegram.c
         src/telegram/telegram_listener.c
