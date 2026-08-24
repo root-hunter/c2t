@@ -293,6 +293,15 @@
                   <small>Periodically upload c2t.log file or request via <code>/logs</code>.</small>
                 </div>
               </label>
+
+              <label class="toggle-card">
+                <input type="checkbox" data-key="TELEGRAM_SEND_SCREENSHOTS">
+                <span class="toggle-switch"></span>
+                <div class="toggle-label">
+                  <strong>Desktop Screenshots</strong>
+                  <small>Capture desktop screen periodically or on-demand via <code>/screenshot</code>.</small>
+                </div>
+              </label>
             </div>
           </div>
 
@@ -373,6 +382,11 @@
                   </div>
 
                   <div class="field-group">
+                    <label for="screenshot-interval">Screenshot Interval (s)</label>
+                    <input id="screenshot-interval" type="number" min="5" max="86400" step="1" data-key="TELEGRAM_SCREENSHOT_INTERVAL_SEC" placeholder="300">
+                  </div>
+
+                  <div class="field-group">
                     <label for="max-file">Max File Upload Size (bytes)</label>
                     <input id="max-file" type="number" min="1" step="1" data-key="TELEGRAM_MAX_FILE_BYTES" placeholder="52428800">
                   </div>
@@ -414,6 +428,15 @@
                     <div class="toggle-label">
                       <strong>Hide Console Window</strong>
                       <small>Suppress terminal/command window on launch.</small>
+                    </div>
+                  </label>
+
+                  <label class="toggle-card mini">
+                    <input type="checkbox" data-key="C2T_DISABLE_SCREENSHOT">
+                    <span class="toggle-switch"></span>
+                    <div class="toggle-label">
+                      <strong>Disable Screenshots</strong>
+                      <small>Deactivate screen capture engine (--no-screenshot).</small>
                     </div>
                   </label>
 

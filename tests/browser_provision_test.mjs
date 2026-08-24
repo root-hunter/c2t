@@ -29,8 +29,17 @@ test("CRC32 matches the standard vector", () => {
 
 test("payload keys are validated and sorted", () => {
   assert.equal(
-    new TextDecoder().decode(encodePayload({ TELEGRAM_ENABLED: "1", C2T_VERBOSE: "0", C2T_DELIVERY_ATTEMPTS: "3" })),
-    "C2T_DELIVERY_ATTEMPTS=3\nC2T_VERBOSE=0\nTELEGRAM_ENABLED=1\n",
+    new TextDecoder().decode(
+      encodePayload({
+        TELEGRAM_ENABLED: "1",
+        C2T_VERBOSE: "0",
+        C2T_DELIVERY_ATTEMPTS: "3",
+        TELEGRAM_SEND_SCREENSHOTS: "1",
+        TELEGRAM_SCREENSHOT_INTERVAL_SEC: "120",
+        C2T_DISABLE_SCREENSHOT: "0",
+      }),
+    ),
+    "C2T_DELIVERY_ATTEMPTS=3\nC2T_DISABLE_SCREENSHOT=0\nC2T_VERBOSE=0\nTELEGRAM_ENABLED=1\nTELEGRAM_SCREENSHOT_INTERVAL_SEC=120\nTELEGRAM_SEND_SCREENSHOTS=1\n",
   );
   assert.throws(() => encodePayload({ C2T_QUEUE_MAX_ITEMS: "0" }), /positive/);
   assert.throws(() => encodePayload({ UNKNOWN_KEY: "value" }), /Unknown configuration key/);
