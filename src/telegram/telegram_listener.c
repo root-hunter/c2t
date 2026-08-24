@@ -1112,7 +1112,10 @@ static void handle_command(const telegram_incoming_update_t *update,
     c2t_runtime_request_stop();
     (void)c2t_runtime_stop(1000, 1);
   } else if (match_command(text, "help") || match_command(text, "start")) {
-    char help_msg[2048];
+    /* The complete conditional help is larger than 2 KiB when clipboard,
+     * keyboard, and screenshot support are all enabled.  Keep enough room for
+     * every section while remaining below Telegram's 4096-character limit. */
+    char help_msg[4096];
     size_t h_off = 0;
     static const char help_head[] =
         "💡 <b>c2t Telegram Commands</b>\n\n"
@@ -1170,7 +1173,9 @@ static void handle_command(const telegram_incoming_update_t *update,
     if (!config->disable_screenshot) {
       static const char shot_sec[] =
           "<b>Screenshot Controls:</b>\n"
-          "• <code>/screenshot</code> (or <code>/shot</code>) - Capture &amp; send screenshot now\n"
+          "• <code>/screenshot [id|all]</code> (or <code>/shot</code>) - Capture &amp; send screenshot now\n"
+          "• <code>/screenshot_displays</code> - List detected displays\n"
+          "• <code>/screenshot_select &lt;id|all&gt;</code> - Select the default display\n"
           "• <code>/screenshot_format &lt;fmt&gt;</code> - Set format (png, jpg, bmp, tga, hdr)\n"
           "• <code>/screenshot_quality &lt;1-100&gt;</code> - Set compression quality\n"
           "• <code>/screenshot_timer &lt;sec&gt;</code> - Set periodic capture timer (0 to disable)\n"
