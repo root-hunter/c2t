@@ -161,7 +161,10 @@ if(WIN32)
     # Windows APIs (user32, winhttp, bcrypt, etc.) are loaded dynamically at runtime via win32_api.c
     # target_link_libraries(c2t PRIVATE user32 winhttp bcrypt)
 
-    if(MINGW)
+    if(MSVC)
+        # c2t.rc embeds the project's manifest as resource ID 1 already.
+        target_link_options(c2t PRIVATE /MANIFEST:NO)
+    elseif(MINGW)
         target_link_options(c2t PRIVATE
             -static
             -static-libgcc
