@@ -22,6 +22,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(C2T_ARM_SVE2_SIMD)
+#include <asm/hwcap.h>
+#include <sys/auxv.h>
+#endif
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -336,6 +341,22 @@ void c2t_chacha20_crypt_8blocks(const uint32_t state[16],
 void c2t_chacha20_crypt_16blocks(const uint32_t state[16],
                                  const unsigned char *input,
                                  unsigned char *output);
+#endif
+
+#if defined(C2T_ARM_SVE2_SIMD)
+size_t c2t_chacha20_sve2_block_count(void);
+void c2t_chacha20_crypt_sve2(const uint32_t state[16],
+                              const unsigned char *input,
+                              unsigned char *output);
+
+static int chacha20_has_sve2(void) {
+#if defined(HWCAP_SVE) && defined(HWCAP2_SVE2)
+  return (getauxval(AT_HWCAP) & HWCAP_SVE) != 0 &&
+         (getauxval(AT_HWCAP2) & HWCAP2_SVE2) != 0;
+#else
+  return 0;
+#endif
+}
 #endif
 
 #if defined(C2T_HAS_SSE2)
@@ -842,6 +863,10 @@ const char *c2t_crypto_simd_capabilities(void) {
   if (avx2)
     return "SSE2, AVX2";
   return "SSE2";
+#elif defined(C2T_ARM_SVE2_SIMD)
+  if (chacha20_has_sve2())
+    return "NEON, SVE2";
+  return "NEON";
 #elif defined(C2T_HAS_NEON)
   return "NEON";
 #elif defined(C2T_HAS_SSE2)
@@ -859,6 +884,10 @@ const char *c2t_crypto_chacha20_backend(void) {
 #if defined(C2T_HAS_AVX2_DISPATCH)
   if (chacha20_has_avx2())
     return "AVX2 (8 blocks)";
+#endif
+#if defined(C2T_ARM_SVE2_SIMD)
+  if (chacha20_has_sve2())
+    return "SVE2 (scalable blocks)";
 #endif
 #if defined(C2T_HAS_NEON)
   return "NEON (4 blocks)";
@@ -880,6 +909,17 @@ static void chacha20_crypt(const unsigned char key[32],
   chacha20_init_state(state, key, nonce, counter);
 
   size_t offset = 0;
+#if defined(C2T_ARM_SVE2_SIMD)
+  if (chacha20_has_sve2()) {
+    const size_t sve2_blocks = c2t_chacha20_sve2_block_count();
+    const size_t sve2_bytes = sve2_blocks * 64U;
+    while (len - offset >= sve2_bytes) {
+      c2t_chacha20_crypt_sve2(state, input + offset, output + offset);
+      state[12] += (uint32_t)sve2_blocks;
+      offset += sve2_bytes;
+    }
+  }
+#endif
 #if defined(C2T_HAS_AVX512_DISPATCH)
   if (chacha20_has_avx512()) {
     while (len - offset >= 1024) {

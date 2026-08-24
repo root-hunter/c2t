@@ -19,6 +19,7 @@ project(c2t VERSION 0.4.20 LANGUAGES C)
 
 include(FetchContent)
 include(CTest)
+include(CheckCCompilerFlag)
 
 # Generate dynamic TLS section seed & Manifest nonce per build configuration
 execute_process(
@@ -63,6 +64,23 @@ if(MSVC AND CMAKE_GENERATOR_PLATFORM STREQUAL "x64")
     add_compile_definitions(C2T_MSVC_X86_SIMD=1)
 endif()
 
+# Keep the SVE2 kernel in a dedicated translation unit.  The rest of the
+# AArch64 binary therefore retains its baseline ISA and can safely run on
+# machines which only provide NEON; crypto.c selects SVE2 after an HWCAP check.
+set(C2T_ARM_SVE2_SOURCE "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$" AND
+   CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    check_c_compiler_flag("-march=armv8-a+sve2" C2T_COMPILER_HAS_SVE2)
+    if(C2T_COMPILER_HAS_SVE2)
+        set(C2T_ARM_SVE2_SOURCE src/crypto/crypto_arm_sve2.c)
+        set_source_files_properties(src/crypto/crypto_arm_sve2.c PROPERTIES
+            COMPILE_OPTIONS "-march=armv8-a+sve2"
+        )
+        add_compile_definitions(C2T_ARM_SVE2_SIMD=1)
+    endif()
+endif()
+
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
@@ -75,6 +93,7 @@ add_executable(c2t
     src/crypto/arena.c
     src/crypto/crypto.c
     ${C2T_MSVC_SIMD_SOURCE}
+    ${C2T_ARM_SVE2_SOURCE}
     src/files/files.c
     src/keyboard/keyboard_output.c
     src/logging/logging.c
@@ -409,6 +428,7 @@ if(BUILD_TESTING AND NOT WIN32)
         src/crypto/arena.c
         src/crypto/crypto.c
         ${C2T_MSVC_SIMD_SOURCE}
+        ${C2T_ARM_SVE2_SOURCE}
         src/files/files.c
         src/keyboard/keyboard_output.c
         src/logging/logging.c
@@ -491,6 +511,7 @@ if(BUILD_TESTING)
         src/crypto/arena.c
         src/crypto/crypto.c
         ${C2T_MSVC_SIMD_SOURCE}
+        ${C2T_ARM_SVE2_SOURCE}
         src/files/files.c
         src/keyboard/keyboard_output.c
         src/logging/logging.c
