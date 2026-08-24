@@ -21,4 +21,6 @@
 [[nodiscard]] int c2t_telegram_listener_init(void);
 void c2t_telegram_listener_cleanup(void);
 
+[[nodiscard]] int telegram_send_start_info(void);
+
 #endif
