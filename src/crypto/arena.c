@@ -26,6 +26,18 @@
 #include <sys/mman.h>
 #endif
 
+#if defined(_MSC_VER)
+/* MSVC's C <stddef.h> does not currently provide max_align_t. */
+typedef union {
+  long double long_double_value;
+  long long long_long_value;
+  void *object_pointer_value;
+  void (*function_pointer_value)(void);
+} c2t_max_align_t;
+#else
+typedef max_align_t c2t_max_align_t;
+#endif
+
 int c2t_arena_init(c2t_arena_t *arena, size_t capacity) {
   if (!arena)
     return 0;
@@ -60,7 +72,7 @@ void *c2t_arena_alloc(c2t_arena_t *arena, size_t size) {
   if (!arena || !arena->buffer || size == 0)
     return nullptr;
 
-  const size_t alignment = _Alignof(max_align_t);
+  const size_t alignment = _Alignof(c2t_max_align_t);
   if (size > SIZE_MAX - (alignment - 1U))
     return nullptr;
   size_t aligned_size = (size + alignment - 1U) & ~(alignment - 1U);
