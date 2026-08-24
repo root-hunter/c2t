@@ -19,6 +19,7 @@
 
 #include "screenshot.h"
 #include "screenshot_encoder.h"
+#include "screenshot_output.h"
 #include "../config/config.h"
 #include "../logging/logging.h"
 
@@ -360,8 +361,8 @@ int screenshot_capture_linux_display(const char *target,
         if (reply) {
           uint8_t *pixel_data = xcb_get_image_data(reply);
           if (pixel_data) {
-            c2t_image_format_t format = screenshot_parse_format(c2t_config_get()->screenshot_format);
-            int quality = c2t_config_get()->screenshot_quality;
+            c2t_image_format_t format = screenshot_get_format();
+            int quality = screenshot_get_quality();
             if (quality <= 0) quality = 85;
 
             void *img_buf = nullptr;

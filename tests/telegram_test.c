@@ -1444,6 +1444,18 @@ int main(void) {
     return fail("screenshot_set_interval / screenshot_get_interval mismatch");
   screenshot_set_interval(0);
 
+  screenshot_set_format(C2T_IMAGE_FORMAT_JPG);
+  if (screenshot_get_format() != C2T_IMAGE_FORMAT_JPG)
+    return fail("screenshot_set_format / screenshot_get_format mismatch");
+  screenshot_set_format(C2T_IMAGE_FORMAT_PNG);
+  if (screenshot_get_format() != C2T_IMAGE_FORMAT_PNG)
+    return fail("screenshot_set_format PNG mismatch");
+
+  screenshot_set_quality(92);
+  if (screenshot_get_quality() != 92)
+    return fail("screenshot_set_quality / screenshot_get_quality mismatch");
+  screenshot_set_quality(85);
+
   char shot_stat_buf[1024] = {};
   screenshot_get_status_info(shot_stat_buf, sizeof(shot_stat_buf));
   if (strstr(shot_stat_buf, "Screenshot Subsystem Status") == nullptr ||

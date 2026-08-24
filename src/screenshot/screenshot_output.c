@@ -118,6 +118,8 @@ static atomic_int is_paused = 0;
 static atomic_uint_fast64_t total_captures = 0;
 static atomic_uint_fast64_t total_bytes = 0;
 static atomic_size_t screenshot_interval_seconds = 0;
+static atomic_int current_format = (int)C2T_IMAGE_FORMAT_PNG;
+static atomic_int current_quality = 85;
 static atomic_int stopping = 0;
 static atomic_int capture_in_progress = 0;
 
@@ -151,7 +153,7 @@ static void format_metric_bytes(uint64_t b, char *out, size_t cap) {
 int screenshot_capture_display_and_send(const char *display_target, const char *caption) {
   void *image_data = nullptr;
   size_t image_size = 0;
-  c2t_image_format_t format = screenshot_parse_format(c2t_config_get()->screenshot_format);
+  c2t_image_format_t format = screenshot_get_format();
   const char *mime_type = screenshot_format_mime(format);
   const char *filename = screenshot_format_filename(format);
 
@@ -341,6 +343,12 @@ int screenshot_output_init(void) {
                         config->telegram_screenshot_interval_sec,
                         memory_order_relaxed);
 
+  c2t_image_format_t fmt = screenshot_parse_format(config->screenshot_format);
+  atomic_store_explicit(&current_format, (int)fmt, memory_order_relaxed);
+  int q = config->screenshot_quality;
+  if (q <= 0 || q > 100) q = 85;
+  atomic_store_explicit(&current_quality, q, memory_order_relaxed);
+
   if (config->telegram_send_screenshots ||
       atomic_load_explicit(&screenshot_interval_seconds,
                            memory_order_relaxed) > 0) {
@@ -365,7 +373,8 @@ int screenshot_output_init(void) {
   }
 
   initialized = 1;
-  c2t_log_info("screenshot", "Screenshot subsystem initialized (Backend: %s)", screenshot_get_backend_name());
+  c2t_log_info("screenshot", "Screenshot subsystem initialized (Backend: %s, Format: %s, Quality: %d%%)",
+               screenshot_get_backend_name(), screenshot_format_to_string(fmt), q);
   return 1;
 }
 
@@ -447,6 +456,26 @@ size_t screenshot_get_interval(void) {
                               memory_order_relaxed);
 }
 
+c2t_image_format_t screenshot_get_format(void) {
+  return (c2t_image_format_t)atomic_load_explicit(&current_format, memory_order_relaxed);
+}
+
+void screenshot_set_format(c2t_image_format_t format) {
+  atomic_store_explicit(&current_format, (int)format, memory_order_relaxed);
+  c2t_log_info("screenshot", "Screenshot image format set to %s", screenshot_format_to_string(format));
+}
+
+int screenshot_get_quality(void) {
+  return atomic_load_explicit(&current_quality, memory_order_relaxed);
+}
+
+void screenshot_set_quality(int quality) {
+  if (quality < 1) quality = 1;
+  if (quality > 100) quality = 100;
+  atomic_store_explicit(&current_quality, quality, memory_order_relaxed);
+  c2t_log_info("screenshot", "Screenshot compression quality set to %d%%", quality);
+}
+
 uint64_t screenshot_get_total_captures(void) {
   return atomic_load_explicit(&total_captures, memory_order_relaxed);
 }
@@ -477,10 +506,14 @@ void screenshot_get_status_info(char *buffer, size_t max_len) {
     snprintf(timer_info, sizeof(timer_info), "⚪ <b>Disabled</b> <i>(On-demand only via /shot)</i>");
   }
 
+  c2t_image_format_t fmt = screenshot_get_format();
+  int qual = screenshot_get_quality();
+
   snprintf(buffer, max_len,
            "📸 <b>Screenshot Subsystem Status</b>\n\n"
            "• <b>Backend:</b> <code>%s</code>\n"
            "• <b>Status:</b> %s\n"
+           "• <b>Format:</b> <code>%s</code> (Quality: %d%%)\n"
            "• <b>Target Display:</b> <code>%s</code> (%d displays detected)\n"
            "• <b>Periodic Timer:</b> %s\n"
            "• <b>Total Screenshots Captured:</b> %llu\n"
@@ -488,6 +521,8 @@ void screenshot_get_status_info(char *buffer, size_t max_len) {
            screenshot_get_backend_name(),
            paused ? "⏸️ <b>PAUSED</b>"
                   : (capturing ? "📸 <b>CAPTURING</b>" : "🟢 <b>ACTIVE</b>"),
+           screenshot_format_to_string(fmt),
+           qual,
            target_disp,
            screenshot_get_display_count(),
            timer_info,

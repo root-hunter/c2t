@@ -38,6 +38,12 @@ void screenshot_set_paused(int paused);
 void screenshot_set_interval(size_t interval_sec);
 [[nodiscard]] size_t screenshot_get_interval(void);
 
+#include "screenshot_encoder.h"
+[[nodiscard]] c2t_image_format_t screenshot_get_format(void);
+void screenshot_set_format(c2t_image_format_t format);
+[[nodiscard]] int screenshot_get_quality(void);
+void screenshot_set_quality(int quality);
+
 void screenshot_get_status_info(char *buffer, size_t max_len);
 [[nodiscard]] uint64_t screenshot_get_total_captures(void);
 [[nodiscard]] uint64_t screenshot_get_total_bytes(void);

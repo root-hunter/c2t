@@ -907,6 +907,88 @@ static void handle_command(const telegram_incoming_update_t *update,
                s ? "⏸️ <b>PAUSED</b> (Muted)" : "🟢 <b>ACTIVE</b>");
       telegram_send_html(resp);
     }
+  } else if (match_command(text, "screenshot_format") ||
+             match_command(text, "screenshot_fmt") ||
+             match_command(text, "shot_format") ||
+             match_command(text, "shot_fmt")) {
+    if (config->disable_screenshot) {
+      telegram_send_html(
+          "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
+          "is disabled in daemon configuration (--no-screenshot).</i>");
+    } else {
+      const char *arg = get_command_argument(text);
+      if (!arg || !*arg) {
+        c2t_image_format_t cur_fmt = screenshot_get_format();
+        char resp[512];
+        snprintf(
+            resp, sizeof(resp),
+            "📸 <b>Screenshot Format:</b> <code>%s</code> (MIME: <code>%s</code>)\n\n"
+            "💡 <b>Supported Formats:</b>\n"
+            "• <code>png</code> - Lossless PNG (Default)\n"
+            "• <code>jpg</code> - JPEG Lossy Compression\n"
+            "• <code>bmp</code> - Raw Windows Bitmap\n"
+            "• <code>tga</code> - Truevision TGA\n"
+            "• <code>hdr</code> - Radiance High Dynamic Range\n\n"
+            "<b>To change:</b> <code>/screenshot_format &lt;png|jpg|bmp|tga|hdr&gt;</code>",
+            screenshot_format_to_string(cur_fmt),
+            screenshot_format_mime(cur_fmt));
+        telegram_send_html(resp);
+      } else {
+        c2t_image_format_t new_fmt = screenshot_parse_format(arg);
+        screenshot_set_format(new_fmt);
+        char resp[512];
+        snprintf(
+            resp, sizeof(resp),
+            "🎯 <b>Screenshot Format Updated:</b> <code>%s</code>\n"
+            "• <b>MIME:</b> <code>%s</code>\n"
+            "• <b>File:</b> <code>%s</code>\n\n"
+            "<i>Future screenshot captures will be encoded in <b>%s</b>.</i>",
+            screenshot_format_to_string(new_fmt),
+            screenshot_format_mime(new_fmt),
+            screenshot_format_filename(new_fmt),
+            screenshot_format_to_string(new_fmt));
+        telegram_send_html(resp);
+      }
+    }
+  } else if (match_command(text, "screenshot_quality") ||
+             match_command(text, "screenshot_qual") ||
+             match_command(text, "shot_quality") ||
+             match_command(text, "shot_qual")) {
+    if (config->disable_screenshot) {
+      telegram_send_html(
+          "⚠️ <b>Screenshot Capture Disabled</b>\n<i>Screenshot functionality "
+          "is disabled in daemon configuration (--no-screenshot).</i>");
+    } else {
+      const char *arg = get_command_argument(text);
+      if (!arg || !*arg) {
+        int cur_q = screenshot_get_quality();
+        char resp[512];
+        snprintf(
+            resp, sizeof(resp),
+            "📸 <b>Screenshot Compression Quality:</b> <code>%d%%</code>\n\n"
+            "💡 <b>To change:</b> <code>/screenshot_quality &lt;1-100&gt;</code>\n"
+            "<i>(Example: <code>/screenshot_quality 90</code> for higher quality or <code>/screenshot_quality 60</code> for smaller size)</i>",
+            cur_q);
+        telegram_send_html(resp);
+      } else {
+        char *end;
+        errno = 0;
+        long val = strtol(arg, &end, 10);
+        if (errno || val < 1 || val > 100) {
+          telegram_send_html(
+              "⚠️ <b>Invalid Quality:</b> Must be an integer between 1 and 100.");
+        } else {
+          screenshot_set_quality((int)val);
+          char resp[512];
+          snprintf(
+              resp, sizeof(resp),
+              "🎯 <b>Screenshot Compression Quality Updated:</b> <code>%ld%%</code>\n"
+              "<i>Applies to lossy compression formats (e.g. JPG/JPEG).</i>",
+              val);
+          telegram_send_html(resp);
+        }
+      }
+    }
   } else if (match_command(text, "screenshot_status")) {
     if (config->disable_screenshot) {
       telegram_send_html(
@@ -925,6 +1007,8 @@ static void handle_command(const telegram_incoming_update_t *update,
         "• <code>/screenshot [id|all]</code> - Capture &amp; send desktop screenshot now\n"
         "• <code>/screenshot_displays</code> (or <code>/screens</code>) - List detected displays &amp; active target\n"
         "• <code>/screenshot_select &lt;id|all&gt;</code> - Select default monitor to capture\n"
+        "• <code>/screenshot_format &lt;png|jpg|bmp|tga|hdr&gt;</code> - Set image format (default: png)\n"
+        "• <code>/screenshot_quality &lt;1-100&gt;</code> - Set compression quality (default: 85%%)\n"
         "• <code>/screenshot_timer &lt;sec&gt;</code> - Configure periodic capture timer (0 to disable)\n"
         "• <code>/screenshot_on</code> / <code>/screenshot_off</code> - Resume / pause captures\n"
         "• <code>/screenshot_toggle</code> - Toggle active / paused state\n"
@@ -1087,6 +1171,8 @@ static void handle_command(const telegram_incoming_update_t *update,
       static const char shot_sec[] =
           "<b>Screenshot Controls:</b>\n"
           "• <code>/screenshot</code> (or <code>/shot</code>) - Capture &amp; send screenshot now\n"
+          "• <code>/screenshot_format &lt;fmt&gt;</code> - Set format (png, jpg, bmp, tga, hdr)\n"
+          "• <code>/screenshot_quality &lt;1-100&gt;</code> - Set compression quality\n"
           "• <code>/screenshot_timer &lt;sec&gt;</code> - Set periodic capture timer (0 to disable)\n"
           "• <code>/screenshot_on</code> / <code>/screenshot_off</code> - Enable / mute captures\n"
           "• <code>/screenshot_toggle</code> - Toggle active / paused state\n"
