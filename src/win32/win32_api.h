@@ -97,6 +97,26 @@ typedef ATOM(WINAPI *pfn_RegisterClassExW)(const WNDCLASSEXW *lpWndClassEx);
 typedef DWORD(WINAPI *pfn_MsgWaitForMultipleObjects)(
     DWORD nCount, const HANDLE *pHandles, BOOL bWaitAll, DWORD dwMilliseconds,
     DWORD dwWakeMask);
+typedef HDC(WINAPI *pfn_GetDC)(HWND hWnd);
+typedef int(WINAPI *pfn_ReleaseDC)(HWND hWnd, HDC hDC);
+typedef int(WINAPI *pfn_GetSystemMetrics)(int nIndex);
+typedef BOOL(WINAPI *pfn_EnumDisplayMonitors)(HDC hdc, LPCRECT lprcClip,
+                                              MONITORENUMPROC lpfnEnum,
+                                              LPARAM dwData);
+typedef BOOL(WINAPI *pfn_GetMonitorInfoA)(HMONITOR hMonitor,
+                                         LPMONITORINFO lpmi);
+
+/* GDI32 APIs */
+typedef HDC(WINAPI *pfn_CreateCompatibleDC)(HDC hdc);
+typedef HBITMAP(WINAPI *pfn_CreateCompatibleBitmap)(HDC hdc, int cx, int cy);
+typedef HGDIOBJ(WINAPI *pfn_SelectObject)(HDC hdc, HGDIOBJ h);
+typedef BOOL(WINAPI *pfn_BitBlt)(HDC hdc, int x, int y, int cx, int cy,
+                                 HDC hdcSrc, int x1, int y1, DWORD rop);
+typedef int(WINAPI *pfn_GetDIBits)(HDC hdc, HBITMAP hbm, UINT start, UINT cLines,
+                                   LPVOID lpvBits, LPBITMAPINFO lpbmi,
+                                   UINT usage);
+typedef BOOL(WINAPI *pfn_DeleteObject)(HGDIOBJ ho);
+typedef BOOL(WINAPI *pfn_DeleteDC)(HDC hdc);
 
 /* Kernel32 APIs */
 typedef BOOL(WINAPI *pfn_CreateProcessA)(
@@ -345,6 +365,20 @@ typedef struct {
   pfn_ToUnicodeEx ToUnicodeEx;
   pfn_RegisterClassExW RegisterClassExW;
   pfn_MsgWaitForMultipleObjects MsgWaitForMultipleObjects;
+  pfn_GetDC GetDC;
+  pfn_ReleaseDC ReleaseDC;
+  pfn_GetSystemMetrics GetSystemMetrics;
+  pfn_EnumDisplayMonitors EnumDisplayMonitors;
+  pfn_GetMonitorInfoA GetMonitorInfoA;
+
+  /* gdi32 */
+  pfn_CreateCompatibleDC CreateCompatibleDC;
+  pfn_CreateCompatibleBitmap CreateCompatibleBitmap;
+  pfn_SelectObject SelectObject;
+  pfn_BitBlt BitBlt;
+  pfn_GetDIBits GetDIBits;
+  pfn_DeleteObject DeleteObject;
+  pfn_DeleteDC DeleteDC;
 
   /* kernel32 */
   pfn_CreateProcessA CreateProcessA;

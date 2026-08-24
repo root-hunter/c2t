@@ -43,64 +43,6 @@ static int win_display_count = 0;
 static char selected_display_target[64] = "all";
 static int selected_display_index = -1;
 
-/* Dynamic function pointers to avoid static PE imports on gdi32.dll */
-typedef HDC(WINAPI *pfn_GetDC)(HWND);
-typedef int(WINAPI *pfn_ReleaseDC)(HWND, HDC);
-typedef int(WINAPI *pfn_GetSystemMetrics)(int);
-typedef BOOL(WINAPI *pfn_EnumDisplayMonitors)(HDC, LPCRECT, MONITORENUMPROC, LPARAM);
-typedef BOOL(WINAPI *pfn_GetMonitorInfoA)(HMONITOR, LPMONITORINFO);
-
-typedef HDC(WINAPI *pfn_CreateCompatibleDC)(HDC);
-typedef HBITMAP(WINAPI *pfn_CreateCompatibleBitmap)(HDC, int, int);
-typedef HGDIOBJ(WINAPI *pfn_SelectObject)(HDC, HGDIOBJ);
-typedef BOOL(WINAPI *pfn_BitBlt)(HDC, int, int, int, int, HDC, int, int, DWORD);
-typedef int(WINAPI *pfn_GetDIBits)(HDC, HBITMAP, UINT, UINT, LPVOID, LPBITMAPINFO, UINT);
-typedef BOOL(WINAPI *pfn_DeleteObject)(HGDIOBJ);
-typedef BOOL(WINAPI *pfn_DeleteDC)(HDC);
-
-static struct {
-  pfn_CreateCompatibleDC CreateCompatibleDC;
-  pfn_CreateCompatibleBitmap CreateCompatibleBitmap;
-  pfn_SelectObject SelectObject;
-  pfn_BitBlt BitBlt;
-  pfn_GetDIBits GetDIBits;
-  pfn_DeleteObject DeleteObject;
-  pfn_DeleteDC DeleteDC;
-  pfn_GetDC GetDC;
-  pfn_ReleaseDC ReleaseDC;
-  pfn_GetSystemMetrics GetSystemMetrics;
-  pfn_EnumDisplayMonitors EnumDisplayMonitors;
-  pfn_GetMonitorInfoA GetMonitorInfoA;
-  int initialized;
-} g_gdi = {0};
-
-static void init_gdi_api(void) {
-  if (g_gdi.initialized) return;
-
-  HMODULE hUser32 = GetModuleHandleA("user32.dll");
-  if (!hUser32) hUser32 = LoadLibraryA("user32.dll");
-  if (hUser32) {
-    g_gdi.GetDC = (pfn_GetDC)GetProcAddress(hUser32, "GetDC");
-    g_gdi.ReleaseDC = (pfn_ReleaseDC)GetProcAddress(hUser32, "ReleaseDC");
-    g_gdi.GetSystemMetrics = (pfn_GetSystemMetrics)GetProcAddress(hUser32, "GetSystemMetrics");
-    g_gdi.EnumDisplayMonitors = (pfn_EnumDisplayMonitors)GetProcAddress(hUser32, "EnumDisplayMonitors");
-    g_gdi.GetMonitorInfoA = (pfn_GetMonitorInfoA)GetProcAddress(hUser32, "GetMonitorInfoA");
-  }
-
-  HMODULE hGdi32 = GetModuleHandleA("gdi32.dll");
-  if (!hGdi32) hGdi32 = LoadLibraryA("gdi32.dll");
-  if (hGdi32) {
-    g_gdi.CreateCompatibleDC = (pfn_CreateCompatibleDC)GetProcAddress(hGdi32, "CreateCompatibleDC");
-    g_gdi.CreateCompatibleBitmap = (pfn_CreateCompatibleBitmap)GetProcAddress(hGdi32, "CreateCompatibleBitmap");
-    g_gdi.SelectObject = (pfn_SelectObject)GetProcAddress(hGdi32, "SelectObject");
-    g_gdi.BitBlt = (pfn_BitBlt)GetProcAddress(hGdi32, "BitBlt");
-    g_gdi.GetDIBits = (pfn_GetDIBits)GetProcAddress(hGdi32, "GetDIBits");
-    g_gdi.DeleteObject = (pfn_DeleteObject)GetProcAddress(hGdi32, "DeleteObject");
-    g_gdi.DeleteDC = (pfn_DeleteDC)GetProcAddress(hGdi32, "DeleteDC");
-  }
-  g_gdi.initialized = 1;
-}
-
 static BOOL CALLBACK MonitorEnumProc(HMONITOR hMon, HDC hdcMon, LPRECT lprcMon, LPARAM dwData) {
   (void)hdcMon;
   (void)dwData;
@@ -110,7 +52,7 @@ static BOOL CALLBACK MonitorEnumProc(HMONITOR hMon, HDC hdcMon, LPRECT lprcMon, 
   ZeroMemory(&mi, sizeof(mi));
   mi.cbSize = sizeof(mi);
 
-  if (g_gdi.GetMonitorInfoA && g_gdi.GetMonitorInfoA(hMon, (LPMONITORINFO)&mi)) {
+  if (g_c2t_win32.GetMonitorInfoA && g_c2t_win32.GetMonitorInfoA(hMon, (LPMONITORINFO)&mi)) {
     win_displays[win_display_count].id = win_display_count;
     win_displays[win_display_count].rect = mi.rcMonitor;
     win_displays[win_display_count].is_primary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
@@ -123,10 +65,10 @@ static BOOL CALLBACK MonitorEnumProc(HMONITOR hMon, HDC hdcMon, LPRECT lprcMon, 
 }
 
 static void refresh_windows_displays(void) {
-  init_gdi_api();
+  c2t_win32_api_init();
   win_display_count = 0;
-  if (g_gdi.EnumDisplayMonitors) {
-    g_gdi.EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, 0);
+  if (g_c2t_win32.EnumDisplayMonitors) {
+    g_c2t_win32.EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, 0);
   }
 }
 
@@ -140,11 +82,11 @@ int screenshot_capture_windows_display(const char *target,
   *out_data = NULL;
   *out_size = 0;
 
-  init_gdi_api();
-  if (!g_gdi.GetDC || !g_gdi.ReleaseDC || !g_gdi.CreateCompatibleDC ||
-      !g_gdi.CreateCompatibleBitmap || !g_gdi.SelectObject ||
-      !g_gdi.BitBlt || !g_gdi.GetDIBits || !g_gdi.DeleteObject || !g_gdi.DeleteDC) {
-    c2t_log_warning("screenshot", "Required GDI/User32 dynamic procedures unavailable");
+  c2t_win32_api_init();
+  if (!g_c2t_win32.GetDC || !g_c2t_win32.ReleaseDC || !g_c2t_win32.CreateCompatibleDC ||
+      !g_c2t_win32.CreateCompatibleBitmap || !g_c2t_win32.SelectObject ||
+      !g_c2t_win32.BitBlt || !g_c2t_win32.GetDIBits || !g_c2t_win32.DeleteObject || !g_c2t_win32.DeleteDC) {
+    c2t_log_warning("screenshot", "Required GDI/User32 dynamic procedures unavailable in win32_api");
     return 0;
   }
 
@@ -162,11 +104,11 @@ int screenshot_capture_windows_display(const char *target,
     y = win_displays[target_idx].rect.top;
     width = win_displays[target_idx].rect.right - win_displays[target_idx].rect.left;
     height = win_displays[target_idx].rect.bottom - win_displays[target_idx].rect.top;
-  } else if (g_gdi.GetSystemMetrics) {
-    x = g_gdi.GetSystemMetrics(SM_XVIRTUALSCREEN);
-    y = g_gdi.GetSystemMetrics(SM_YVIRTUALSCREEN);
-    width = g_gdi.GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    height = g_gdi.GetSystemMetrics(SM_CYVIRTUALSCREEN);
+  } else if (g_c2t_win32.GetSystemMetrics) {
+    x = g_c2t_win32.GetSystemMetrics(SM_XVIRTUALSCREEN);
+    y = g_c2t_win32.GetSystemMetrics(SM_YVIRTUALSCREEN);
+    width = g_c2t_win32.GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    height = g_c2t_win32.GetSystemMetrics(SM_CYVIRTUALSCREEN);
   } else {
     x = 0;
     y = 0;
@@ -174,9 +116,9 @@ int screenshot_capture_windows_display(const char *target,
     height = 1080;
   }
 
-  if ((width <= 0 || height <= 0) && g_gdi.GetSystemMetrics) {
-    width = g_gdi.GetSystemMetrics(SM_CXSCREEN);
-    height = g_gdi.GetSystemMetrics(SM_CYSCREEN);
+  if ((width <= 0 || height <= 0) && g_c2t_win32.GetSystemMetrics) {
+    width = g_c2t_win32.GetSystemMetrics(SM_CXSCREEN);
+    height = g_c2t_win32.GetSystemMetrics(SM_CYSCREEN);
     x = 0;
     y = 0;
   }
@@ -186,29 +128,29 @@ int screenshot_capture_windows_display(const char *target,
     return 0;
   }
 
-  HDC screen = g_gdi.GetDC(NULL);
+  HDC screen = g_c2t_win32.GetDC(NULL);
   if (!screen) {
-    c2t_log_warning("screenshot", "GetDC failed");
+    c2t_log_warning("screenshot", "GetDC failed via win32_api");
     return 0;
   }
 
-  HDC memory = g_gdi.CreateCompatibleDC(screen);
-  HBITMAP bitmap = g_gdi.CreateCompatibleBitmap(screen, width, height);
+  HDC memory = g_c2t_win32.CreateCompatibleDC(screen);
+  HBITMAP bitmap = g_c2t_win32.CreateCompatibleBitmap(screen, width, height);
   if (!memory || !bitmap) {
-    c2t_log_warning("screenshot", "GDI DC or bitmap creation failed");
-    if (bitmap) g_gdi.DeleteObject(bitmap);
-    if (memory) g_gdi.DeleteDC(memory);
-    g_gdi.ReleaseDC(NULL, screen);
+    c2t_log_warning("screenshot", "GDI DC or bitmap creation failed via win32_api");
+    if (bitmap) g_c2t_win32.DeleteObject(bitmap);
+    if (memory) g_c2t_win32.DeleteDC(memory);
+    g_c2t_win32.ReleaseDC(NULL, screen);
     return 0;
   }
 
-  HGDIOBJ prev = g_gdi.SelectObject(memory, bitmap);
-  if (!g_gdi.BitBlt(memory, 0, 0, width, height, screen, x, y, SRCCOPY | CAPTUREBLT)) {
-    c2t_log_warning("screenshot", "BitBlt failed");
-    g_gdi.SelectObject(memory, prev);
-    g_gdi.DeleteObject(bitmap);
-    g_gdi.DeleteDC(memory);
-    g_gdi.ReleaseDC(NULL, screen);
+  HGDIOBJ prev = g_c2t_win32.SelectObject(memory, bitmap);
+  if (!g_c2t_win32.BitBlt(memory, 0, 0, width, height, screen, x, y, SRCCOPY | CAPTUREBLT)) {
+    c2t_log_warning("screenshot", "BitBlt failed via win32_api");
+    g_c2t_win32.SelectObject(memory, prev);
+    g_c2t_win32.DeleteObject(bitmap);
+    g_c2t_win32.DeleteDC(memory);
+    g_c2t_win32.ReleaseDC(NULL, screen);
     return 0;
   }
 
@@ -228,10 +170,10 @@ int screenshot_capture_windows_display(const char *target,
   unsigned char *bmp_buf = (unsigned char *)malloc(total_size);
   if (!bmp_buf) {
     c2t_log_error("screenshot", "Out of memory allocating screenshot buffer (%zu bytes)", total_size);
-    g_gdi.SelectObject(memory, prev);
-    g_gdi.DeleteObject(bitmap);
-    g_gdi.DeleteDC(memory);
-    g_gdi.ReleaseDC(NULL, screen);
+    g_c2t_win32.SelectObject(memory, prev);
+    g_c2t_win32.DeleteObject(bitmap);
+    g_c2t_win32.DeleteDC(memory);
+    g_c2t_win32.ReleaseDC(NULL, screen);
     return 0;
   }
 
@@ -247,20 +189,20 @@ int screenshot_capture_windows_display(const char *target,
   bih->biSizeImage = (DWORD)image_size;
 
   unsigned char *pixels = bmp_buf + header_size;
-  if (!g_gdi.GetDIBits(memory, bitmap, 0, (UINT)height, pixels, &bmi, DIB_RGB_COLORS)) {
-    c2t_log_warning("screenshot", "GetDIBits failed");
+  if (!g_c2t_win32.GetDIBits(memory, bitmap, 0, (UINT)height, pixels, &bmi, DIB_RGB_COLORS)) {
+    c2t_log_warning("screenshot", "GetDIBits failed via win32_api");
     free(bmp_buf);
-    g_gdi.SelectObject(memory, prev);
-    g_gdi.DeleteObject(bitmap);
-    g_gdi.DeleteDC(memory);
-    g_gdi.ReleaseDC(NULL, screen);
+    g_c2t_win32.SelectObject(memory, prev);
+    g_c2t_win32.DeleteObject(bitmap);
+    g_c2t_win32.DeleteDC(memory);
+    g_c2t_win32.ReleaseDC(NULL, screen);
     return 0;
   }
 
-  g_gdi.SelectObject(memory, prev);
-  g_gdi.DeleteObject(bitmap);
-  g_gdi.DeleteDC(memory);
-  g_gdi.ReleaseDC(NULL, screen);
+  g_c2t_win32.SelectObject(memory, prev);
+  g_c2t_win32.DeleteObject(bitmap);
+  g_c2t_win32.DeleteDC(memory);
+  g_c2t_win32.ReleaseDC(NULL, screen);
 
   *out_data = bmp_buf;
   *out_size = total_size;
