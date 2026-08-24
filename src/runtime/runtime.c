@@ -1223,8 +1223,18 @@ int c2t_runtime_stop(unsigned int timeout_ms, int force) {
 
   unsigned int elapsed = 0;
   while (elapsed < timeout_ms) {
-    if (c2t_runtime_get_status(&status) == 0)
+    int st = c2t_runtime_get_status(&status);
+    if (st == 0)
       return 1;
+    if (st > 0 && elapsed > 0 && (elapsed % 1000 == 0)) {
+      pid_t cur_target = status.supervisor_pid ? (pid_t)status.supervisor_pid
+                                               : (pid_t)status.process_id;
+      if (cur_target && kill(cur_target, 0) == 0)
+        kill(cur_target, SIGTERM);
+      if (status.process_id && (pid_t)status.process_id != cur_target &&
+          kill((pid_t)status.process_id, 0) == 0)
+        kill((pid_t)status.process_id, SIGTERM);
+    }
     sleep_ms(100);
     elapsed += 100;
   }
@@ -1351,6 +1361,11 @@ int c2t_runtime_run_supervisor(int argc, char **argv) {
   if (acquired < 0) {
     fprintf(stderr, "Unable to create the c2t daemon state\n");
     return 1;
+  }
+
+  if (existing_worker_pid > 0) {
+    (void)state_write_extended("running", existing_worker_pid,
+                               (unsigned long)getpid());
   }
 
   c2t_log_info("supervisor",
@@ -1621,7 +1636,8 @@ static HANDLE worker_watchdog_thread = NULL;
 static pthread_t worker_watchdog_thread;
 #endif
 
-static void spawn_supervisor_process([[maybe_unused]] int argc, char **argv) {
+static unsigned long spawn_supervisor_process([[maybe_unused]] int argc,
+                                               char **argv) {
   char executable[C2T_PATH_CAPACITY] = {};
 #if defined(_WIN32)
   if (GetModuleFileNameA(nullptr, executable, sizeof(executable)) == 0) {
@@ -1635,9 +1651,12 @@ static void spawn_supervisor_process([[maybe_unused]] int argc, char **argv) {
   PROCESS_INFORMATION process;
   if (CreateProcessA(nullptr, command, nullptr, nullptr, FALSE,
                      CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process)) {
+    unsigned long child_pid = (unsigned long)process.dwProcessId;
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
+    return child_pid;
   }
+  return 0;
 #else
 #if defined(__linux__)
   ssize_t link_len =
@@ -1661,7 +1680,7 @@ static void spawn_supervisor_process([[maybe_unused]] int argc, char **argv) {
 
   char **sup_argv = malloc((size_t)(argc + 3) * sizeof(char *));
   if (!sup_argv)
-    return;
+    return 0;
   int sup_argc = 0;
   sup_argv[sup_argc++] = (argv && argv[0]) ? argv[0] : (char *)"c2t";
   sup_argv[sup_argc++] = (char *)"run";
@@ -1681,6 +1700,7 @@ static void spawn_supervisor_process([[maybe_unused]] int argc, char **argv) {
     _exit(1);
   }
   free(sup_argv);
+  return pid > 0 ? (unsigned long)pid : 0;
 #endif
 }
 
@@ -1754,8 +1774,8 @@ static void *worker_watchdog_func(void *arg) {
               "worker",
               "Supervisor process (PID %lu) died or was killed. Restoring supervisor process...",
               last_supervisor_pid);
-          spawn_supervisor_process(watchdog_ctx.argc, watchdog_ctx.argv);
-          last_supervisor_pid = 0;
+          last_supervisor_pid =
+              spawn_supervisor_process(watchdog_ctx.argc, watchdog_ctx.argv);
           supervisor_sleep_ms(2000);
         }
       }

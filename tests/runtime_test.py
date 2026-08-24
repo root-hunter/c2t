@@ -254,6 +254,9 @@ def main():
 
             assert sup_pid_2 > 1 and sup_pid_2 != sup_pid_1
 
+            # Give restored supervisor a brief moment to settle and write state
+            time.sleep(0.3)
+
             # 4. Test SECOND supervisor kill cycle to verify permanent mutual resilience
             safe_kill(sup_pid_2, signal.SIGKILL)
 
@@ -277,6 +280,9 @@ def main():
                 raise AssertionError("supervisor process was not restored on second SIGKILL cycle")
 
             assert sup_pid_3 > 1 and sup_pid_3 != sup_pid_2
+
+            # Give restored supervisor a brief moment to settle and write state
+            time.sleep(0.3)
 
             # Verify worker daemon worker_pid_3 remained alive throughout both supervisor kills
             safe_kill(worker_pid_3, 0)
