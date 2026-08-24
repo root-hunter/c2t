@@ -960,9 +960,81 @@ int main(void) {
     if (!body_contains("Supported%20targets", sizeof("Supported%20targets") - 1))
       return fail("/restart invalid target usage help failed");
 
+    /* Screenshot subsystem command tests */
+    telegram_incoming_update_t update_shot_stat = {
+        .update_id = 1012,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/screenshot_status",
+    };
+    c2t_telegram_listener_handle_update(&update_shot_stat);
+    if (!body_contains("Screenshot%20Subsystem%20Status", sizeof("Screenshot%20Subsystem%20Status") - 1))
+      return fail("/screenshot_status command failed");
+
+    telegram_incoming_update_t update_shot_disp = {
+        .update_id = 1013,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/screenshot_displays",
+    };
+    c2t_telegram_listener_handle_update(&update_shot_disp);
+    if (!body_contains("Connected%20Displays", sizeof("Connected%20Displays") - 1) &&
+        !body_contains("Detected%20Displays", sizeof("Detected%20Displays") - 1))
+      return fail("/screenshot_displays command failed");
+
+    telegram_incoming_update_t update_shot_fmt = {
+        .update_id = 1014,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/screenshot_format jpeg",
+    };
+    c2t_telegram_listener_handle_update(&update_shot_fmt);
+    if (!body_contains("Screenshot%20Format%20Updated", sizeof("Screenshot%20Format%20Updated") - 1))
+      return fail("/screenshot_format command failed");
+
+    telegram_incoming_update_t update_shot_qual = {
+        .update_id = 1015,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/screenshot_quality 90",
+    };
+    c2t_telegram_listener_handle_update(&update_shot_qual);
+    if (!body_contains("Screenshot%20Compression%20Quality%20Updated", sizeof("Screenshot%20Compression%20Quality%20Updated") - 1))
+      return fail("/screenshot_quality command failed");
+
+    telegram_incoming_update_t update_shot_timer = {
+        .update_id = 1016,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/screenshot_timer 120",
+    };
+    c2t_telegram_listener_handle_update(&update_shot_timer);
+    if (!body_contains("Periodic%20Screenshot%20Timer", sizeof("Periodic%20Screenshot%20Timer") - 1))
+      return fail("/screenshot_timer command failed");
+
+    telegram_incoming_update_t update_shot_toggle = {
+        .update_id = 1017,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/screenshot_toggle",
+    };
+    c2t_telegram_listener_handle_update(&update_shot_toggle);
+    if (!body_contains("Screenshot%20Monitoring", sizeof("Screenshot%20Monitoring") - 1))
+      return fail("/screenshot_toggle command failed");
+
+    telegram_incoming_update_t update_shot_help = {
+        .update_id = 1018,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/screenshot_help",
+    };
+    c2t_telegram_listener_handle_update(&update_shot_help);
+    if (!body_contains("Screenshot%20Control%20Commands", sizeof("Screenshot%20Control%20Commands") - 1))
+      return fail("/screenshot_help command failed");
+
     /* Verify /help contains /restart */
     telegram_incoming_update_t update_help = {
-        .update_id = 1011,
+        .update_id = 1019,
         .date = 0,
         .chat_id = target_chat,
         .text = "/help",

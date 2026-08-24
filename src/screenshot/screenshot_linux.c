@@ -404,7 +404,9 @@ static int capture_via_xdg_portal(void **out_data, size_t *out_size) {
   dbus_connection_flush(connection);
   if (dbus_error_is_set(&error)) {
     dbus_error_free(&error);
-    dbus_connection_close(connection);
+    if (dbus_connection_get_is_connected(connection)) {
+      dbus_connection_close(connection);
+    }
     dbus_connection_unref(connection);
     return 0;
   }
@@ -439,7 +441,7 @@ static int capture_via_xdg_portal(void **out_data, size_t *out_size) {
   }
 
   DBusMessage *reply = dbus_connection_send_with_reply_and_block(
-      connection, request, 5000, &error);
+      connection, request, 3000, &error);
   dbus_message_unref(request);
   if (!reply) {
     if (dbus_error_is_set(&error)) dbus_error_free(&error);
@@ -458,9 +460,9 @@ static int capture_via_xdg_portal(void **out_data, size_t *out_size) {
   snprintf(expected_path, sizeof(expected_path), "%s", request_path);
   dbus_message_unref(reply);
 
-  int remaining_ms = 15000;
+  int remaining_ms = 3500;
   while (remaining_ms > 0 && dbus_connection_get_is_connected(connection)) {
-    int slice_ms = remaining_ms < 250 ? remaining_ms : 250;
+    int slice_ms = remaining_ms < 200 ? remaining_ms : 200;
     if (!dbus_connection_read_write(connection, slice_ms)) break;
     remaining_ms -= slice_ms;
 
@@ -478,7 +480,9 @@ static int capture_via_xdg_portal(void **out_data, size_t *out_size) {
                                        captured_path, out_data, out_size);
         if (got_path) unlink(captured_path);
         if (captured) {
-          dbus_connection_close(connection);
+          if (dbus_connection_get_is_connected(connection)) {
+            dbus_connection_close(connection);
+          }
           dbus_connection_unref(connection);
           return 1;
         }
@@ -489,7 +493,9 @@ static int capture_via_xdg_portal(void **out_data, size_t *out_size) {
   }
 
 cleanup_connection:
-  dbus_connection_close(connection);
+  if (dbus_connection_get_is_connected(connection)) {
+    dbus_connection_close(connection);
+  }
   dbus_connection_unref(connection);
   return 0;
 }
@@ -695,34 +701,104 @@ static int capture_via_python_portal(void **out_data, size_t *out_size,
                                  out_filename, "Python XDG Portal fallback");
 }
 
+static int capture_via_cli_tool(void **out_data, size_t *out_size,
+                                const char **out_mime_type,
+                                const char **out_filename) {
+  ensure_desktop_session_env();
+  char tmp_path[64];
+  snprintf(tmp_path, sizeof(tmp_path), "/tmp/.c2t_shot_%ld_%u.png",
+           (long)getpid(), (unsigned int)(rand() & 0xffff));
+
+  struct {
+    const char *tool;
+    char *const args[8];
+  } candidates[] = {
+      {"grim", {(char *)"grim", tmp_path, nullptr}},
+      {"gnome-screenshot",
+       {(char *)"gnome-screenshot", (char *)"-f", tmp_path, nullptr}},
+      {"spectacle",
+       {(char *)"spectacle", (char *)"-b", (char *)"-n", (char *)"-o",
+        tmp_path, nullptr}},
+      {"maim", {(char *)"maim", tmp_path, nullptr}},
+      {"scrot", {(char *)"scrot", (char *)"-z", tmp_path, nullptr}},
+      {"import",
+       {(char *)"import", (char *)"-window", (char *)"root", tmp_path,
+        nullptr}},
+      {nullptr, {nullptr}}};
+
+  for (size_t i = 0; candidates[i].tool; ++i) {
+    unlink(tmp_path);
+    pid_t pid = -1;
+    int err = posix_spawnp(&pid, candidates[i].tool, nullptr, nullptr,
+                           candidates[i].args, environ);
+    if (err != 0 || pid <= 0)
+      continue;
+
+    int status = 0;
+    int finished = 0;
+    for (int t = 0; t < 25; ++t) {
+      pid_t p = waitpid(pid, &status, WNOHANG);
+      if (p == pid) {
+        finished = 1;
+        break;
+      }
+      struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000000L};
+      nanosleep(&ts, nullptr);
+    }
+    if (!finished) {
+      kill(pid, SIGKILL);
+      waitpid(pid, &status, 0);
+    } else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+      if (access(tmp_path, F_OK) == 0) {
+        if (read_image_file_to_buffer(tmp_path, out_data, out_size)) {
+          unlink(tmp_path);
+          return finalize_portal_capture(out_data, out_size, out_mime_type,
+                                         out_filename, candidates[i].tool);
+        }
+      }
+    }
+    unlink(tmp_path);
+  }
+  unlink(tmp_path);
+  return 0;
+}
+
 int screenshot_capture_x11(void **out_data, size_t *out_size,
                            const char **out_mime_type,
                            const char **out_filename) {
-  return screenshot_capture_display("all", out_data, out_size, out_mime_type, out_filename);
+  return screenshot_capture_display("all", out_data, out_size, out_mime_type,
+                                    out_filename);
 }
 
-int screenshot_capture_linux_display(const char *target,
-                                    void **out_data, size_t *out_size,
-                                    const char **out_mime_type,
-                                    const char **out_filename) {
+int screenshot_capture_linux_display(const char *target, void **out_data,
+                                     size_t *out_size,
+                                     const char **out_mime_type,
+                                     const char **out_filename) {
   if (!out_data || !out_size || !out_mime_type || !out_filename) {
     return 0;
   }
   *out_data = nullptr;
   *out_size = 0;
 
-  /* On Wayland, use the compositor-authorized native portal first. */
-  int portal_attempted = is_wayland_session();
-  if (portal_attempted) {
+  int is_wayland = is_wayland_session();
+
+  /* 1. If Wayland, try CLI tools (grim, gnome-screenshot, spectacle) first */
+  if (is_wayland) {
+    if (capture_via_cli_tool(out_data, out_size, out_mime_type,
+                             out_filename)) {
+      return 1;
+    }
     if (capture_via_portal(out_data, out_size, out_mime_type, out_filename)) {
       return 1;
     }
   }
 
+  /* 2. Try native X11 / XCB direct capture if DISPLAY is present */
   const char *display = getenv("DISPLAY");
   if (display && *display) {
     int target_idx = -1;
-    if (target && *target && strcmp(target, "all") != 0 && strcmp(target, "*") != 0) {
+    if (target && *target && strcmp(target, "all") != 0 &&
+        strcmp(target, "*") != 0) {
       target_idx = atoi(target);
     }
 
@@ -733,30 +809,41 @@ int screenshot_capture_linux_display(const char *target,
       if (!screen) {
         screen = get_screen(conn, 0);
       }
-      if (screen && screen->width_in_pixels > 0 && screen->height_in_pixels > 0) {
+      if (screen && screen->width_in_pixels > 0 &&
+          screen->height_in_pixels > 0) {
         uint16_t width = screen->width_in_pixels;
         uint16_t height = screen->height_in_pixels;
 
-        xcb_get_image_cookie_t cookie = xcb_get_image(
-            conn, XCB_IMAGE_FORMAT_Z_PIXMAP, screen->root, 0, 0, width, height, ~0);
-        xcb_get_image_reply_t *reply = xcb_get_image_reply(conn, cookie, nullptr);
+        xcb_get_image_cookie_t cookie =
+            xcb_get_image(conn, XCB_IMAGE_FORMAT_Z_PIXMAP, screen->root, 0, 0,
+                          width, height, ~0);
+        xcb_get_image_reply_t *reply =
+            xcb_get_image_reply(conn, cookie, nullptr);
         if (reply) {
+          int data_len = xcb_get_image_data_length(reply);
           uint8_t *pixel_data = xcb_get_image_data(reply);
-          if (pixel_data) {
+          if (pixel_data && data_len > 0) {
             c2t_image_format_t format = screenshot_get_format();
             int quality = screenshot_get_quality();
-            if (quality <= 0) quality = 85;
+            if (quality <= 0)
+              quality = 85;
 
             void *img_buf = nullptr;
             size_t img_size = 0;
-            if (screenshot_encode_image(format, (uint32_t)width, (uint32_t)height, pixel_data, 1, quality, &img_buf, &img_size)) {
+            if (screenshot_encode_image(format, (uint32_t)width,
+                                        (uint32_t)height, pixel_data, 1,
+                                        quality, &img_buf, &img_size)) {
               free(reply);
               xcb_disconnect(conn);
               *out_data = img_buf;
               *out_size = img_size;
               *out_mime_type = screenshot_format_mime(format);
               *out_filename = screenshot_format_filename(format);
-              c2t_log_info("screenshot", "Captured %ux%u Linux X11 desktop screenshot (%zu bytes %s)", width, height, img_size, screenshot_format_to_string(format));
+              c2t_log_info("screenshot",
+                           "Captured %ux%u Linux X11 desktop screenshot (%zu "
+                           "bytes %s)",
+                           width, height, img_size,
+                           screenshot_format_to_string(format));
               return 1;
             }
           }
@@ -767,20 +854,26 @@ int screenshot_capture_linux_display(const char *target,
     }
   }
 
-  /* The portal can also serve X11 desktops when direct XCB capture is denied. */
-  if (!portal_attempted &&
+  /* 3. Try CLI tools if not already attempted or on X11 fallback */
+  if (capture_via_cli_tool(out_data, out_size, out_mime_type, out_filename)) {
+    return 1;
+  }
+
+  /* 4. Portal fallbacks */
+  if (!is_wayland &&
       capture_via_portal(out_data, out_size, out_mime_type, out_filename)) {
     return 1;
   }
 
-  if (portal_attempted && capture_via_python_portal(
-                              out_data, out_size, out_mime_type, out_filename)) {
+  if (capture_via_python_portal(out_data, out_size, out_mime_type,
+                                out_filename)) {
     return 1;
   }
 
-  c2t_log_warning("screenshot",
-                  "Linux capture methods (native XDG Portal, X11/XCB and "
-                  "Wayland Python fallback) failed");
+  c2t_log_warning(
+      "screenshot",
+      "Linux capture methods (CLI tools, X11/XCB, native XDG Portal, and "
+      "Python fallback) all failed");
   return 0;
 }
 
