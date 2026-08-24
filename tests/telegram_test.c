@@ -27,6 +27,7 @@
 #include "logging/log_sender.h"
 #include "logging/logging.h"
 #include "screenshot/screenshot.h"
+#include "screenshot/screenshot_jpeg.h"
 #include "screenshot/screenshot_output.h"
 #include "screenshot/screenshot_png.h"
 #include "telegram/telegram.h"
@@ -1533,6 +1534,25 @@ int main(void) {
       return fail("PNG stored-Deflate block boundary mismatch");
     }
     free(png_out);
+
+    void *jpeg_out = nullptr;
+    size_t jpeg_len = 0;
+    if (!screenshot_encode_jpeg_rgba(16, 16, test_pixels, 1, 85, &jpeg_out, &jpeg_len) || !jpeg_out || jpeg_len < 32)
+      return fail("screenshot_encode_jpeg_rgba failed");
+    const uint8_t *jpeg_bytes = jpeg_out;
+    if (jpeg_bytes[0] != 0xff || jpeg_bytes[1] != 0xd8 ||
+        jpeg_bytes[jpeg_len - 2] != 0xff || jpeg_bytes[jpeg_len - 1] != 0xd9) {
+      free(jpeg_out);
+      return fail("screenshot_encode_jpeg_rgba invalid JPEG markers (SOI/EOI)");
+    }
+    free(jpeg_out);
+
+    jpeg_out = (void *)1;
+    jpeg_len = 123;
+    if (screenshot_encode_jpeg_rgba(0, 16, test_pixels, 0, 85, &jpeg_out,
+                                    &jpeg_len) ||
+        jpeg_out != nullptr || jpeg_len != 0)
+      return fail("screenshot_encode_jpeg_rgba invalid-input contract mismatch");
   }
 
   (void)screenshot_get_total_captures();
