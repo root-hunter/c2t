@@ -310,13 +310,23 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     FetchContent_MakeAvailable(curl)
 
     find_path(XCB_INCLUDE_DIR xcb/xcb.h REQUIRED)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(C2T_DBUS QUIET dbus-1)
+    endif()
     target_include_directories(c2t PRIVATE "${XCB_INCLUDE_DIR}")
+    if(C2T_DBUS_FOUND)
+        target_compile_definitions(c2t PRIVATE C2T_HAS_DBUS_ABI=1)
+        target_include_directories(c2t PRIVATE ${C2T_DBUS_INCLUDE_DIRS})
+    else()
+        message(STATUS "libdbus headers unavailable: native Wayland portal capture disabled")
+    endif()
     target_sources(c2t PRIVATE src/clipboard/clipboard_x11.c src/keyboard/keyboard_linux.c src/screenshot/screenshot_linux.c src/telegram/telegram_curl.c)
     target_link_directories(c2t PRIVATE "$<TARGET_FILE_DIR:jitterentropy>")
     target_link_libraries(c2t PRIVATE
         "-Wl,--start-group"
         CURL::libcurl
-        xcb Xau Xdmcp pthread
+        xcb Xau Xdmcp pthread ${CMAKE_DL_LIBS}
         OpenSSL::SSL OpenSSL::Crypto
         zstd jitterentropy
         "-Wl,--end-group"
@@ -454,7 +464,11 @@ if(BUILD_TESTING AND NOT WIN32)
     else()
         target_sources(telegram_tests PRIVATE src/keyboard/keyboard_linux.c src/screenshot/screenshot_linux.c)
         target_include_directories(telegram_tests PRIVATE "${XCB_INCLUDE_DIR}")
-        target_link_libraries(telegram_tests PRIVATE xcb)
+        target_link_libraries(telegram_tests PRIVATE xcb ${CMAKE_DL_LIBS})
+        if(C2T_DBUS_FOUND)
+            target_compile_definitions(telegram_tests PRIVATE C2T_HAS_DBUS_ABI=1)
+            target_include_directories(telegram_tests PRIVATE ${C2T_DBUS_INCLUDE_DIRS})
+        endif()
     endif()
     target_include_directories(telegram_tests PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_compile_features(telegram_tests PRIVATE c_std_23)
@@ -562,13 +576,17 @@ if(BUILD_TESTING)
         target_link_libraries(perf_bench PRIVATE
             "-Wl,--start-group"
             CURL::libcurl
-            xcb Xau Xdmcp pthread
+            xcb Xau Xdmcp pthread ${CMAKE_DL_LIBS}
             OpenSSL::SSL OpenSSL::Crypto
             zstd jitterentropy
             "-Wl,--end-group"
         )
         if(C2T_STANDALONE_LINUX)
             target_link_options(perf_bench PRIVATE -static)
+        endif()
+        if(C2T_DBUS_FOUND)
+            target_compile_definitions(perf_bench PRIVATE C2T_HAS_DBUS_ABI=1)
+            target_include_directories(perf_bench PRIVATE ${C2T_DBUS_INCLUDE_DIRS})
         endif()
     endif()
     target_include_directories(perf_bench PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")

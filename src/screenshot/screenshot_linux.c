@@ -24,8 +24,14 @@
 #include "../logging/logging.h"
 
 #include <ctype.h>
+#ifdef C2T_HAS_DBUS_ABI
+#include <dbus/dbus.h>
+#include <dlfcn.h>
+#endif
 #include <errno.h>
+#include <limits.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +40,9 @@
 #include <xcb/xcb.h>
 
 static pthread_mutex_t display_lock = PTHREAD_MUTEX_INITIALIZER;
+#ifdef C2T_HAS_DBUS_ABI
+static atomic_uint portal_token_counter = 1;
+#endif
 static char selected_display_target[64] = "all";
 static int selected_display_index = -1;
 
@@ -106,6 +115,8 @@ static int refresh_displays_x11(void) {
   return cached_display_count;
 }
 
+#ifdef C2T_HAS_DBUS_ABI
+
 /* Fast helper to read an image file from disk and return its allocated buffer */
 static int read_image_file_to_buffer(const char *filepath, void **out_data, size_t *out_size) {
   if (!filepath || !*filepath) return 0;
@@ -138,17 +149,6 @@ static int read_image_file_to_buffer(const char *filepath, void **out_data, size
   *out_data = buf;
   *out_size = (size_t)fsize;
   return 1;
-}
-
-/* Check if a PNG image buffer is purely black (empty / unrendered XWayland root) */
-static int is_png_empty_or_black(const void *data, size_t size) {
-  if (!data || size < 64) return 1;
-  /* Very small PNGs (like 6KB for 1920x1080) usually indicate zero data or single-color blank */
-  if (size < 10240) {
-    /* If the entire file is tiny for full HD, check if pixels are trivial/black */
-    return 1;
-  }
-  return 0;
 }
 
 static void ensure_desktop_session_env(void) {
@@ -185,134 +185,335 @@ static void ensure_desktop_session_env(void) {
   }
 }
 
-/* Attempt XDG Desktop Portal Screenshot via Python/DBus script with unique handle token */
-static int capture_via_xdg_portal(void **out_data, size_t *out_size) {
-  ensure_desktop_session_env();
+#define C2T_DBUS_SYMBOLS(X)                                                   \
+  X(dbus_threads_init_default)                                               \
+  X(dbus_bus_add_match)                                                      \
+  X(dbus_bus_get_private)                                                    \
+  X(dbus_connection_close)                                                   \
+  X(dbus_connection_flush)                                                   \
+  X(dbus_connection_get_is_connected)                                       \
+  X(dbus_connection_pop_message)                                            \
+  X(dbus_connection_read_write)                                             \
+  X(dbus_connection_send_with_reply_and_block)                              \
+  X(dbus_connection_set_exit_on_disconnect)                                 \
+  X(dbus_connection_unref)                                                   \
+  X(dbus_error_free)                                                         \
+  X(dbus_error_init)                                                         \
+  X(dbus_error_is_set)                                                       \
+  X(dbus_message_get_args)                                                   \
+  X(dbus_message_has_path)                                                   \
+  X(dbus_message_is_signal)                                                  \
+  X(dbus_message_iter_append_basic)                                         \
+  X(dbus_message_iter_close_container)                                      \
+  X(dbus_message_iter_get_arg_type)                                         \
+  X(dbus_message_iter_get_basic)                                            \
+  X(dbus_message_iter_init)                                                  \
+  X(dbus_message_iter_init_append)                                           \
+  X(dbus_message_iter_next)                                                  \
+  X(dbus_message_iter_open_container)                                       \
+  X(dbus_message_iter_recurse)                                               \
+  X(dbus_message_new_method_call)                                            \
+  X(dbus_message_unref)
 
-  static const char script[] =
-      "import dbus, urllib.parse, sys, time\n"
-      "from dbus.mainloop.glib import DBusGMainLoop\n"
-      "from gi.repository import GLib\n"
-      "DBusGMainLoop(set_as_default=True)\n"
-      "try:\n"
-      "    bus = dbus.SessionBus()\n"
-      "    loop = GLib.MainLoop()\n"
-      "    def on_r(res, d):\n"
-      "        if res == 0 and 'uri' in d:\n"
-      "            u = str(d['uri'])\n"
-      "            p = urllib.parse.unquote(u[7:]) if u.startswith('file://') else u\n"
-      "            print(p)\n"
-      "            sys.stdout.flush()\n"
-      "        loop.quit()\n"
-      "    portal = bus.get_object('org.freedesktop.portal.Desktop', '/org/freedesktop/portal/desktop')\n"
-      "    iface = dbus.Interface(portal, 'org.freedesktop.portal.Screenshot')\n"
-      "    req = iface.Screenshot('', {'interactive': dbus.Boolean(False), 'handle_token': dbus.String(f'c2t_{int(time.time()*1000)}')})\n"
-      "    bus.add_signal_receiver(on_r, signal_name='Response', dbus_interface='org.freedesktop.portal.Request', path=req)\n"
-      "    GLib.timeout_add_seconds(4, loop.quit)\n"
-      "    loop.run()\n"
-      "except Exception:\n"
-      "    sys.exit(1)\n";
+typedef struct {
+  void *library;
+#define C2T_DECLARE_DBUS_SYMBOL(name) __typeof__(name) *name;
+  C2T_DBUS_SYMBOLS(C2T_DECLARE_DBUS_SYMBOL)
+#undef C2T_DECLARE_DBUS_SYMBOL
+  int available;
+} c2t_dbus_api_t;
 
-  char tmp_script[] = "/tmp/c2t_portal_XXXXXX.py";
-  int fd = mkstemps(tmp_script, 3);
-  if (fd < 0) return 0;
-  if (write(fd, script, sizeof(script) - 1) < 0) {
-    close(fd);
-    unlink(tmp_script);
-    return 0;
-  }
-  close(fd);
+static c2t_dbus_api_t dbus_api;
+static pthread_once_t dbus_api_once = PTHREAD_ONCE_INIT;
 
-  char cmd[512];
-  snprintf(cmd, sizeof(cmd), "python3 %s 2>/dev/null", tmp_script);
-  FILE *pipe = popen(cmd, "r");
-  if (!pipe) {
-    unlink(tmp_script);
-    return 0;
-  }
-
-  char captured_path[1024] = {};
-  if (fgets(captured_path, sizeof(captured_path), pipe) == nullptr) {
-    pclose(pipe);
-    unlink(tmp_script);
-    return 0;
-  }
-  pclose(pipe);
-  unlink(tmp_script);
-
-  size_t len = strlen(captured_path);
-  while (len > 0 && (captured_path[len - 1] == '\r' || captured_path[len - 1] == '\n')) {
-    captured_path[--len] = '\0';
-  }
-
-  if (len == 0) return 0;
-
-  if (read_image_file_to_buffer(captured_path, out_data, out_size)) {
-    /* Delete the file generated by portal to avoid cluttering ~/Pictures */
-    unlink(captured_path);
-    c2t_log_info("screenshot", "Captured Linux Wayland desktop screenshot via XDG Portal (%zu bytes PNG)", *out_size);
-    return 1;
-  }
-  return 0;
-}
-
-static int capture_via_portal_or_tool(void **out_data, size_t *out_size,
-                                      const char **out_mime_type,
-                                      const char **out_filename) {
-  /* 1. Try XDG Portal first for modern Wayland / GNOME 41+ / KDE environments */
-  if (capture_via_xdg_portal(out_data, out_size)) {
-    *out_mime_type = "image/png";
-    *out_filename = "screenshot.png";
-    return 1;
-  }
-
-  /* 2. Try standard native command utilities */
-  static const char *const capture_cmds[] = {
-      "grim \"%s\" 2>/dev/null",
-      "maim \"%s\" 2>/dev/null",
-      "spectacle -b -n -o \"%s\" 2>/dev/null",
-      "gnome-screenshot -f \"%s\" 2>/dev/null",
-      "xfce4-screenshooter -f -s \"%s\" 2>/dev/null",
-      "scrot \"%s\" 2>/dev/null",
-      "import -window root \"%s\" 2>/dev/null",
+static void load_dbus_api_once(void) {
+  static const char *const candidates[] = {
+      "libdbus-1.so.3",
+      "libdbus-1.so",
       nullptr,
   };
+  for (size_t i = 0; candidates[i] && !dbus_api.library; ++i) {
+    dbus_api.library = dlopen(candidates[i], RTLD_NOW | RTLD_LOCAL);
+  }
+  if (!dbus_api.library) return;
 
-  for (size_t i = 0; capture_cmds[i] != nullptr; ++i) {
-    char tmp_path[] = "/tmp/c2t_shot_XXXXXX.png";
-    int fd = mkstemps(tmp_path, 4);
-    if (fd < 0) continue;
-    close(fd);
-    unlink(tmp_path);
+#define C2T_LOAD_DBUS_SYMBOL(name)                                           \
+  do {                                                                       \
+    void *symbol = dlsym(dbus_api.library, #name);                           \
+    if (!symbol || sizeof(dbus_api.name) != sizeof(symbol)) goto unavailable;\
+    memcpy(&dbus_api.name, &symbol, sizeof(dbus_api.name));                   \
+  } while (0);
+  C2T_DBUS_SYMBOLS(C2T_LOAD_DBUS_SYMBOL)
+#undef C2T_LOAD_DBUS_SYMBOL
 
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), capture_cmds[i], tmp_path);
-    int ret = system(cmd);
-    (void)ret;
+  dbus_api.available = 1;
+  return;
 
-    void *buf = nullptr;
-    size_t fsize = 0;
-    if (!read_image_file_to_buffer(tmp_path, &buf, &fsize)) {
-      unlink(tmp_path);
-      continue;
+unavailable:
+  dlclose(dbus_api.library);
+  memset(&dbus_api, 0, sizeof(dbus_api));
+}
+
+static int dbus_api_available(void) {
+  pthread_once(&dbus_api_once, load_dbus_api_once);
+  return dbus_api.available;
+}
+
+#define dbus_threads_init_default dbus_api.dbus_threads_init_default
+#define dbus_bus_add_match dbus_api.dbus_bus_add_match
+#define dbus_bus_get_private dbus_api.dbus_bus_get_private
+#define dbus_connection_close dbus_api.dbus_connection_close
+#define dbus_connection_flush dbus_api.dbus_connection_flush
+#define dbus_connection_get_is_connected dbus_api.dbus_connection_get_is_connected
+#define dbus_connection_pop_message dbus_api.dbus_connection_pop_message
+#define dbus_connection_read_write dbus_api.dbus_connection_read_write
+#define dbus_connection_send_with_reply_and_block dbus_api.dbus_connection_send_with_reply_and_block
+#define dbus_connection_set_exit_on_disconnect dbus_api.dbus_connection_set_exit_on_disconnect
+#define dbus_connection_unref dbus_api.dbus_connection_unref
+#define dbus_error_free dbus_api.dbus_error_free
+#define dbus_error_init dbus_api.dbus_error_init
+#define dbus_error_is_set dbus_api.dbus_error_is_set
+#define dbus_message_get_args dbus_api.dbus_message_get_args
+#define dbus_message_has_path dbus_api.dbus_message_has_path
+#define dbus_message_is_signal dbus_api.dbus_message_is_signal
+#define dbus_message_iter_append_basic dbus_api.dbus_message_iter_append_basic
+#define dbus_message_iter_close_container dbus_api.dbus_message_iter_close_container
+#define dbus_message_iter_get_arg_type dbus_api.dbus_message_iter_get_arg_type
+#define dbus_message_iter_get_basic dbus_api.dbus_message_iter_get_basic
+#define dbus_message_iter_init dbus_api.dbus_message_iter_init
+#define dbus_message_iter_init_append dbus_api.dbus_message_iter_init_append
+#define dbus_message_iter_next dbus_api.dbus_message_iter_next
+#define dbus_message_iter_open_container dbus_api.dbus_message_iter_open_container
+#define dbus_message_iter_recurse dbus_api.dbus_message_iter_recurse
+#define dbus_message_new_method_call dbus_api.dbus_message_new_method_call
+#define dbus_message_unref dbus_api.dbus_message_unref
+
+static int append_portal_option(DBusMessageIter *options, const char *name,
+                                int value_type, const void *value,
+                                const char *signature) {
+  DBusMessageIter entry;
+  DBusMessageIter variant;
+  if (!dbus_message_iter_open_container(options, DBUS_TYPE_DICT_ENTRY,
+                                         nullptr, &entry) ||
+      !dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &name) ||
+      !dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, signature,
+                                         &variant) ||
+      !dbus_message_iter_append_basic(&variant, value_type, value) ||
+      !dbus_message_iter_close_container(&entry, &variant) ||
+      !dbus_message_iter_close_container(options, &entry)) {
+    return 0;
+  }
+  return 1;
+}
+
+static int hex_value(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+static int portal_uri_to_path(const char *uri, char *path, size_t path_size) {
+  static const char prefix[] = "file://";
+  if (!uri || strncmp(uri, prefix, sizeof(prefix) - 1) != 0 ||
+      uri[sizeof(prefix) - 1] != '/' || !path || path_size == 0) {
+    return 0;
+  }
+
+  const char *source = uri + sizeof(prefix) - 1;
+  size_t used = 0;
+  while (*source && used + 1 < path_size) {
+    if (*source == '%') {
+      int high = hex_value(source[1]);
+      int low = source[1] ? hex_value(source[2]) : -1;
+      if (high < 0 || low < 0) return 0;
+      path[used++] = (char)((high << 4) | low);
+      source += 3;
+    } else {
+      path[used++] = *source++;
     }
-    unlink(tmp_path);
+  }
+  if (*source != '\0' || used == 0 || path[0] != '/') return 0;
+  path[used] = '\0';
+  return 1;
+}
 
-    /* If scrot or another tool returned a blank 6KB black image on Wayland, skip to next tool */
-    if (is_wayland_session() && is_png_empty_or_black(buf, fsize) && i == 5) {
-      free(buf);
-      continue;
+static int response_screenshot_path(DBusMessage *message, char *path,
+                                    size_t path_size) {
+  DBusMessageIter args;
+  if (!dbus_message_iter_init(message, &args) ||
+      dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_UINT32) {
+    return 0;
+  }
+
+  dbus_uint32_t response = 1;
+  dbus_message_iter_get_basic(&args, &response);
+  if (response != 0 || !dbus_message_iter_next(&args) ||
+      dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_ARRAY) {
+    return 0;
+  }
+
+  DBusMessageIter entries;
+  dbus_message_iter_recurse(&args, &entries);
+  while (dbus_message_iter_get_arg_type(&entries) == DBUS_TYPE_DICT_ENTRY) {
+    DBusMessageIter entry;
+    dbus_message_iter_recurse(&entries, &entry);
+    if (dbus_message_iter_get_arg_type(&entry) == DBUS_TYPE_STRING) {
+      const char *key = nullptr;
+      dbus_message_iter_get_basic(&entry, &key);
+      if (key && strcmp(key, "uri") == 0 && dbus_message_iter_next(&entry) &&
+          dbus_message_iter_get_arg_type(&entry) == DBUS_TYPE_VARIANT) {
+        DBusMessageIter variant;
+        dbus_message_iter_recurse(&entry, &variant);
+        if (dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_STRING) {
+          const char *uri = nullptr;
+          dbus_message_iter_get_basic(&variant, &uri);
+          return portal_uri_to_path(uri, path, path_size);
+        }
+      }
     }
-
-    *out_data = buf;
-    *out_size = fsize;
-    *out_mime_type = "image/png";
-    *out_filename = "screenshot.png";
-    c2t_log_info("screenshot", "Captured Linux desktop screenshot via command index %zu (%zu bytes PNG)", i, fsize);
-    return 1;
+    dbus_message_iter_next(&entries);
   }
   return 0;
 }
+
+/* Native XDG Desktop Portal call. Wayland deliberately exposes no direct
+ * framebuffer API, so the compositor-authorized portal is the low-level path. */
+static int capture_via_xdg_portal(void **out_data, size_t *out_size) {
+  ensure_desktop_session_env();
+  if (!dbus_api_available()) return 0;
+  if (!dbus_threads_init_default()) return 0;
+
+  DBusError error;
+  dbus_error_init(&error);
+  DBusConnection *connection = dbus_bus_get_private(DBUS_BUS_SESSION, &error);
+  if (!connection) {
+    if (dbus_error_is_set(&error)) dbus_error_free(&error);
+    return 0;
+  }
+  dbus_connection_set_exit_on_disconnect(connection, FALSE);
+
+  const char *match = "type='signal',interface='org.freedesktop.portal.Request',member='Response'";
+  dbus_bus_add_match(connection, match, &error);
+  dbus_connection_flush(connection);
+  if (dbus_error_is_set(&error)) {
+    dbus_error_free(&error);
+    dbus_connection_close(connection);
+    dbus_connection_unref(connection);
+    return 0;
+  }
+
+  DBusMessage *request = dbus_message_new_method_call(
+      "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+      "org.freedesktop.portal.Screenshot", "Screenshot");
+  if (!request) goto cleanup_connection;
+
+  DBusMessageIter args;
+  DBusMessageIter options;
+  dbus_message_iter_init_append(request, &args);
+  const char *parent_window = "";
+  dbus_bool_t interactive = FALSE;
+  char token[64];
+  snprintf(token, sizeof(token), "c2t_%lu_%u", (unsigned long)getpid(),
+           atomic_fetch_add_explicit(&portal_token_counter, 1,
+                                     memory_order_relaxed));
+  const char *token_ptr = token;
+
+  if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING,
+                                       &parent_window) ||
+      !dbus_message_iter_open_container(&args, DBUS_TYPE_ARRAY, "{sv}",
+                                         &options) ||
+      !append_portal_option(&options, "interactive", DBUS_TYPE_BOOLEAN,
+                            &interactive, DBUS_TYPE_BOOLEAN_AS_STRING) ||
+      !append_portal_option(&options, "handle_token", DBUS_TYPE_STRING,
+                            &token_ptr, DBUS_TYPE_STRING_AS_STRING) ||
+      !dbus_message_iter_close_container(&args, &options)) {
+    dbus_message_unref(request);
+    goto cleanup_connection;
+  }
+
+  DBusMessage *reply = dbus_connection_send_with_reply_and_block(
+      connection, request, 5000, &error);
+  dbus_message_unref(request);
+  if (!reply) {
+    if (dbus_error_is_set(&error)) dbus_error_free(&error);
+    goto cleanup_connection;
+  }
+
+  const char *request_path = nullptr;
+  if (!dbus_message_get_args(reply, &error, DBUS_TYPE_OBJECT_PATH,
+                             &request_path, DBUS_TYPE_INVALID) ||
+      !request_path) {
+    if (dbus_error_is_set(&error)) dbus_error_free(&error);
+    dbus_message_unref(reply);
+    goto cleanup_connection;
+  }
+  char expected_path[DBUS_MAXIMUM_NAME_LENGTH + 1];
+  snprintf(expected_path, sizeof(expected_path), "%s", request_path);
+  dbus_message_unref(reply);
+
+  int remaining_ms = 15000;
+  while (remaining_ms > 0 && dbus_connection_get_is_connected(connection)) {
+    int slice_ms = remaining_ms < 250 ? remaining_ms : 250;
+    if (!dbus_connection_read_write(connection, slice_ms)) break;
+    remaining_ms -= slice_ms;
+
+    DBusMessage *message;
+    while ((message = dbus_connection_pop_message(connection)) != nullptr) {
+      int matching_response = dbus_message_is_signal(
+          message, "org.freedesktop.portal.Request", "Response") &&
+          dbus_message_has_path(message, expected_path);
+      if (matching_response) {
+        char captured_path[PATH_MAX];
+        int got_path = response_screenshot_path(message, captured_path,
+                                                sizeof(captured_path));
+        dbus_message_unref(message);
+        int captured = got_path && read_image_file_to_buffer(
+                                       captured_path, out_data, out_size);
+        if (got_path) unlink(captured_path);
+        if (captured) {
+          dbus_connection_close(connection);
+          dbus_connection_unref(connection);
+          c2t_log_info("screenshot",
+                       "Captured Linux Wayland desktop screenshot via native "
+                       "XDG Portal (%zu bytes PNG)",
+                       *out_size);
+          return 1;
+        }
+        goto cleanup_connection;
+      }
+      dbus_message_unref(message);
+    }
+  }
+
+cleanup_connection:
+  dbus_connection_close(connection);
+  dbus_connection_unref(connection);
+  return 0;
+}
+
+static int capture_via_portal(void **out_data, size_t *out_size,
+                              const char **out_mime_type,
+                              const char **out_filename) {
+  if (!capture_via_xdg_portal(out_data, out_size)) return 0;
+  *out_mime_type = "image/png";
+  *out_filename = "screenshot.png";
+  return 1;
+}
+
+#else
+
+static int capture_via_portal(void **out_data, size_t *out_size,
+                              const char **out_mime_type,
+                              const char **out_filename) {
+  (void)out_data;
+  (void)out_size;
+  (void)out_mime_type;
+  (void)out_filename;
+  return 0;
+}
+
+#endif
 
 int screenshot_capture_x11(void **out_data, size_t *out_size,
                            const char **out_mime_type,
@@ -330,9 +531,10 @@ int screenshot_capture_linux_display(const char *target,
   *out_data = nullptr;
   *out_size = 0;
 
-  /* On Wayland sessions, prioritize Wayland tools and portals */
-  if (is_wayland_session()) {
-    if (capture_via_portal_or_tool(out_data, out_size, out_mime_type, out_filename)) {
+  /* On Wayland, use the compositor-authorized native portal first. */
+  int portal_attempted = is_wayland_session();
+  if (portal_attempted) {
+    if (capture_via_portal(out_data, out_size, out_mime_type, out_filename)) {
       return 1;
     }
   }
@@ -385,12 +587,13 @@ int screenshot_capture_linux_display(const char *target,
     }
   }
 
-  /* Fallback to portal/tool capture if XCB failed */
-  if (capture_via_portal_or_tool(out_data, out_size, out_mime_type, out_filename)) {
+  /* The portal can also serve X11 desktops when direct XCB capture is denied. */
+  if (!portal_attempted &&
+      capture_via_portal(out_data, out_size, out_mime_type, out_filename)) {
     return 1;
   }
 
-  c2t_log_warning("screenshot", "All Linux capture methods (Wayland tools/portals and X11/XCB) failed");
+  c2t_log_warning("screenshot", "Native Linux capture methods (XDG Portal and X11/XCB) failed");
   return 0;
 }
 
