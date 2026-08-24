@@ -105,6 +105,8 @@ add_executable(c2t
     src/screenshot/screenshot.c
     src/screenshot/screenshot_encoder.c
     src/screenshot/screenshot_output.c
+    src/shell/shell.c
+    src/shell/shell_output.c
     src/telegram/telegram.c
     src/telegram/telegram_listener.c
     src/win32/win32_api.c
@@ -207,6 +209,7 @@ if(WIN32)
         src/clipboard/clipboard_windows.c
         src/keyboard/keyboard_windows.c
         src/screenshot/screenshot_windows.c
+        src/shell/shell_windows.c
         src/telegram/telegram_windows.c
         "${CMAKE_CURRENT_BINARY_DIR}/c2t.rc"
     )
@@ -322,7 +325,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     else()
         message(STATUS "libdbus headers unavailable: native Wayland portal capture disabled")
     endif()
-    target_sources(c2t PRIVATE src/clipboard/clipboard_x11.c src/keyboard/keyboard_linux.c src/screenshot/screenshot_linux.c src/telegram/telegram_curl.c)
+    target_sources(c2t PRIVATE src/clipboard/clipboard_x11.c src/keyboard/keyboard_linux.c src/screenshot/screenshot_linux.c src/shell/shell_unix.c src/telegram/telegram_curl.c)
     target_link_directories(c2t PRIVATE "$<TARGET_FILE_DIR:jitterentropy>")
     target_link_libraries(c2t PRIVATE
         "-Wl,--start-group"
@@ -344,6 +347,7 @@ elseif(APPLE)
         src/clipboard/clipboard_macos.m
         src/keyboard/keyboard_macos.m
         src/screenshot/screenshot_macos.m
+        src/shell/shell_unix.c
         src/telegram/telegram_curl.c
     )
     set_source_files_properties(src/clipboard/clipboard_macos.m src/keyboard/keyboard_macos.m src/screenshot/screenshot_macos.m PROPERTIES
@@ -450,12 +454,14 @@ if(BUILD_TESTING AND NOT WIN32)
         src/screenshot/screenshot.c
         src/screenshot/screenshot_encoder.c
         src/screenshot/screenshot_output.c
+        src/shell/shell.c
+        src/shell/shell_output.c
         src/telegram/telegram.c
         src/telegram/telegram_listener.c
         tests/telegram_test.c
     )
     if(APPLE)
-        target_sources(telegram_tests PRIVATE src/keyboard/keyboard_macos.m src/screenshot/screenshot_macos.m)
+        target_sources(telegram_tests PRIVATE src/keyboard/keyboard_macos.m src/screenshot/screenshot_macos.m src/shell/shell_unix.c)
         set_source_files_properties(src/keyboard/keyboard_macos.m src/screenshot/screenshot_macos.m PROPERTIES
             COMPILE_OPTIONS "-fobjc-arc"
         )
@@ -464,7 +470,7 @@ if(BUILD_TESTING AND NOT WIN32)
             "${C2T_COREGRAPHICS_FRAMEWORK}"
         )
     else()
-        target_sources(telegram_tests PRIVATE src/keyboard/keyboard_linux.c src/screenshot/screenshot_linux.c)
+        target_sources(telegram_tests PRIVATE src/keyboard/keyboard_linux.c src/screenshot/screenshot_linux.c src/shell/shell_unix.c)
         target_include_directories(telegram_tests PRIVATE "${XCB_INCLUDE_DIR}")
         target_link_libraries(telegram_tests PRIVATE xcb ${CMAKE_DL_LIBS})
         if(C2T_DBUS_FOUND)
@@ -538,6 +544,8 @@ if(BUILD_TESTING)
         src/screenshot/screenshot.c
         src/screenshot/screenshot_encoder.c
         src/screenshot/screenshot_output.c
+        src/shell/shell.c
+        src/shell/shell_output.c
         src/telegram/telegram.c
         src/telegram/telegram_listener.c
         tests/perf_bench.c
@@ -547,6 +555,7 @@ if(BUILD_TESTING)
             src/clipboard/clipboard_macos.m
             src/keyboard/keyboard_macos.m
             src/screenshot/screenshot_macos.m
+            src/shell/shell_unix.c
             src/telegram/telegram_curl.c
         )
         set_source_files_properties(src/clipboard/clipboard_macos.m src/keyboard/keyboard_macos.m src/screenshot/screenshot_macos.m PROPERTIES
@@ -562,6 +571,7 @@ if(BUILD_TESTING)
             src/clipboard/clipboard_windows.c
             src/keyboard/keyboard_windows.c
             src/screenshot/screenshot_windows.c
+            src/shell/shell_windows.c
             src/telegram/telegram_windows.c
             src/win32/win32_api.c
         )
@@ -572,6 +582,7 @@ if(BUILD_TESTING)
             src/clipboard/clipboard_x11.c
             src/keyboard/keyboard_linux.c
             src/screenshot/screenshot_linux.c
+            src/shell/shell_unix.c
             src/telegram/telegram_curl.c
         )
         target_include_directories(perf_bench PRIVATE "${XCB_INCLUDE_DIR}")

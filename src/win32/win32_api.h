@@ -259,6 +259,14 @@ typedef VOID(WINAPI *pfn_WakeConditionVariable)(
     PCONDITION_VARIABLE ConditionVariable);
 typedef BOOL(WINAPI *pfn_GetComputerNameA)(LPSTR lpBuffer, LPDWORD nSize);
 typedef VOID(WINAPI *pfn_GetNativeSystemInfo)(LPSYSTEM_INFO lpSystemInfo);
+typedef BOOL(WINAPI *pfn_CreatePipe)(PHANDLE hReadPipe, PHANDLE hWritePipe,
+                                     LPSECURITY_ATTRIBUTES lpPipeAttributes,
+                                     DWORD nSize);
+typedef BOOL(WINAPI *pfn_PeekNamedPipe)(
+    HANDLE hNamedPipe, LPVOID lpBuffer, DWORD nBufferSize, LPDWORD lpBytesRead,
+    LPDWORD lpTotalBytesAvail, LPDWORD lpBytesLeftThisMessage);
+typedef BOOL(WINAPI *pfn_SetHandleInformation)(HANDLE hObject, DWORD dwMask,
+                                               DWORD dwFlags);
 
 /* Ntdll APIs */
 typedef LONG(WINAPI *pfn_RtlGetVersion)(POSVERSIONINFOEXW lpVersionInformation);
@@ -527,6 +535,9 @@ typedef struct {
   pfn_WakeConditionVariable WakeConditionVariable;
   pfn_GetComputerNameA GetComputerNameA;
   pfn_GetNativeSystemInfo GetNativeSystemInfo;
+  pfn_CreatePipe CreatePipe;
+  pfn_PeekNamedPipe PeekNamedPipe;
+  pfn_SetHandleInformation SetHandleInformation;
 
   /* ntdll */
   pfn_RtlGetVersion RtlGetVersion;

