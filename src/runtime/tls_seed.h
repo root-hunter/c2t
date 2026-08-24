@@ -15,13 +15,19 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef C2T_VERSION_H
-#define C2T_VERSION_H
+#ifndef C2T_RUNTIME_TLS_SEED_H
+#define C2T_RUNTIME_TLS_SEED_H
 
-#define C2T_VERSION "@PROJECT_VERSION@"
-#define C2T_VERSION_WIDE L"@PROJECT_VERSION@"
-#define C2T_USER_AGENT "c2t/" C2T_VERSION
-#define C2T_USER_AGENT_WIDE L"c2t/" C2T_VERSION_WIDE
+#include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
 #endif
 
+const unsigned char *c2t_get_tls_seed(size_t *len);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* C2T_RUNTIME_TLS_SEED_H */

