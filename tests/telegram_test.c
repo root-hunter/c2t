@@ -1420,6 +1420,7 @@ int main(void) {
   {
     uint8_t test_pixels[16 * 16 * 4];
     for (size_t i = 0; i < sizeof(test_pixels); ++i) test_pixels[i] = (uint8_t)(i & 0xFF);
+    test_pixels[3] = 0;
     void *png_out = nullptr;
     size_t png_len = 0;
     if (!screenshot_encode_png_rgba(16, 16, test_pixels, 1, &png_out, &png_len) || !png_out || png_len < 32)
@@ -1427,6 +1428,53 @@ int main(void) {
     if (memcmp(png_out, "\x89PNG\r\n\x1a\n", 8) != 0) {
       free(png_out);
       return fail("screenshot_encode_png_rgba invalid PNG magic header");
+    }
+    /* The fast encoder emits a zlib stream of stored Deflate blocks directly
+     * into IDAT. Validate the complete layout and a converted pixel instead of
+     * accepting any buffer with a PNG signature. */
+    const uint8_t *png_bytes = png_out;
+    size_t expected_raw = (16U * 4U + 1U) * 16U;
+    size_t expected_zlib = 2U + 5U + expected_raw + 4U;
+    if (png_len != 57U + expected_zlib ||
+        memcmp(png_bytes + 12, "IHDR", 4) != 0 ||
+        memcmp(png_bytes + 37, "IDAT", 4) != 0 ||
+        png_bytes[41] != 0x78 || png_bytes[42] != 0x01 ||
+        png_bytes[43] != 0x01 || png_bytes[48] != 0 ||
+        png_bytes[49] != test_pixels[2] ||
+        png_bytes[50] != test_pixels[1] ||
+        png_bytes[51] != test_pixels[0] || png_bytes[52] != 255) {
+      free(png_out);
+      return fail("screenshot_encode_png_rgba PNG/Deflate layout mismatch");
+    }
+    free(png_out);
+
+    png_out = (void *)1;
+    png_len = 123;
+    if (screenshot_encode_png_rgba(0, 16, test_pixels, 0, &png_out,
+                                   &png_len) ||
+        png_out != nullptr || png_len != 0)
+      return fail("screenshot_encode_png_rgba invalid-input contract mismatch");
+
+    const size_t boundary_pixels_size = 16384U * 4U;
+    uint8_t *boundary_pixels = malloc(boundary_pixels_size);
+    if (!boundary_pixels)
+      return fail("PNG boundary-test allocation failed");
+    memset(boundary_pixels, 0x5a, boundary_pixels_size);
+    if (!screenshot_encode_png_rgba(16384, 1, boundary_pixels, 1,
+                                    &png_out, &png_len)) {
+      free(boundary_pixels);
+      return fail("PNG multi-block encoding failed");
+    }
+    free(boundary_pixels);
+    png_bytes = png_out;
+    /* raw scanline size is 65537: one full stored block plus two bytes. */
+    size_t second_block = 43U + 5U + 65535U;
+    if (png_bytes[43] != 0x00 || png_bytes[44] != 0xff ||
+        png_bytes[45] != 0xff || png_bytes[second_block] != 0x01 ||
+        png_bytes[second_block + 1U] != 0x02 ||
+        png_bytes[second_block + 2U] != 0x00) {
+      free(png_out);
+      return fail("PNG stored-Deflate block boundary mismatch");
     }
     free(png_out);
   }

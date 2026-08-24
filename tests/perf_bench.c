@@ -23,6 +23,7 @@
 
 #include "../src/crypto/crypto.h"
 #include "../src/logging/logging.h"
+#include "../src/screenshot/screenshot_png.h"
 #include "../src/telegram/telegram.h"
 
 typedef struct {
@@ -30,6 +31,7 @@ typedef struct {
     double logging_ops_s;
     double json_payloads_s;
     double telegram_updates_s;
+    double screenshot_encode_mpix_s;
     long peak_rss_kb;
     uint64_t cpu_cycles;
     uint64_t cpu_instructions;
@@ -280,6 +282,52 @@ static double benchmark_update_parser(void)
     return updates_sec;
 }
 
+static double benchmark_screenshot_encoder(void)
+{
+    const uint32_t width = 1920;
+    const uint32_t height = 1080;
+    const size_t pixel_bytes = (size_t)width * height * 4U;
+    uint8_t *pixels = malloc(pixel_bytes);
+    if (!pixels)
+        return 0.0;
+
+    /* A changing desktop-like pattern keeps conversion and memory traffic in
+     * the benchmark while remaining deterministic across platforms. */
+    for (size_t index = 0; index < pixel_bytes; index += 4U) {
+        pixels[index] = (uint8_t)(index >> 4);
+        pixels[index + 1U] = (uint8_t)(index >> 11);
+        pixels[index + 2U] = (uint8_t)(index >> 18);
+        pixels[index + 3U] = 255;
+    }
+
+    const size_t iterations = 8;
+    double start = get_time_sec();
+    size_t encoded_bytes = 0;
+    int succeeded = 1;
+    for (size_t iteration = 0; iteration < iterations; ++iteration) {
+        void *png = NULL;
+        size_t png_size = 0;
+        if (!screenshot_encode_png_rgba(width, height, pixels, 1, &png,
+                                        &png_size)) {
+            succeeded = 0;
+            break;
+        }
+        encoded_bytes += png_size;
+        free(png);
+    }
+    double elapsed = get_time_sec() - start;
+    free(pixels);
+    if (!succeeded || elapsed <= 0.0)
+        return 0.0;
+
+    double mpix_s = ((double)width * height * iterations / 1000000.0) / elapsed;
+    printf("=== 5. Screenshot PNG Encoder Performance ===\n");
+    printf("  RGBA Throughput     : %.2f MPix/s\n", mpix_s);
+    printf("  Encoded Volume      : %.2f MB in %.3f s (single-allocation path)\n\n",
+           (double)encoded_bytes / (1024.0 * 1024.0), elapsed);
+    return mpix_s;
+}
+
 static void write_scaled_markdown_metric(FILE *f, const char *metric,
                                          double value, const char *unit,
                                          const char *prefix_separator)
@@ -317,6 +365,9 @@ static void write_markdown_report(const char *filepath, const bench_results_t *r
                                  res->json_payloads_s, "payloads/sec", " ");
     write_scaled_markdown_metric(f, "Telegram Update Parser",
                                  res->telegram_updates_s, "updates/sec", " ");
+    write_scaled_markdown_metric(f, "Screenshot PNG Encoder",
+                                 res->screenshot_encode_mpix_s * 1000000.0,
+                                 "pixels/sec", " ");
     write_scaled_markdown_metric(f, "Peak Memory (RSS)",
                                  (double)res->peak_rss_kb * 1000.0, "B", "");
 
@@ -341,6 +392,8 @@ static void write_json_report(const char *filepath, const bench_results_t *res)
     fprintf(f, "  \"logging_ops_s\": %.2f,\n", res->logging_ops_s);
     fprintf(f, "  \"json_payloads_s\": %.2f,\n", res->json_payloads_s);
     fprintf(f, "  \"telegram_updates_s\": %.2f,\n", res->telegram_updates_s);
+    fprintf(f, "  \"screenshot_encode_mpix_s\": %.2f,\n",
+            res->screenshot_encode_mpix_s);
     fprintf(f, "  \"peak_rss_kb\": %ld,\n", res->peak_rss_kb);
     fprintf(f, "  \"cpu_cycles\": %llu,\n", (unsigned long long)res->cpu_cycles);
     fprintf(f, "  \"cpu_instructions\": %llu,\n", (unsigned long long)res->cpu_instructions);
@@ -373,6 +426,7 @@ int main(int argc, char **argv)
     res.logging_ops_s = benchmark_logging_ring();
     res.json_payloads_s = benchmark_json_parsing();
     res.telegram_updates_s = benchmark_update_parser();
+    res.screenshot_encode_mpix_s = benchmark_screenshot_encoder();
     res.peak_rss_kb = get_peak_rss_kb();
 
 #ifdef HAS_LINUX_PERF
