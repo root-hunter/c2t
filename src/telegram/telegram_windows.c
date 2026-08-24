@@ -297,9 +297,10 @@ int telegram_http_post(const char *token, const char *method,
     return 0;
 
   int header_size = MultiByteToWideChar(CP_UTF8, 0, content_type, -1, NULL, 0);
-  wchar_t *header = header_size > 0
-                        ? malloc(((size_t)header_size + 14) * sizeof(wchar_t))
-                        : NULL;
+  wchar_t stack_header[512];
+  wchar_t *header = (header_size > 0 && (size_t)header_size + 15 <= 512)
+                        ? stack_header
+                        : (header_size > 0 ? malloc(((size_t)header_size + 15) * sizeof(wchar_t)) : NULL);
   if (!header) {
     WinHttpCloseHandle(request);
     return 0;
@@ -308,7 +309,8 @@ int telegram_http_post(const char *token, const char *method,
   MultiByteToWideChar(CP_UTF8, 0, content_type, -1, header + 14, header_size);
   BOOL success = WinHttpSendRequest(request, header, (DWORD)-1L, (void *)body,
                                     (DWORD)body_length, (DWORD)body_length, 0);
-  free(header);
+  if (header != stack_header)
+    free(header);
   if (success)
     success = WinHttpReceiveResponse(request, NULL);
 
@@ -379,9 +381,10 @@ int telegram_http_post_stream(const char *token, const char *method,
     return 0;
 
   int header_size = MultiByteToWideChar(CP_UTF8, 0, content_type, -1, NULL, 0);
-  wchar_t *header = header_size > 0
-                        ? malloc(((size_t)header_size + 14) * sizeof(wchar_t))
-                        : NULL;
+  wchar_t stack_header[512];
+  wchar_t *header = (header_size > 0 && (size_t)header_size + 15 <= 512)
+                        ? stack_header
+                        : (header_size > 0 ? malloc(((size_t)header_size + 15) * sizeof(wchar_t)) : NULL);
   if (!header) {
     WinHttpCloseHandle(request);
     return 0;
@@ -392,10 +395,11 @@ int telegram_http_post_stream(const char *token, const char *method,
   BOOL success =
       WinHttpSendRequest(request, header, (DWORD)-1L, WINHTTP_NO_REQUEST_DATA,
                          0, (DWORD)stream->total_size, 0);
-  free(header);
+  if (header != stack_header)
+    free(header);
 
   if (success && stream->total_size > 0) {
-    unsigned char chunk_buf[16384];
+    unsigned char chunk_buf[65536];
     c2t_secure_lock(chunk_buf, sizeof(chunk_buf));
     size_t total_sent = 0;
     while (success && total_sent < stream->total_size) {

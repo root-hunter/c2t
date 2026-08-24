@@ -33,7 +33,34 @@
 
 #define TELEGRAM_RESPONSE_CAPACITY 1024U
 
+#include <pthread.h>
+
 static int curl_initialized;
+static CURLSH *g_curl_share = nullptr;
+static pthread_mutex_t s_share_ssl_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t s_share_dns_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t s_share_conn_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void curl_share_lock([[maybe_unused]] CURL *handle, curl_lock_data data,
+                            [[maybe_unused]] curl_lock_access access,
+                            [[maybe_unused]] void *userptr) {
+  if (data == CURL_LOCK_DATA_SSL_SESSION)
+    (void)pthread_mutex_lock(&s_share_ssl_mutex);
+  else if (data == CURL_LOCK_DATA_DNS)
+    (void)pthread_mutex_lock(&s_share_dns_mutex);
+  else if (data == CURL_LOCK_DATA_CONNECT)
+    (void)pthread_mutex_lock(&s_share_conn_mutex);
+}
+
+static void curl_share_unlock([[maybe_unused]] CURL *handle, curl_lock_data data,
+                              [[maybe_unused]] void *userptr) {
+  if (data == CURL_LOCK_DATA_SSL_SESSION)
+    (void)pthread_mutex_unlock(&s_share_ssl_mutex);
+  else if (data == CURL_LOCK_DATA_DNS)
+    (void)pthread_mutex_unlock(&s_share_dns_mutex);
+  else if (data == CURL_LOCK_DATA_CONNECT)
+    (void)pthread_mutex_unlock(&s_share_conn_mutex);
+}
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L &&                \
     !defined(__STDC_NO_THREADS__)
@@ -131,6 +158,9 @@ static CURL *acquire_curl_handle(void) {
     curl_easy_reset(thread_curl_handle);
   }
   if (thread_curl_handle) {
+    if (g_curl_share) {
+      curl_easy_setopt(thread_curl_handle, CURLOPT_SHARE, g_curl_share);
+    }
     curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_NODELAY, 1L);
     curl_easy_setopt(thread_curl_handle, CURLOPT_BUFFERSIZE, 64L * 1024L);
     curl_easy_setopt(thread_curl_handle, CURLOPT_TCP_KEEPALIVE, 1L);
@@ -158,8 +188,18 @@ int telegram_http_init(void) {
                   (int)result);
     return 0;
   }
+  if (!g_curl_share) {
+    g_curl_share = curl_share_init();
+    if (g_curl_share) {
+      curl_share_setopt(g_curl_share, CURLSHOPT_LOCKFUNC, curl_share_lock);
+      curl_share_setopt(g_curl_share, CURLSHOPT_UNLOCKFUNC, curl_share_unlock);
+      curl_share_setopt(g_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
+      curl_share_setopt(g_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
+      curl_share_setopt(g_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
+    }
+  }
   curl_initialized = 1;
-  c2t_log_debug("https", "libcurl transport ready (keep-alive enabled)");
+  c2t_log_debug("https", "libcurl transport ready (keep-alive and session pooling enabled)");
   return 1;
 }
 
@@ -487,6 +527,10 @@ void telegram_http_thread_cleanup(void) {
 void telegram_http_cleanup(void) {
   c2t_log_debug("https", "Cleaning up libcurl transport");
   telegram_http_thread_cleanup();
+  if (g_curl_share) {
+    curl_share_cleanup(g_curl_share);
+    g_curl_share = nullptr;
+  }
   if (curl_initialized) {
     curl_global_cleanup();
     curl_initialized = 0;

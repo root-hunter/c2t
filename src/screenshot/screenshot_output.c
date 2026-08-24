@@ -150,8 +150,8 @@ static void format_metric_bytes(uint64_t b, char *out, size_t cap) {
 int screenshot_capture_display_and_send(const char *display_target, const char *caption) {
   void *image_data = nullptr;
   size_t image_size = 0;
-  const char *mime_type = "image/bmp";
-  const char *filename = "screenshot.bmp";
+  const char *mime_type = "image/jpeg";
+  const char *filename = "screenshot.jpg";
 
   char target[64] = "all";
   if (display_target && *display_target) {

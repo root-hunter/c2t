@@ -45,37 +45,86 @@ static int checked_mul_size(size_t left, size_t right, size_t *result) {
   return 1;
 }
 
-static void make_crc32_table(uint32_t table[256]) {
+static void make_crc32_table(uint32_t table[8][256]) {
   for (uint32_t value = 0; value < 256; ++value) {
     uint32_t crc = value;
     for (unsigned int bit = 0; bit < 8; ++bit)
       crc = (crc >> 1) ^ (UINT32_C(0xedb88320) &
                          (uint32_t)-(int32_t)(crc & 1U));
-    table[value] = crc;
+    table[0][value] = crc;
+  }
+  for (size_t slice = 1; slice < 8; ++slice) {
+    for (uint32_t value = 0; value < 256; ++value) {
+      table[slice][value] = (table[slice - 1][value] >> 8) ^
+                            table[0][table[slice - 1][value] & 0xffU];
+    }
   }
 }
 
-static uint32_t calc_crc32(const uint32_t table[256], const uint8_t *data,
+static uint32_t calc_crc32(const uint32_t table[8][256], const uint8_t *data,
                            size_t length) {
   uint32_t crc = UINT32_MAX;
-  for (size_t index = 0; index < length; ++index)
-    crc = table[(crc ^ data[index]) & 0xffU] ^ (crc >> 8);
+  while (length >= 8) {
+    uint32_t one = (uint32_t)data[0] | ((uint32_t)data[1] << 8) |
+                   ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+    uint32_t two = (uint32_t)data[4] | ((uint32_t)data[5] << 8) |
+                   ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+    one ^= crc;
+    crc = table[7][one & 0xffU] ^
+          table[6][(one >> 8) & 0xffU] ^
+          table[5][(one >> 16) & 0xffU] ^
+          table[4][one >> 24] ^
+          table[3][two & 0xffU] ^
+          table[2][(two >> 8) & 0xffU] ^
+          table[1][(two >> 16) & 0xffU] ^
+          table[0][two >> 24];
+    data += 8;
+    length -= 8;
+  }
+  while (length != 0) {
+    crc = table[0][(crc ^ *data++) & 0xffU] ^ (crc >> 8);
+    --length;
+  }
   return ~crc;
 }
 
-static void adler32_update(uint32_t *sum1, uint32_t *sum2,
+static void adler32_update(uint32_t *sum1_ptr, uint32_t *sum2_ptr,
                            const uint8_t *data, size_t length) {
+  uint32_t s1 = *sum1_ptr;
+  uint32_t s2 = *sum2_ptr;
   /* zlib's NMAX keeps the deferred modulo within 32-bit accumulators. */
   while (length != 0) {
     size_t chunk = length > 5552U ? 5552U : length;
     length -= chunk;
-    while (chunk-- != 0) {
-      *sum1 += *data++;
-      *sum2 += *sum1;
+    while (chunk >= 16) {
+      s1 += data[0]; s2 += s1;
+      s1 += data[1]; s2 += s1;
+      s1 += data[2]; s2 += s1;
+      s1 += data[3]; s2 += s1;
+      s1 += data[4]; s2 += s1;
+      s1 += data[5]; s2 += s1;
+      s1 += data[6]; s2 += s1;
+      s1 += data[7]; s2 += s1;
+      s1 += data[8]; s2 += s1;
+      s1 += data[9]; s2 += s1;
+      s1 += data[10]; s2 += s1;
+      s1 += data[11]; s2 += s1;
+      s1 += data[12]; s2 += s1;
+      s1 += data[13]; s2 += s1;
+      s1 += data[14]; s2 += s1;
+      s1 += data[15]; s2 += s1;
+      data += 16;
+      chunk -= 16;
     }
-    *sum1 %= 65521U;
-    *sum2 %= 65521U;
+    while (chunk-- != 0) {
+      s1 += *data++;
+      s2 += s1;
+    }
+    s1 %= 65521U;
+    s2 %= 65521U;
   }
+  *sum1_ptr = s1;
+  *sum2_ptr = s2;
 }
 
 typedef struct {
@@ -211,7 +260,7 @@ int screenshot_encode_png_rgba(uint32_t width, uint32_t height,
   png[position++] = 0;
   png[position++] = 0;
 
-  uint32_t crc_table[256];
+  uint32_t crc_table[8][256];
   make_crc32_table(crc_table);
   put_u32_be(png + position, calc_crc32(crc_table, ihdr, 17U));
   position += 4;

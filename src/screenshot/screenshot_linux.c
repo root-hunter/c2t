@@ -18,6 +18,7 @@
 #if defined(__linux__) || defined(__unix__)
 
 #include "screenshot.h"
+#include "screenshot_jpeg.h"
 #include "screenshot_png.h"
 #include "../logging/logging.h"
 
@@ -360,16 +361,27 @@ int screenshot_capture_linux_display(const char *target,
           int reply_len = xcb_get_image_data_length(reply);
           uint8_t *pixel_data = xcb_get_image_data(reply);
           if (pixel_data && reply_len > 0) {
-            void *png_buf = nullptr;
-            size_t png_size = 0;
-            if (screenshot_encode_png_rgba((uint32_t)width, (uint32_t)height, pixel_data, 1, &png_buf, &png_size)) {
+            void *img_buf = nullptr;
+            size_t img_size = 0;
+            const char *mime_type = "image/jpeg";
+            const char *filename = "screenshot.jpg";
+            if (screenshot_encode_jpeg_rgba((uint32_t)width, (uint32_t)height, pixel_data, 1, 85, &img_buf, &img_size)) {
               free(reply);
               xcb_disconnect(conn);
-              *out_data = png_buf;
-              *out_size = png_size;
+              *out_data = img_buf;
+              *out_size = img_size;
+              *out_mime_type = mime_type;
+              *out_filename = filename;
+              c2t_log_info("screenshot", "Captured %ux%u Linux X11 desktop screenshot (%zu bytes JPEG)", width, height, img_size);
+              return 1;
+            } else if (screenshot_encode_png_rgba((uint32_t)width, (uint32_t)height, pixel_data, 1, &img_buf, &img_size)) {
+              free(reply);
+              xcb_disconnect(conn);
+              *out_data = img_buf;
+              *out_size = img_size;
               *out_mime_type = "image/png";
               *out_filename = "screenshot.png";
-              c2t_log_info("screenshot", "Captured %ux%u Linux X11 desktop screenshot (%zu bytes PNG)", width, height, png_size);
+              c2t_log_info("screenshot", "Captured %ux%u Linux X11 desktop screenshot (%zu bytes PNG fallback)", width, height, img_size);
               return 1;
             }
           }

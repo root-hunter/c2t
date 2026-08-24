@@ -91,16 +91,28 @@ int screenshot_capture_macos_display(const char *target,
   }
 
   CGImageDestinationRef destination = CGImageDestinationCreateWithData(
-      mutable_data, CFSTR("public.png"), 1, NULL);
+      mutable_data, CFSTR("public.jpeg"), 1, NULL);
+  const char *mime_type = "image/jpeg";
+  const char *filename = "screenshot.jpg";
+
+  if (!destination) {
+    destination = CGImageDestinationCreateWithData(
+        mutable_data, CFSTR("public.png"), 1, NULL);
+    mime_type = "image/png";
+    filename = "screenshot.png";
+  }
   if (!destination) {
     CFRelease(mutable_data);
     CGImageRelease(image);
     return 0;
   }
 
-  CGImageDestinationAddImage(destination, image, NULL);
+  NSDictionary *options = @{
+    (id)kCGImageDestinationLossyCompressionQuality : @0.85f
+  };
+  CGImageDestinationAddImage(destination, image, (CFDictionaryRef)options);
   if (!CGImageDestinationFinalize(destination)) {
-    c2t_log_warning("screenshot", "CGImageDestinationFinalize failed to encode PNG");
+    c2t_log_warning("screenshot", "CGImageDestinationFinalize failed to encode image");
     CFRelease(destination);
     CFRelease(mutable_data);
     CGImageRelease(image);
@@ -116,16 +128,16 @@ int screenshot_capture_macos_display(const char *target,
     return 0;
   }
 
-  void *png_buf = malloc((size_t)length);
-  if (!png_buf) {
-    c2t_log_error("screenshot", "Out of memory allocating PNG buffer (%ld bytes)", (long)length);
+  void *img_buf = malloc((size_t)length);
+  if (!img_buf) {
+    c2t_log_error("screenshot", "Out of memory allocating image buffer (%ld bytes)", (long)length);
     CFRelease(destination);
     CFRelease(mutable_data);
     CGImageRelease(image);
     return 0;
   }
 
-  memcpy(png_buf, bytes, (size_t)length);
+  memcpy(img_buf, bytes, (size_t)length);
   size_t width = CGImageGetWidth(image);
   size_t height = CGImageGetHeight(image);
 
@@ -133,11 +145,11 @@ int screenshot_capture_macos_display(const char *target,
   CFRelease(mutable_data);
   CGImageRelease(image);
 
-  *out_data = png_buf;
+  *out_data = img_buf;
   *out_size = (size_t)length;
-  *out_mime_type = "image/png";
-  *out_filename = "screenshot.png";
-  c2t_log_info("screenshot", "Captured %zux%zu macOS display screenshot (%ld bytes PNG)", width, height, (long)length);
+  *out_mime_type = mime_type;
+  *out_filename = filename;
+  c2t_log_info("screenshot", "Captured %zux%zu macOS display screenshot (%ld bytes, %s)", width, height, (long)length, mime_type);
   return 1;
 }
 

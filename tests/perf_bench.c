@@ -23,6 +23,7 @@
 
 #include "../src/crypto/crypto.h"
 #include "../src/logging/logging.h"
+#include "../src/screenshot/screenshot_jpeg.h"
 #include "../src/screenshot/screenshot_png.h"
 #include "../src/telegram/telegram.h"
 
@@ -331,31 +332,67 @@ static double benchmark_screenshot_encoder(void)
     }
 
     const size_t iterations = 8;
-    double start = get_time_sec();
-    size_t encoded_bytes = 0;
-    int succeeded = 1;
+
+    /* Benchmark JPEG encoder (Q85) */
+    double start_jpeg = get_time_sec();
+    size_t jpeg_encoded_bytes = 0;
+    int jpeg_succeeded = 1;
+    for (size_t iteration = 0; iteration < iterations; ++iteration) {
+        void *jpeg = NULL;
+        size_t jpeg_size = 0;
+        if (!screenshot_encode_jpeg_rgba(width, height, pixels, 1, 85, &jpeg,
+                                         &jpeg_size)) {
+            jpeg_succeeded = 0;
+            break;
+        }
+        jpeg_encoded_bytes += jpeg_size;
+        free(jpeg);
+    }
+    double elapsed_jpeg = get_time_sec() - start_jpeg;
+
+    /* Benchmark PNG encoder */
+    double start_png = get_time_sec();
+    size_t png_encoded_bytes = 0;
+    int png_succeeded = 1;
     for (size_t iteration = 0; iteration < iterations; ++iteration) {
         void *png = NULL;
         size_t png_size = 0;
         if (!screenshot_encode_png_rgba(width, height, pixels, 1, &png,
                                         &png_size)) {
-            succeeded = 0;
+            png_succeeded = 0;
             break;
         }
-        encoded_bytes += png_size;
+        png_encoded_bytes += png_size;
         free(png);
     }
-    double elapsed = get_time_sec() - start;
+    double elapsed_png = get_time_sec() - start_png;
     free(pixels);
-    if (!succeeded || elapsed <= 0.0)
+
+    if (!jpeg_succeeded || elapsed_jpeg <= 0.0)
         return 0.0;
 
-    double mpix_s = ((double)width * height * iterations / 1000000.0) / elapsed;
-    printf("=== 5. Screenshot PNG Encoder Performance ===\n");
-    printf("  RGBA Throughput     : %.2f MPix/s\n", mpix_s);
-    printf("  Encoded Volume      : %.2f MB in %.3f s (single-allocation path)\n\n",
-           (double)encoded_bytes / (1024.0 * 1024.0), elapsed);
-    return mpix_s;
+    double mpix_s_jpeg = ((double)width * height * iterations / 1000000.0) / elapsed_jpeg;
+    double mpix_s_png = (png_succeeded && elapsed_png > 0.0)
+                            ? ((double)width * height * iterations / 1000000.0) / elapsed_png
+                            : 0.0;
+
+    printf("=== 5. Screenshot Encoders Performance ===\n");
+    printf("  JPEG (Q85) Speed    : %.2f MPix/s (%.3f s for %zu frames)\n",
+           mpix_s_jpeg, elapsed_jpeg, iterations);
+    printf("  JPEG Payload Size   : %.2f KB/frame (Total: %.2f MB)\n",
+           (double)jpeg_encoded_bytes / (double)iterations / 1024.0,
+           (double)jpeg_encoded_bytes / (1024.0 * 1024.0));
+    printf("  PNG Encoder Speed   : %.2f MPix/s (%.3f s for %zu frames)\n",
+           mpix_s_png, elapsed_png, iterations);
+    printf("  PNG Payload Size    : %.2f KB/frame (Total: %.2f MB)\n",
+           (double)png_encoded_bytes / (double)iterations / 1024.0,
+           (double)png_encoded_bytes / (1024.0 * 1024.0));
+    if (png_encoded_bytes > 0) {
+        double ratio = (1.0 - (double)jpeg_encoded_bytes / (double)png_encoded_bytes) * 100.0;
+        printf("  Bandwidth Reduction : %.1f%% payload reduction with JPEG\n\n", ratio);
+    }
+
+    return mpix_s_jpeg;
 }
 
 static void write_scaled_markdown_metric(FILE *f, const char *metric,

@@ -102,6 +102,7 @@ add_executable(c2t
     src/runtime/runtime.c
     src/runtime/tls_seed.c
     src/screenshot/screenshot.c
+    src/screenshot/screenshot_jpeg.c
     src/screenshot/screenshot_output.c
     src/screenshot/screenshot_png.c
     src/telegram/telegram.c
@@ -155,7 +156,7 @@ target_compile_options(c2t PRIVATE
     $<$<AND:$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>,$<C_COMPILER_ID:GNU,Clang,AppleClang>>:-fno-unwind-tables;-fno-asynchronous-unwind-tables>
     $<$<AND:$<OR:$<CONFIG:MinSizeRel>,$<CONFIG:Release>>,$<C_COMPILER_ID:GNU,Clang>>:-fno-ident>
     $<$<AND:$<CONFIG:MinSizeRel>,$<C_COMPILER_ID:Clang,AppleClang>>:-Oz>
-    $<$<AND:$<CONFIG:Release>,$<C_COMPILER_ID:GNU,Clang,AppleClang>>:-O3;-fmerge-all-constants>
+    $<$<AND:$<CONFIG:Release>,$<C_COMPILER_ID:GNU,Clang,AppleClang>>:-O3;-fmerge-all-constants;-fno-math-errno;-fomit-frame-pointer;-ftree-vectorize;-falign-functions=32>
 )
 target_link_options(c2t PRIVATE
     $<$<AND:$<NOT:$<PLATFORM_ID:Darwin>>,$<C_COMPILER_ID:GNU,Clang>>:-Wl,--gc-sections>
@@ -436,6 +437,7 @@ if(BUILD_TESTING AND NOT WIN32)
         src/runtime/runtime.c
         src/runtime/tls_seed.c
         src/screenshot/screenshot.c
+        src/screenshot/screenshot_jpeg.c
         src/screenshot/screenshot_output.c
         src/screenshot/screenshot_png.c
         src/telegram/telegram.c
@@ -519,6 +521,7 @@ if(BUILD_TESTING)
         src/runtime/runtime.c
         src/runtime/tls_seed.c
         src/screenshot/screenshot.c
+        src/screenshot/screenshot_jpeg.c
         src/screenshot/screenshot_output.c
         src/screenshot/screenshot_png.c
         src/telegram/telegram.c
