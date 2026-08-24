@@ -295,6 +295,11 @@ static void chacha20_init_state(uint32_t state[16], const unsigned char key[32],
 #define C2T_HAS_SSE2 1
 #endif
 
+#if defined(__aarch64__) || defined(_M_ARM64)
+#include <arm_neon.h>
+#define C2T_HAS_NEON 1
+#endif
+
 #if defined(C2T_HAS_SSE2) &&                                                   \
     (defined(__GNUC__) || defined(__clang__) || defined(__AVX2__))
 #include <immintrin.h>
@@ -413,6 +418,114 @@ static void chacha20_crypt_4blocks(const uint32_t state[16],
   chacha20_xor_4words(x4, x5, x6, x7, input + 16, output + 16);
   chacha20_xor_4words(x8, x9, x10, x11, input + 32, output + 32);
   chacha20_xor_4words(x12, x13, x14, x15, input + 48, output + 48);
+}
+#endif
+
+#if defined(C2T_HAS_NEON)
+#define ROTL32_NEON(v, n)                                                     \
+  vorrq_u32(vshlq_n_u32((v), (n)), vshrq_n_u32((v), 32 - (n)))
+
+static inline uint32x4_t chacha20_rotl16_neon(uint32x4_t value) {
+  return vreinterpretq_u32_u16(vrev32q_u16(vreinterpretq_u16_u32(value)));
+}
+
+static inline uint32x4_t chacha20_rotl8_neon(uint32x4_t value) {
+  static const uint8_t rotate8_bytes[16] = {3,  0,  1,  2,  7,  4, 5,  6,
+                                             11, 8,  9,  10, 15, 12, 13, 14};
+  return vreinterpretq_u32_u8(
+      vqtbl1q_u8(vreinterpretq_u8_u32(value), vld1q_u8(rotate8_bytes)));
+}
+
+#define CHACHA20_QUARTERROUND_NEON(a, b, c, d)                                \
+  do {                                                                         \
+    (a) = vaddq_u32((a), (b));                                                  \
+    (d) = chacha20_rotl16_neon(veorq_u32((d), (a)));                           \
+    (c) = vaddq_u32((c), (d));                                                  \
+    (b) = ROTL32_NEON(veorq_u32((b), (c)), 12);                               \
+    (a) = vaddq_u32((a), (b));                                                  \
+    (d) = chacha20_rotl8_neon(veorq_u32((d), (a)));                            \
+    (c) = vaddq_u32((c), (d));                                                  \
+    (b) = ROTL32_NEON(veorq_u32((b), (c)), 7);                                \
+  } while (0)
+
+static inline void chacha20_xor_4words_neon(
+    uint32x4_t x0, uint32x4_t x1, uint32x4_t x2, uint32x4_t x3,
+    const unsigned char *input, unsigned char *output) {
+  uint32x4x2_t t01 = vzipq_u32(x0, x1);
+  uint32x4x2_t t23 = vzipq_u32(x2, x3);
+  uint32x4_t blocks[4] = {
+      vcombine_u32(vget_low_u32(t01.val[0]), vget_low_u32(t23.val[0])),
+      vcombine_u32(vget_high_u32(t01.val[0]), vget_high_u32(t23.val[0])),
+      vcombine_u32(vget_low_u32(t01.val[1]), vget_low_u32(t23.val[1])),
+      vcombine_u32(vget_high_u32(t01.val[1]), vget_high_u32(t23.val[1]))};
+
+  for (size_t block_index = 0; block_index < 4; ++block_index) {
+    size_t block_offset = block_index * 64;
+    uint8x16_t in = vld1q_u8(input + block_offset);
+    vst1q_u8(output + block_offset,
+             veorq_u8(in, vreinterpretq_u8_u32(blocks[block_index])));
+  }
+}
+
+/* AArch64 has 32 SIMD registers, enough to keep all four-block state words
+ * and round temporaries in registers without spilling. */
+static void chacha20_crypt_4blocks_neon(const uint32_t state[16],
+                                        const unsigned char *input,
+                                        unsigned char *output) {
+  uint32x4_t x0 = vdupq_n_u32(state[0]);
+  uint32x4_t x1 = vdupq_n_u32(state[1]);
+  uint32x4_t x2 = vdupq_n_u32(state[2]);
+  uint32x4_t x3 = vdupq_n_u32(state[3]);
+  uint32x4_t x4 = vdupq_n_u32(state[4]);
+  uint32x4_t x5 = vdupq_n_u32(state[5]);
+  uint32x4_t x6 = vdupq_n_u32(state[6]);
+  uint32x4_t x7 = vdupq_n_u32(state[7]);
+  uint32x4_t x8 = vdupq_n_u32(state[8]);
+  uint32x4_t x9 = vdupq_n_u32(state[9]);
+  uint32x4_t x10 = vdupq_n_u32(state[10]);
+  uint32x4_t x11 = vdupq_n_u32(state[11]);
+  uint32x4_t x12 = {state[12], state[12] + 1U, state[12] + 2U,
+                     state[12] + 3U};
+  uint32x4_t x13 = vdupq_n_u32(state[13]);
+  uint32x4_t x14 = vdupq_n_u32(state[14]);
+  uint32x4_t x15 = vdupq_n_u32(state[15]);
+
+  for (size_t i = 0; i < 10; ++i) {
+    CHACHA20_QUARTERROUND_NEON(x0, x4, x8, x12);
+    CHACHA20_QUARTERROUND_NEON(x1, x5, x9, x13);
+    CHACHA20_QUARTERROUND_NEON(x2, x6, x10, x14);
+    CHACHA20_QUARTERROUND_NEON(x3, x7, x11, x15);
+    CHACHA20_QUARTERROUND_NEON(x0, x5, x10, x15);
+    CHACHA20_QUARTERROUND_NEON(x1, x6, x11, x12);
+    CHACHA20_QUARTERROUND_NEON(x2, x7, x8, x13);
+    CHACHA20_QUARTERROUND_NEON(x3, x4, x9, x14);
+  }
+
+#define CHACHA20_ADD_ORIGINAL_NEON(n)                                          \
+  x##n = vaddq_u32(x##n, vdupq_n_u32(state[n]))
+  CHACHA20_ADD_ORIGINAL_NEON(0);
+  CHACHA20_ADD_ORIGINAL_NEON(1);
+  CHACHA20_ADD_ORIGINAL_NEON(2);
+  CHACHA20_ADD_ORIGINAL_NEON(3);
+  CHACHA20_ADD_ORIGINAL_NEON(4);
+  CHACHA20_ADD_ORIGINAL_NEON(5);
+  CHACHA20_ADD_ORIGINAL_NEON(6);
+  CHACHA20_ADD_ORIGINAL_NEON(7);
+  CHACHA20_ADD_ORIGINAL_NEON(8);
+  CHACHA20_ADD_ORIGINAL_NEON(9);
+  CHACHA20_ADD_ORIGINAL_NEON(10);
+  CHACHA20_ADD_ORIGINAL_NEON(11);
+  x12 = vaddq_u32(x12, (uint32x4_t){state[12], state[12] + 1U,
+                                    state[12] + 2U, state[12] + 3U});
+  CHACHA20_ADD_ORIGINAL_NEON(13);
+  CHACHA20_ADD_ORIGINAL_NEON(14);
+  CHACHA20_ADD_ORIGINAL_NEON(15);
+#undef CHACHA20_ADD_ORIGINAL_NEON
+
+  chacha20_xor_4words_neon(x0, x1, x2, x3, input + 0, output + 0);
+  chacha20_xor_4words_neon(x4, x5, x6, x7, input + 16, output + 16);
+  chacha20_xor_4words_neon(x8, x9, x10, x11, input + 32, output + 32);
+  chacha20_xor_4words_neon(x12, x13, x14, x15, input + 48, output + 48);
 }
 #endif
 
@@ -564,6 +677,13 @@ static void chacha20_crypt(const unsigned char key[32],
     }
   }
 #endif
+#if defined(C2T_HAS_NEON)
+  while (len - offset >= 256) {
+    chacha20_crypt_4blocks_neon(state, input + offset, output + offset);
+    state[12] += 4U;
+    offset += 256;
+  }
+#endif
 #if defined(C2T_HAS_SSE2)
   while (len - offset >= 256) {
     chacha20_crypt_4blocks(state, input + offset, output + offset);
@@ -605,6 +725,21 @@ static void chacha20_crypt(const unsigned char key[32],
                        _mm_xor_si128(i2, k2));
       _mm_storeu_si128((__m128i *)(void *)(output + offset + 48),
                        _mm_xor_si128(i3, k3));
+    } else
+#elif defined(C2T_HAS_NEON)
+    if (block_bytes == 64) {
+      uint8x16_t k0 = vld1q_u8(keystream + 0);
+      uint8x16_t k1 = vld1q_u8(keystream + 16);
+      uint8x16_t k2 = vld1q_u8(keystream + 32);
+      uint8x16_t k3 = vld1q_u8(keystream + 48);
+      uint8x16_t i0 = vld1q_u8(input + offset + 0);
+      uint8x16_t i1 = vld1q_u8(input + offset + 16);
+      uint8x16_t i2 = vld1q_u8(input + offset + 32);
+      uint8x16_t i3 = vld1q_u8(input + offset + 48);
+      vst1q_u8(output + offset + 0, veorq_u8(i0, k0));
+      vst1q_u8(output + offset + 16, veorq_u8(i1, k1));
+      vst1q_u8(output + offset + 32, veorq_u8(i2, k2));
+      vst1q_u8(output + offset + 48, veorq_u8(i3, k3));
     } else
 #endif
         if (block_bytes == 64) {
