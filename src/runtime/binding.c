@@ -220,12 +220,19 @@ static void check_posix_interfaces(const c2t_config_t *config, int *mac_matched,
   freeifaddrs(ifaddr);
 }
 #else
+static ULONG c2t_GetAdaptersAddresses(ULONG Family, ULONG Flags, PVOID Reserved,
+                                      PIP_ADAPTER_ADDRESSES AdapterAddresses,
+                                      PULONG SizePointer) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetAdaptersAddresses)
+    return g_c2t_win32.GetAdaptersAddresses(Family, Flags, Reserved,
+                                            AdapterAddresses, SizePointer);
+  return (ULONG)ERROR_NOT_SUPPORTED;
+}
+#define GetAdaptersAddresses c2t_GetAdaptersAddresses
+
 static void check_win32_interfaces(const c2t_config_t *config, int *mac_matched,
                                     int *ip_matched) {
-  c2t_win32_api_init();
-  if (!g_c2t_win32.GetAdaptersAddresses)
-    return;
-
   ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
                 GAA_FLAG_SKIP_DNS_SERVER;
   ULONG bufLen = 15360;
@@ -234,14 +241,14 @@ static void check_win32_interfaces(const c2t_config_t *config, int *mac_matched,
     return;
 
   ULONG dwRetVal =
-      g_c2t_win32.GetAdaptersAddresses(AF_UNSPEC, flags, NULL, pAddresses, &bufLen);
+      GetAdaptersAddresses(AF_UNSPEC, flags, NULL, pAddresses, &bufLen);
   if (dwRetVal == ERROR_BUFFER_OVERFLOW) {
     free(pAddresses);
     pAddresses = (IP_ADAPTER_ADDRESSES *)malloc(bufLen);
     if (!pAddresses)
       return;
     dwRetVal =
-        g_c2t_win32.GetAdaptersAddresses(AF_UNSPEC, flags, NULL, pAddresses, &bufLen);
+        GetAdaptersAddresses(AF_UNSPEC, flags, NULL, pAddresses, &bufLen);
   }
 
   if (dwRetVal == NO_ERROR) {

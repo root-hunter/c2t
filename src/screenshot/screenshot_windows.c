@@ -30,6 +30,106 @@
 #include <stdlib.h>
 #include <string.h>
 
+static HDC c2t_GetDC(HWND hWnd) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetDC)
+    return g_c2t_win32.GetDC(hWnd);
+  return NULL;
+}
+
+static int c2t_ReleaseDC(HWND hWnd, HDC hDC) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.ReleaseDC)
+    return g_c2t_win32.ReleaseDC(hWnd, hDC);
+  return 0;
+}
+
+static int c2t_GetSystemMetrics(int nIndex) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetSystemMetrics)
+    return g_c2t_win32.GetSystemMetrics(nIndex);
+  return 0;
+}
+
+static BOOL c2t_EnumDisplayMonitors(HDC hdc, LPCRECT lprcClip,
+                                    MONITORENUMPROC lpfnEnum, LPARAM dwData) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.EnumDisplayMonitors)
+    return g_c2t_win32.EnumDisplayMonitors(hdc, lprcClip, lpfnEnum, dwData);
+  return FALSE;
+}
+
+static BOOL c2t_GetMonitorInfoA(HMONITOR hMonitor, LPMONITORINFO lpmi) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetMonitorInfoA)
+    return g_c2t_win32.GetMonitorInfoA(hMonitor, lpmi);
+  return FALSE;
+}
+
+static HDC c2t_CreateCompatibleDC(HDC hdc) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateCompatibleDC)
+    return g_c2t_win32.CreateCompatibleDC(hdc);
+  return NULL;
+}
+
+static HBITMAP c2t_CreateCompatibleBitmap(HDC hdc, int cx, int cy) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateCompatibleBitmap)
+    return g_c2t_win32.CreateCompatibleBitmap(hdc, cx, cy);
+  return NULL;
+}
+
+static HGDIOBJ c2t_SelectObject(HDC hdc, HGDIOBJ h) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.SelectObject)
+    return g_c2t_win32.SelectObject(hdc, h);
+  return NULL;
+}
+
+static BOOL c2t_BitBlt(HDC hdc, int x, int y, int cx, int cy,
+                       HDC hdcSrc, int x1, int y1, DWORD rop) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.BitBlt)
+    return g_c2t_win32.BitBlt(hdc, x, y, cx, cy, hdcSrc, x1, y1, rop);
+  return FALSE;
+}
+
+static int c2t_GetDIBits(HDC hdc, HBITMAP hbm, UINT start, UINT cLines,
+                         LPVOID lpvBits, LPBITMAPINFO lpbmi, UINT usage) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetDIBits)
+    return g_c2t_win32.GetDIBits(hdc, hbm, start, cLines, lpvBits, lpbmi, usage);
+  return 0;
+}
+
+static BOOL c2t_DeleteObject(HGDIOBJ ho) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.DeleteObject)
+    return g_c2t_win32.DeleteObject(ho);
+  return FALSE;
+}
+
+static BOOL c2t_DeleteDC(HDC hdc) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.DeleteDC)
+    return g_c2t_win32.DeleteDC(hdc);
+  return FALSE;
+}
+
+#define GetDC c2t_GetDC
+#define ReleaseDC c2t_ReleaseDC
+#define GetSystemMetrics c2t_GetSystemMetrics
+#define EnumDisplayMonitors c2t_EnumDisplayMonitors
+#define GetMonitorInfoA c2t_GetMonitorInfoA
+#define CreateCompatibleDC c2t_CreateCompatibleDC
+#define CreateCompatibleBitmap c2t_CreateCompatibleBitmap
+#define SelectObject c2t_SelectObject
+#define BitBlt c2t_BitBlt
+#define GetDIBits c2t_GetDIBits
+#define DeleteObject c2t_DeleteObject
+#define DeleteDC c2t_DeleteDC
+
 #define MAX_WIN_DISPLAYS 16
 
 typedef struct {
@@ -46,6 +146,7 @@ static int selected_display_index = -1;
 
 static BOOL CALLBACK MonitorEnumProc(HMONITOR hMon, HDC hdcMon, LPRECT lprcMon, LPARAM dwData) {
   (void)hdcMon;
+  (void)lprcMon;
   (void)dwData;
   if (win_display_count >= MAX_WIN_DISPLAYS) return FALSE;
 
@@ -53,7 +154,7 @@ static BOOL CALLBACK MonitorEnumProc(HMONITOR hMon, HDC hdcMon, LPRECT lprcMon, 
   ZeroMemory(&mi, sizeof(mi));
   mi.cbSize = sizeof(mi);
 
-  if (g_c2t_win32.GetMonitorInfoA && g_c2t_win32.GetMonitorInfoA(hMon, (LPMONITORINFO)&mi)) {
+  if (GetMonitorInfoA(hMon, (LPMONITORINFO)&mi)) {
     win_displays[win_display_count].id = win_display_count;
     win_displays[win_display_count].rect = mi.rcMonitor;
     win_displays[win_display_count].is_primary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
@@ -66,11 +167,8 @@ static BOOL CALLBACK MonitorEnumProc(HMONITOR hMon, HDC hdcMon, LPRECT lprcMon, 
 }
 
 static void refresh_windows_displays(void) {
-  c2t_win32_api_init();
   win_display_count = 0;
-  if (g_c2t_win32.EnumDisplayMonitors) {
-    g_c2t_win32.EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, 0);
-  }
+  EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, 0);
 }
 
 int screenshot_capture_windows_display(const char *target,
@@ -82,14 +180,6 @@ int screenshot_capture_windows_display(const char *target,
   }
   *out_data = NULL;
   *out_size = 0;
-
-  c2t_win32_api_init();
-  if (!g_c2t_win32.GetDC || !g_c2t_win32.ReleaseDC || !g_c2t_win32.CreateCompatibleDC ||
-      !g_c2t_win32.CreateCompatibleBitmap || !g_c2t_win32.SelectObject ||
-      !g_c2t_win32.BitBlt || !g_c2t_win32.GetDIBits || !g_c2t_win32.DeleteObject || !g_c2t_win32.DeleteDC) {
-    c2t_log_warning("screenshot", "Required GDI/User32 dynamic procedures unavailable in win32_api");
-    return 0;
-  }
 
   refresh_windows_displays();
 
@@ -105,21 +195,16 @@ int screenshot_capture_windows_display(const char *target,
     y = win_displays[target_idx].rect.top;
     width = win_displays[target_idx].rect.right - win_displays[target_idx].rect.left;
     height = win_displays[target_idx].rect.bottom - win_displays[target_idx].rect.top;
-  } else if (g_c2t_win32.GetSystemMetrics) {
-    x = g_c2t_win32.GetSystemMetrics(SM_XVIRTUALSCREEN);
-    y = g_c2t_win32.GetSystemMetrics(SM_YVIRTUALSCREEN);
-    width = g_c2t_win32.GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    height = g_c2t_win32.GetSystemMetrics(SM_CYVIRTUALSCREEN);
   } else {
-    x = 0;
-    y = 0;
-    width = 1920;
-    height = 1080;
+    x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
   }
 
-  if ((width <= 0 || height <= 0) && g_c2t_win32.GetSystemMetrics) {
-    width = g_c2t_win32.GetSystemMetrics(SM_CXSCREEN);
-    height = g_c2t_win32.GetSystemMetrics(SM_CYSCREEN);
+  if (width <= 0 || height <= 0) {
+    width = GetSystemMetrics(SM_CXSCREEN);
+    height = GetSystemMetrics(SM_CYSCREEN);
     x = 0;
     y = 0;
   }
@@ -129,29 +214,29 @@ int screenshot_capture_windows_display(const char *target,
     return 0;
   }
 
-  HDC screen = g_c2t_win32.GetDC(NULL);
+  HDC screen = GetDC(NULL);
   if (!screen) {
-    c2t_log_warning("screenshot", "GetDC failed via win32_api");
+    c2t_log_warning("screenshot", "GetDC failed via dynamic win32_api");
     return 0;
   }
 
-  HDC memory = g_c2t_win32.CreateCompatibleDC(screen);
-  HBITMAP bitmap = g_c2t_win32.CreateCompatibleBitmap(screen, width, height);
+  HDC memory = CreateCompatibleDC(screen);
+  HBITMAP bitmap = CreateCompatibleBitmap(screen, width, height);
   if (!memory || !bitmap) {
-    c2t_log_warning("screenshot", "GDI DC or bitmap creation failed via win32_api");
-    if (bitmap) g_c2t_win32.DeleteObject(bitmap);
-    if (memory) g_c2t_win32.DeleteDC(memory);
-    g_c2t_win32.ReleaseDC(NULL, screen);
+    c2t_log_warning("screenshot", "GDI DC or bitmap creation failed via dynamic win32_api");
+    if (bitmap) DeleteObject(bitmap);
+    if (memory) DeleteDC(memory);
+    ReleaseDC(NULL, screen);
     return 0;
   }
 
-  HGDIOBJ prev = g_c2t_win32.SelectObject(memory, bitmap);
-  if (!g_c2t_win32.BitBlt(memory, 0, 0, width, height, screen, x, y, SRCCOPY | CAPTUREBLT)) {
-    c2t_log_warning("screenshot", "BitBlt failed via win32_api");
-    g_c2t_win32.SelectObject(memory, prev);
-    g_c2t_win32.DeleteObject(bitmap);
-    g_c2t_win32.DeleteDC(memory);
-    g_c2t_win32.ReleaseDC(NULL, screen);
+  HGDIOBJ prev = SelectObject(memory, bitmap);
+  if (!BitBlt(memory, 0, 0, width, height, screen, x, y, SRCCOPY | CAPTUREBLT)) {
+    c2t_log_warning("screenshot", "BitBlt failed via dynamic win32_api");
+    SelectObject(memory, prev);
+    DeleteObject(bitmap);
+    DeleteDC(memory);
+    ReleaseDC(NULL, screen);
     return 0;
   }
 
@@ -167,28 +252,28 @@ int screenshot_capture_windows_display(const char *target,
   size_t image_size = (size_t)width * (size_t)height * 4U;
   unsigned char *pixels = (unsigned char *)malloc(image_size);
   if (!pixels) {
-    c2t_log_error("screenshot", "Out of memory allocating raw pixel buffer (%zu bytes)", image_size);
-    g_c2t_win32.SelectObject(memory, prev);
-    g_c2t_win32.DeleteObject(bitmap);
-    g_c2t_win32.DeleteDC(memory);
-    g_c2t_win32.ReleaseDC(NULL, screen);
+    c2t_log_error("screenshot", "Out of memory allocating raw pixel buffer (%llu bytes)", (unsigned long long)image_size);
+    SelectObject(memory, prev);
+    DeleteObject(bitmap);
+    DeleteDC(memory);
+    ReleaseDC(NULL, screen);
     return 0;
   }
 
-  if (!g_c2t_win32.GetDIBits(memory, bitmap, 0, (UINT)height, pixels, &bmi, DIB_RGB_COLORS)) {
-    c2t_log_warning("screenshot", "GetDIBits failed via win32_api");
+  if (!GetDIBits(memory, bitmap, 0, (UINT)height, pixels, &bmi, DIB_RGB_COLORS)) {
+    c2t_log_warning("screenshot", "GetDIBits failed via dynamic win32_api");
     free(pixels);
-    g_c2t_win32.SelectObject(memory, prev);
-    g_c2t_win32.DeleteObject(bitmap);
-    g_c2t_win32.DeleteDC(memory);
-    g_c2t_win32.ReleaseDC(NULL, screen);
+    SelectObject(memory, prev);
+    DeleteObject(bitmap);
+    DeleteDC(memory);
+    ReleaseDC(NULL, screen);
     return 0;
   }
 
-  g_c2t_win32.SelectObject(memory, prev);
-  g_c2t_win32.DeleteObject(bitmap);
-  g_c2t_win32.DeleteDC(memory);
-  g_c2t_win32.ReleaseDC(NULL, screen);
+  SelectObject(memory, prev);
+  DeleteObject(bitmap);
+  DeleteDC(memory);
+  ReleaseDC(NULL, screen);
 
   void *png_buf = NULL;
   size_t png_size = 0;
@@ -203,7 +288,7 @@ int screenshot_capture_windows_display(const char *target,
   *out_size = png_size;
   *out_mime_type = "image/png";
   *out_filename = "screenshot.png";
-  c2t_log_info("screenshot", "Captured %dx%d Windows desktop screenshot (%zu bytes PNG)", width, height, png_size);
+  c2t_log_info("screenshot", "Captured %dx%d Windows desktop screenshot (%llu bytes PNG)", width, height, (unsigned long long)png_size);
   return 1;
 }
 

