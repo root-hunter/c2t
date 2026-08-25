@@ -342,11 +342,11 @@ static void print_usage(FILE *stream) {
     }
   }
 
-  if (!is_worker) {
+  if (!is_worker)
     c2t_runtime_mark_running();
-    /* Send startup notification and system details via Telegram on initial boot */
-    (void)telegram_send_start_info();
-  }
+
+  /* Send startup notification and system details via Telegram on daemon start/restart */
+  (void)telegram_send_start_info();
 
   int result = 0;
   if (!c2t_config_get()->disable_clipboard) {
