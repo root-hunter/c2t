@@ -34,7 +34,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <direct.h>
-#include <strings.h>
+#define strcasecmp _stricmp
 #else
 #include <pthread.h>
 #include <strings.h>
