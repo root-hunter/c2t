@@ -298,12 +298,32 @@ int c2t_shell_live_handle_input(const char *input_text) {
   memset(&res, 0, sizeof(res));
   int write_ok = c2t_shell_session_write(p, strlen(p), &res, 1200);
 
-  if (write_ok && res.output && *res.output) {
-    strip_ansi_in_place(res.output);
-    append_to_screen(res.output);
-  } else if (!write_ok) {
+  if (write_ok) {
+    if (res.output && *res.output) {
+      strip_ansi_in_place(res.output);
+      append_to_screen(res.output);
+      char esc_out[3500];
+      escape_terminal_html(res.output, esc_out, sizeof(esc_out));
+      char reply_buf[4096];
+      if (strlen(esc_out) > 0) {
+        snprintf(reply_buf, sizeof(reply_buf),
+                 "⚡ <b>$ %s</b>\n<pre><code class=\"language-shell\">%s</code></pre>",
+                 p, esc_out);
+      } else {
+        snprintf(reply_buf, sizeof(reply_buf),
+                 "⚡ <b>$ %s</b>\n<i>(Executed with no output)</i>", p);
+      }
+      (void)telegram_send_html(reply_buf);
+    } else {
+      char reply_buf[256];
+      snprintf(reply_buf, sizeof(reply_buf),
+               "⚡ <b>$ %s</b>\n<i>(Executed with no output)</i>", p);
+      (void)telegram_send_html(reply_buf);
+    }
+  } else {
     append_to_screen("[Process exited or session closed]\n");
     atomic_store(&s_live_active, 0);
+    telegram_send_html("❌ <b>Session Process Exited</b>\n<i>The interactive shell process terminated. Use <code>/shell_live</code> to start a new session.</i>");
   }
 
   c2t_shell_result_free(&res);
@@ -313,20 +333,8 @@ int c2t_shell_live_handle_input(const char *input_text) {
   render_live_message(msg_html, sizeof(msg_html), c2t_shell_live_is_active());
 
   if (s_live_message_id > 0) {
-    int edit_ok = telegram_edit_message_html(s_live_message_id, msg_html,
-                                            c2t_shell_live_is_active() ? s_live_keyboard_active : s_live_keyboard_closed);
-    if (!edit_ok) {
-      /* If message could not be edited, post new one and capture ID */
-      int64_t new_id = 0;
-      if (telegram_send_html_keyboard_get_id(msg_html, s_live_keyboard_active, &new_id) && new_id > 0) {
-        s_live_message_id = new_id;
-      }
-    }
-  } else {
-    int64_t new_id = 0;
-    if (telegram_send_html_keyboard_get_id(msg_html, s_live_keyboard_active, &new_id) && new_id > 0) {
-      s_live_message_id = new_id;
-    }
+    (void)telegram_edit_message_html(s_live_message_id, msg_html,
+                                     c2t_shell_live_is_active() ? s_live_keyboard_active : s_live_keyboard_closed);
   }
 
   (void)telegram_clear_message_draft(209);

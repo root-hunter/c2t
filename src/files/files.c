@@ -2059,7 +2059,9 @@ static int show_file_action_dialog(size_t item_idx, int64_t edit_msg_id) {
 int c2t_file_explorer_show(const char *path, int page, int64_t edit_msg_id) {
   if (path && *path) {
     scan_explorer_directory(path);
-  } else if (s_explorer_item_count == 0 && s_explorer_dir[0] == '\0') {
+  } else if (s_explorer_dir[0] != '\0') {
+    scan_explorer_directory(s_explorer_dir);
+  } else {
     scan_explorer_directory(".");
   }
 

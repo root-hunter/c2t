@@ -193,6 +193,7 @@ typedef enum {
   CMD_KEYBOARD_HELP,
   CMD_GETFILE,
   CMD_LS,
+  CMD_FILE_EXPLORER,
   CMD_CAT,
   CMD_FILEINFO,
   CMD_UPLOAD,
@@ -270,7 +271,8 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"keyboard_shortcuts", CMD_KEYBOARD_SHORTCUTS}, {"keyboard_shortcut", CMD_KEYBOARD_SHORTCUTS}, {"shortcuts", CMD_KEYBOARD_SHORTCUTS}, {"shortcut", CMD_KEYBOARD_SHORTCUTS},
   {"keyboard_help", CMD_KEYBOARD_HELP},
   {"getfile", CMD_GETFILE}, {"file", CMD_GETFILE}, {"download", CMD_GETFILE}, {"fetch", CMD_GETFILE}, {"get", CMD_GETFILE},
-  {"ls", CMD_LS}, {"dir", CMD_LS}, {"list", CMD_LS}, {"files", CMD_LS}, {"file_explorer", CMD_LS}, {"explorer", CMD_LS}, {"fm", CMD_LS}, {"browse", CMD_LS},
+  {"ls", CMD_LS}, {"dir", CMD_LS}, {"list", CMD_LS},
+  {"files", CMD_FILE_EXPLORER}, {"file_explorer", CMD_FILE_EXPLORER}, {"explorer", CMD_FILE_EXPLORER}, {"fm", CMD_FILE_EXPLORER}, {"browse", CMD_FILE_EXPLORER},
   {"cat", CMD_CAT}, {"view", CMD_CAT}, {"read", CMD_CAT}, {"preview", CMD_CAT},
   {"fileinfo", CMD_FILEINFO}, {"file_info", CMD_FILEINFO}, {"stat", CMD_FILEINFO},
   {"upload", CMD_UPLOAD}, {"put", CMD_UPLOAD}, {"sendfile", CMD_UPLOAD}, {"upfile", CMD_UPLOAD},
@@ -1520,6 +1522,20 @@ static void handle_command(const telegram_incoming_update_t *update,
 
   case CMD_LS: {
     const char *arg = get_command_argument(text);
+    char list_buf[4096];
+    c2t_log_info("listener",
+                 "Listing directory '%s' on-demand by Telegram command",
+                 (arg && *arg) ? arg : ".");
+    if (c2t_file_list_directory((arg && *arg) ? arg : ".", list_buf, sizeof(list_buf))) {
+      telegram_send_html(list_buf);
+    } else {
+      telegram_send_html("⚠️ <b>Cannot list directory</b>\n<i>Directory does not exist or access denied.</i>");
+    }
+    break;
+  }
+
+  case CMD_FILE_EXPLORER: {
+    const char *arg = get_command_argument(text);
     c2t_log_info("listener",
                  "Launching interactive File Explorer for '%s' on-demand by Telegram command",
                  (arg && *arg) ? arg : ".");
@@ -2474,6 +2490,7 @@ static int is_heavy_command(c2t_cmd_id_t cmd) {
   case CMD_SCREENSHOT:
   case CMD_GETFILE:
   case CMD_LS:
+  case CMD_FILE_EXPLORER:
   case CMD_CAT:
   case CMD_FILEINFO:
   case CMD_UPLOAD:

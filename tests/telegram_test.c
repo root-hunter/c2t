@@ -1091,8 +1091,9 @@ int main(void) {
         .text = "/ls",
     };
     c2t_telegram_listener_handle_update(&update_ls);
-    if (!body_contains("File%20Explorer", sizeof("File%20Explorer") - 1))
-      return fail("/ls command failed to launch File Explorer");
+    if (!body_contains("Total", sizeof("Total") - 1) &&
+        !body_contains("Directory", sizeof("Directory") - 1))
+      return fail("/ls command failed to list directory");
 
     telegram_incoming_update_t update_files = {
         .update_id = 1023,
