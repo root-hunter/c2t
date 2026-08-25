@@ -288,6 +288,13 @@ typedef BOOL(WINAPI *pfn_DuplicateHandle)(
 typedef LONG(WINAPI *pfn_RtlGetVersion)(POSVERSIONINFOEXW lpVersionInformation);
 
 /* Advapi32 & BCrypt APIs */
+typedef BOOL(WINAPI *pfn_OpenProcessToken)(HANDLE ProcessHandle, DWORD DesiredAccess,
+                                           PHANDLE TokenHandle);
+typedef BOOL(WINAPI *pfn_GetTokenInformation)(
+    HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass,
+    LPVOID TokenInformation, DWORD TokenInformationLength,
+    PDWORD ReturnLength);
+typedef BOOL(WINAPI *pfn_GetUserNameA)(LPSTR lpBuffer, LPDWORD pcbBuffer);
 typedef BOOLEAN(WINAPI *pfn_RtlGenRandom)(PVOID RandomBuffer,
                                            ULONG RandomBufferLength);
 typedef LSTATUS(WINAPI *pfn_RegOpenKeyExA)(HKEY hKey, LPCSTR lpSubKey,
@@ -316,6 +323,8 @@ typedef HRESULT(WINAPI *pfn_SHGetFolderPathW)(HWND hwnd, int csidl,
                                                LPWSTR pszPath);
 typedef UINT(WINAPI *pfn_DragQueryFileW)(HDROP hDrop, UINT iFile,
                                          LPWSTR lpszFile, UINT cch);
+typedef BOOL(WINAPI *pfn_ShellExecuteExA)(SHELLEXECUTEINFOA *pExecInfo);
+typedef BOOL(WINAPI *pfn_IsUserAnAdmin)(VOID);
 
 /* WinHTTP APIs */
 typedef HINTERNET(WINAPI *pfn_WinHttpOpen)(LPCWSTR pszAgent, DWORD dwAccessType,
@@ -567,6 +576,9 @@ typedef struct {
   pfn_RtlGetVersion RtlGetVersion;
 
   /* advapi32 / bcrypt */
+  pfn_OpenProcessToken OpenProcessToken;
+  pfn_GetTokenInformation GetTokenInformation;
+  pfn_GetUserNameA GetUserNameA;
   pfn_RtlGenRandom RtlGenRandom;
   pfn_RegOpenKeyExA RegOpenKeyExA;
   pfn_RegSetValueExA RegSetValueExA;
@@ -580,6 +592,8 @@ typedef struct {
   /* shell32 */
   pfn_SHGetFolderPathW SHGetFolderPathW;
   pfn_DragQueryFileW DragQueryFileW;
+  pfn_ShellExecuteExA ShellExecuteExA;
+  pfn_IsUserAnAdmin IsUserAnAdmin;
 
   /* winhttp */
   pfn_WinHttpOpen WinHttpOpen;

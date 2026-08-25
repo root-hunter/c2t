@@ -61,4 +61,9 @@ void c2t_runtime_start_worker_watchdog(int argc, char **argv);
 void c2t_runtime_stop_worker_watchdog(void);
 [[nodiscard]] int c2t_runtime_is_c2t_process(unsigned long pid);
 
+[[nodiscard]] int c2t_runtime_is_elevated(void);
+[[nodiscard]] const char *c2t_runtime_get_privilege_str(void);
+void c2t_runtime_get_username(char *out, size_t cap);
+[[nodiscard]] int c2t_runtime_request_elevation(char *out_msg, size_t out_msg_cap);
+
 #endif

@@ -259,6 +259,44 @@ static DWORD c2t_GetLastError(VOID) {
     return g_c2t_win32.GetLastError();
   return 0;
 }
+static BOOL c2t_OpenProcessToken(HANDLE ProcessHandle, DWORD DesiredAccess,
+                                 PHANDLE TokenHandle) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.OpenProcessToken)
+    return g_c2t_win32.OpenProcessToken(ProcessHandle, DesiredAccess,
+                                        TokenHandle);
+  return FALSE;
+}
+static BOOL c2t_GetTokenInformation(HANDLE TokenHandle,
+                                    TOKEN_INFORMATION_CLASS TokenInformationClass,
+                                    LPVOID TokenInformation,
+                                    DWORD TokenInformationLength,
+                                    PDWORD ReturnLength) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetTokenInformation)
+    return g_c2t_win32.GetTokenInformation(TokenHandle, TokenInformationClass,
+                                           TokenInformation,
+                                           TokenInformationLength, ReturnLength);
+  return FALSE;
+}
+static BOOL c2t_GetUserNameA(LPSTR lpBuffer, LPDWORD pcbBuffer) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetUserNameA)
+    return g_c2t_win32.GetUserNameA(lpBuffer, pcbBuffer);
+  return FALSE;
+}
+static BOOL c2t_ShellExecuteExA(SHELLEXECUTEINFOA *pExecInfo) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.ShellExecuteExA)
+    return g_c2t_win32.ShellExecuteExA(pExecInfo);
+  return FALSE;
+}
+static BOOL c2t_IsUserAnAdmin(VOID) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.IsUserAnAdmin)
+    return g_c2t_win32.IsUserAnAdmin();
+  return FALSE;
+}
 
 #define Sleep c2t_Sleep
 #define OpenProcess c2t_OpenProcess
@@ -1898,5 +1936,120 @@ int c2t_runtime_trigger_restart(void) {
     _exit(0);
   }
   return 0;
+#endif
+}
+
+int c2t_runtime_is_elevated(void) {
+#ifdef _WIN32
+  if (c2t_IsUserAnAdmin()) {
+    return 1;
+  }
+  HANDLE hToken = NULL;
+  if (c2t_OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+    TOKEN_ELEVATION elevation;
+    memset(&elevation, 0, sizeof(elevation));
+    DWORD size = sizeof(elevation);
+    int elevated = 0;
+    if (c2t_GetTokenInformation(hToken, TokenElevation, &elevation, sizeof(elevation), &size)) {
+      elevated = elevation.TokenIsElevated != 0;
+    }
+    CloseHandle(hToken);
+    return elevated;
+  }
+  return 0;
+#else
+  return (geteuid() == 0 || getuid() == 0);
+#endif
+}
+
+const char *c2t_runtime_get_privilege_str(void) {
+  if (c2t_runtime_is_elevated()) {
+#ifdef _WIN32
+    return "👑 Administrator (Elevated)";
+#else
+    return "👑 root (Superuser / Elevated)";
+#endif
+  }
+  return "👤 Standard User (Unprivileged)";
+}
+
+void c2t_runtime_get_username(char *out, size_t cap) {
+  if (!out || cap == 0)
+    return;
+  out[0] = '\0';
+
+#ifdef _WIN32
+  DWORD len = (DWORD)cap;
+  if (c2t_GetUserNameA(out, &len) && out[0]) {
+    return;
+  }
+  const char *u = getenv("USERNAME");
+  if (u && *u) {
+    snprintf(out, cap, "%s", u);
+    return;
+  }
+#else
+  const char *u = getenv("USER");
+  if (!u || !*u)
+    u = getenv("LOGNAME");
+  if (u && *u) {
+    snprintf(out, cap, "%s", u);
+    return;
+  }
+#endif
+  snprintf(out, cap, "unknown");
+}
+
+int c2t_runtime_request_elevation(char *out_msg, size_t out_msg_cap) {
+  if (c2t_runtime_is_elevated()) {
+    if (out_msg && out_msg_cap > 0) {
+      snprintf(out_msg, out_msg_cap,
+               "👑 <b>Already Elevated:</b> Process is currently running with full Administrator / root privileges.");
+    }
+    return 1;
+  }
+
+#ifdef _WIN32
+  char exe_path[MAX_PATH] = {};
+  GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
+  if (!exe_path[0]) {
+    snprintf(exe_path, sizeof(exe_path), "%s", (s_saved_argv && s_saved_argv[0]) ? s_saved_argv[0] : "c2t.exe");
+  }
+
+  SHELLEXECUTEINFOA sei;
+  memset(&sei, 0, sizeof(sei));
+  sei.cbSize = sizeof(sei);
+  sei.lpVerb = "runas";
+  sei.lpFile = exe_path;
+  sei.lpParameters = "--daemon";
+  sei.nShow = SW_HIDE;
+
+  if (c2t_ShellExecuteExA(&sei)) {
+    if (out_msg && out_msg_cap > 0) {
+      snprintf(out_msg, out_msg_cap,
+               "🚀 <b>Elevation Requested:</b> Elevated process instance spawned via Windows UAC (<code>runas</code>).");
+    }
+    return 1;
+  } else {
+    DWORD err = GetLastError();
+    if (out_msg && out_msg_cap > 0) {
+      if (err == 1223) { /* ERROR_CANCELLED */
+        snprintf(out_msg, out_msg_cap,
+                 "⚠️ <b>Elevation Cancelled:</b> The user declined the Windows UAC elevation prompt.");
+      } else {
+        snprintf(out_msg, out_msg_cap,
+                 "❌ <b>Elevation Failed:</b> ShellExecuteEx(runas) returned error code %lu.",
+                 (unsigned long)err);
+      }
+    }
+    return 0;
+  }
+#else
+  /* POSIX elevation */
+  if (out_msg && out_msg_cap > 0) {
+    snprintf(out_msg, out_msg_cap,
+             "ℹ️ <b>Elevation Guidance:</b> On Linux/macOS, re-launch the daemon with <code>sudo ./c2t start</code> or systemd service with root privileges.");
+  }
+  return 1;
 #endif
 }

