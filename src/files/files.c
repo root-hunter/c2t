@@ -19,6 +19,7 @@
 #include "../config/config.h"
 #include "../crypto/crypto.h"
 #include "../logging/logging.h"
+#include "../runtime/environment.h"
 #include "../telegram/telegram.h"
 
 #include <ctype.h>
@@ -2186,9 +2187,9 @@ int c2t_file_explorer_handle_callback(const char *callback_query_id, const char 
 
   if (strcmp(callback_data, "fl_home") == 0) {
     (void)telegram_answer_callback_query(callback_query_id, "🏠 Home directory");
-    const char *home = getenv("HOME");
+    const char *home = c2t_getenv("HOME");
 #ifdef _WIN32
-    if (!home) home = getenv("USERPROFILE");
+    if (!home) home = c2t_getenv("USERPROFILE");
 #endif
     if (!home) home = ".";
     s_explorer_page = 0;

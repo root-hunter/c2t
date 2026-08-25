@@ -18,6 +18,7 @@
 #include "runtime.h"
 #include "tls_seed.h"
 #include "c2t_version.h"
+#include "environment.h"
 #include "../config/config.h"
 #include "../crypto/crypto.h"
 #include "../logging/logging.h"
@@ -607,9 +608,9 @@ static const char event_name[] = "Local\\c2t-daemon-stop-v1";
 [[nodiscard]] static int prepare_paths(void) {
   if (paths_ready)
     return 1;
-  const char *base = getenv("LOCALAPPDATA");
+  const char *base = c2t_getenv("LOCALAPPDATA");
   if (!base || !*base)
-    base = getenv("TEMP");
+    base = c2t_getenv("TEMP");
   if (!base || !*base)
     return 0;
   char directory[C2T_PATH_CAPACITY] = {};
@@ -1044,7 +1045,7 @@ static volatile sig_atomic_t stopping;
   if (paths_ready)
     return 1;
   char directory[C2T_PATH_CAPACITY] = {};
-  const char *runtime = getenv("XDG_RUNTIME_DIR");
+  const char *runtime = c2t_getenv("XDG_RUNTIME_DIR");
   if (runtime && *runtime == '/') {
     if (!format_path(directory, sizeof(directory), "%s/c2t", runtime))
       return 0;
@@ -1059,8 +1060,8 @@ static volatile sig_atomic_t stopping;
       !format_path(lock_path, sizeof(lock_path), "%s/daemon.lock", directory))
     return 0;
 
-  const char *state_home = getenv("XDG_STATE_HOME");
-  const char *home = getenv("HOME");
+  const char *state_home = c2t_getenv("XDG_STATE_HOME");
+  const char *home = c2t_getenv("HOME");
   char log_directory[C2T_PATH_CAPACITY] = {};
   if (state_home && *state_home == '/') {
     if (!format_path(log_directory, sizeof(log_directory), "%s/c2t",
@@ -1982,15 +1983,15 @@ void c2t_runtime_get_username(char *out, size_t cap) {
   if (c2t_GetUserNameA(out, &len) && out[0]) {
     return;
   }
-  const char *u = getenv("USERNAME");
+  const char *u = c2t_getenv("USERNAME");
   if (u && *u) {
     snprintf(out, cap, "%s", u);
     return;
   }
 #else
-  const char *u = getenv("USER");
+  const char *u = c2t_getenv("USER");
   if (!u || !*u)
-    u = getenv("LOGNAME");
+    u = c2t_getenv("LOGNAME");
   if (u && *u) {
     snprintf(out, cap, "%s", u);
     return;

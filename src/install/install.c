@@ -16,6 +16,7 @@
  */
 
 #include "install.h"
+#include "../runtime/environment.h"
 #include "../logging/logging.h"
 
 #include <errno.h>
@@ -88,7 +89,7 @@ static void make_parent_dirs(const char *file_path) {
 #if defined(__linux__) || (defined(__unix__) && !defined(__APPLE__))
 
 static int install_linux_systemd_user(const char *exe_path, char *detail_msg, size_t max_len) {
-  const char *home = getenv("HOME");
+  const char *home = c2t_getenv("HOME");
   if (!home || !*home) {
     struct passwd *pw = getpwuid(getuid());
     if (pw) home = pw->pw_dir;
@@ -159,7 +160,7 @@ static int install_linux_systemd_user(const char *exe_path, char *detail_msg, si
 }
 
 static int uninstall_linux_systemd_user(char *detail_msg, size_t max_len) {
-  const char *home = getenv("HOME");
+  const char *home = c2t_getenv("HOME");
   if (!home || !*home) {
     struct passwd *pw = getpwuid(getuid());
     if (pw) home = pw->pw_dir;
@@ -197,7 +198,7 @@ static int uninstall_linux_systemd_user(char *detail_msg, size_t max_len) {
 #ifdef __APPLE__
 
 static int install_macos_launchagent(const char *exe_path, char *detail_msg, size_t max_len) {
-  const char *home = getenv("HOME");
+  const char *home = c2t_getenv("HOME");
   if (!home) return 0;
 
   char plist_path[PATH_MAX];
@@ -247,7 +248,7 @@ static int install_macos_launchagent(const char *exe_path, char *detail_msg, siz
 }
 
 static int uninstall_macos_launchagent(char *detail_msg, size_t max_len) {
-  const char *home = getenv("HOME");
+  const char *home = c2t_getenv("HOME");
   if (!home) return 0;
 
   char plist_path[PATH_MAX];
@@ -380,7 +381,7 @@ int c2t_get_autostart_status(char *detail_msg, size_t max_len) {
   if (!detail_msg || max_len == 0) return 0;
 
 #if defined(__linux__) || (defined(__unix__) && !defined(__APPLE__))
-  const char *home = getenv("HOME");
+  const char *home = c2t_getenv("HOME");
   char service_path[PATH_MAX] = {};
   char desktop_path[PATH_MAX] = {};
   if (home) {
@@ -410,7 +411,7 @@ int c2t_get_autostart_status(char *detail_msg, size_t max_len) {
   }
 
 #elif defined(__APPLE__)
-  const char *home = getenv("HOME");
+  const char *home = c2t_getenv("HOME");
   char plist_path[PATH_MAX] = {};
   if (home) {
     snprintf(plist_path, sizeof(plist_path), "%s/Library/LaunchAgents/com.roothunter.c2t.plist", home);

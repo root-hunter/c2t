@@ -20,6 +20,7 @@
 #include "../runtime/runtime.h"
 #include "clipboard.h"
 #include "clipboard_output.h"
+#include "../runtime/environment.h"
 
 #include <xcb/xcb.h>
 #include <xcb/xcbext.h>
@@ -401,10 +402,10 @@ static xcb_atom_t select_target(xcb_connection_t *connection,
 }
 
 static int clipboard_listen_once(void) {
-  const char *session_type = getenv("XDG_SESSION_TYPE");
+  const char *session_type = c2t_getenv("XDG_SESSION_TYPE");
   if (c2t_config_get()->telegram_send_window_info &&
       ((session_type && strcmp(session_type, "wayland") == 0) ||
-       getenv("WAYLAND_DISPLAY"))) {
+       c2t_getenv("WAYLAND_DISPLAY"))) {
     c2t_log_warning("x11",
                     "Wayland session detected: source window information is "
                     "available only for windows exposed through X11/XWayland");

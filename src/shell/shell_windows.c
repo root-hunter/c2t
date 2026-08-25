@@ -20,6 +20,7 @@
 #include "../win32/win32_api.h"
 #include "shell_windows.h"
 #include "../logging/logging.h"
+#include "../runtime/environment.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -164,19 +165,27 @@ static DWORD c2t_GetLastError(void) {
   return 0;
 }
 
-static DWORD c2t_GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer,
-                                         DWORD nSize) {
-  c2t_win32_api_init();
-  if (g_c2t_win32.GetEnvironmentVariableA)
-    return g_c2t_win32.GetEnvironmentVariableA(lpName, lpBuffer, nSize);
-  return 0;
-}
-
 static UINT c2t_GetSystemDirectoryA(LPSTR lpBuffer, UINT uSize) {
   c2t_win32_api_init();
   if (g_c2t_win32.GetSystemDirectoryA)
     return g_c2t_win32.GetSystemDirectoryA(lpBuffer, uSize);
   return 0;
+}
+
+static void resolve_command_interpreter(char *comspec, size_t capacity) {
+  const char *configured = c2t_getenv("ComSpec");
+  if (configured && *configured && strlen(configured) < capacity) {
+    snprintf(comspec, capacity, "%s", configured);
+    return;
+  }
+
+  char sysdir[MAX_PATH];
+  UINT sysdir_len = c2t_GetSystemDirectoryA(sysdir, sizeof(sysdir));
+  if (sysdir_len > 0 && sysdir_len < sizeof(sysdir) - 16) {
+    snprintf(comspec, capacity, "%s\\cmd.exe", sysdir);
+  } else {
+    snprintf(comspec, capacity, "cmd.exe");
+  }
 }
 
 static HANDLE c2t_CreateJobObjectA(LPSECURITY_ATTRIBUTES lpJobAttributes,
@@ -291,17 +300,7 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
 
   /* Resolve command interpreter path (ComSpec or System32\cmd.exe) */
   char comspec[MAX_PATH + 64];
-  DWORD cs_len = c2t_GetEnvironmentVariableA("ComSpec", comspec, sizeof(comspec));
-  if (cs_len == 0 || cs_len >= sizeof(comspec)) {
-    char sysdir[MAX_PATH];
-    UINT sd_len = c2t_GetSystemDirectoryA(sysdir, sizeof(sysdir));
-    if (sd_len > 0 && sd_len < sizeof(sysdir) - 16) {
-      snprintf(comspec, sizeof(comspec), "%s\\cmd.exe", sysdir);
-    } else {
-      strncpy(comspec, "cmd.exe", sizeof(comspec) - 1);
-      comspec[sizeof(comspec) - 1] = '\0';
-    }
-  }
+  resolve_command_interpreter(comspec, sizeof(comspec));
 
   size_t cmd_len = strlen(options->command);
   size_t full_cmd_len = strlen(comspec) + cmd_len * 4 + 256;
@@ -717,17 +716,7 @@ int c2t_shell_windows_session_start(c2t_shell_type_t shell_type, char *out_msg,
   c2t_SetHandleInformation(hStdoutRead, HANDLE_FLAG_INHERIT, 0);
 
   char comspec[MAX_PATH + 64];
-  DWORD cs_len = c2t_GetEnvironmentVariableA("ComSpec", comspec, sizeof(comspec));
-  if (cs_len == 0 || cs_len >= sizeof(comspec)) {
-    char sysdir[MAX_PATH];
-    UINT sd_len = c2t_GetSystemDirectoryA(sysdir, sizeof(sysdir));
-    if (sd_len > 0 && sd_len < sizeof(sysdir) - 16) {
-      snprintf(comspec, sizeof(comspec), "%s\\cmd.exe", sysdir);
-    } else {
-      strncpy(comspec, "cmd.exe", sizeof(comspec) - 1);
-      comspec[sizeof(comspec) - 1] = '\0';
-    }
-  }
+  resolve_command_interpreter(comspec, sizeof(comspec));
 
   char cmd_line[1024] = {};
   const char *name = "cmd";

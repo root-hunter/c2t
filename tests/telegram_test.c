@@ -27,6 +27,7 @@
 #include "logging/log_sender.h"
 #include "logging/logging.h"
 #include "runtime/runtime.h"
+#include "runtime/environment.h"
 #include "screenshot/screenshot.h"
 #include "screenshot/screenshot_encoder.h"
 #include "screenshot/screenshot_output.h"
@@ -295,8 +296,8 @@ int main(void) {
   if (test_arena() != 0)
     return 1;
 
-  if (getenv("C2T_EXPECT_EMBEDDED") &&
-      strcmp(getenv("C2T_EXPECT_EMBEDDED"), "1") == 0) {
+  if (c2t_getenv("C2T_EXPECT_EMBEDDED") &&
+      strcmp(c2t_getenv("C2T_EXPECT_EMBEDDED"), "1") == 0) {
     unsetenv("TELEGRAM_BOT_TOKEN");
     unsetenv("TELEGRAM_CHAT_ID");
     unsetenv("C2T_PROXY");
@@ -312,6 +313,20 @@ int main(void) {
       return fail("post-link embedded Telegram configuration");
     return 0;
   }
+
+  setenv("C2T_GETENV_TEST", "environment-value", 1);
+  if (!c2t_getenv("C2T_GETENV_TEST") ||
+      strcmp(c2t_getenv("C2T_GETENV_TEST"), "environment-value") != 0)
+    return fail("c2t_getenv populated variable");
+  setenv("C2T_GETENV_EMPTY_TEST", "", 1);
+  const char *empty_environment = c2t_getenv("C2T_GETENV_EMPTY_TEST");
+  if (!empty_environment || *empty_environment != '\0')
+    return fail("c2t_getenv empty variable");
+  unsetenv("C2T_GETENV_TEST");
+  unsetenv("C2T_GETENV_EMPTY_TEST");
+  if (c2t_getenv("C2T_GETENV_TEST") || c2t_getenv(nullptr) ||
+      c2t_getenv("INVALID=NAME"))
+    return fail("c2t_getenv missing or invalid variable");
 
   unsetenv("TELEGRAM_SEND_WINDOW_INFO");
   unsetenv("C2T_VERBOSE");

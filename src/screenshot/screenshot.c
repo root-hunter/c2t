@@ -16,6 +16,7 @@
  */
 
 #include "screenshot.h"
+#include "../runtime/environment.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -76,8 +77,8 @@ int screenshot_is_available(void) {
 #elif defined(_WIN32)
   return 1;
 #elif defined(__linux__) || defined(__unix__)
-  const char *disp = getenv("DISPLAY");
-  const char *wayland = getenv("WAYLAND_DISPLAY");
+  const char *disp = c2t_getenv("DISPLAY");
+  const char *wayland = c2t_getenv("WAYLAND_DISPLAY");
   return (disp != nullptr && *disp != '\0') || (wayland != nullptr && *wayland != '\0');
 #else
   return 0;
@@ -90,7 +91,7 @@ const char *screenshot_get_backend_name(void) {
 #elif defined(_WIN32)
   return "Windows (GDI)";
 #elif defined(__linux__) || defined(__unix__)
-  const char *wayland = getenv("WAYLAND_DISPLAY");
+  const char *wayland = c2t_getenv("WAYLAND_DISPLAY");
   if (wayland && *wayland) return "Linux (Wayland)";
   return "Linux (X11 XCB)";
 #else

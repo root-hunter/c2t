@@ -17,6 +17,7 @@
 
 #include "config.h"
 #include "embedded_config.h"
+#include "../runtime/environment.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -121,7 +122,7 @@ static void load_sidecar(const char *executable_path) {
 
 [[nodiscard]] static const char *
 configured_value(const char *name, char *embedded, size_t embedded_capacity) {
-  const char *value = getenv(name);
+  const char *value = c2t_getenv(name);
   if (value)
     return value;
 #ifdef __APPLE__

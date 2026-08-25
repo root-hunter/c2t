@@ -19,6 +19,7 @@
 #include "../config/config.h"
 #include "../crypto/crypto.h"
 #include "../logging/logging.h"
+#include "../runtime/environment.h"
 #include "../telegram/telegram.h"
 
 #ifdef _WIN32
@@ -527,13 +528,9 @@ int c2t_shell_run_uploaded_script(const char *file_id, const char *file_name,
 
 #ifdef _WIN32
   char tmp_dir[MAX_PATH] = {};
-  if (g_c2t_win32.GetEnvironmentVariableA) {
-    if (g_c2t_win32.GetEnvironmentVariableA("TEMP", tmp_dir, sizeof(tmp_dir)) == 0) {
-      strncpy(tmp_dir, ".", sizeof(tmp_dir) - 1);
-    }
-  } else {
-    strncpy(tmp_dir, ".", sizeof(tmp_dir) - 1);
-  }
+  const char *configured_tmp = c2t_getenv("TEMP");
+  snprintf(tmp_dir, sizeof(tmp_dir), "%s",
+           configured_tmp && *configured_tmp ? configured_tmp : ".");
   snprintf(temp_path, sizeof(temp_path), "%s\\c2t_scr_%llu_%u_%s", tmp_dir,
            (unsigned long long)ts, (unsigned int)(r % 10000), clean_name);
 #else

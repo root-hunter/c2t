@@ -256,6 +256,7 @@ typedef DWORD(WINAPI *pfn_GetCurrentThreadId)(VOID);
 typedef int(WINAPI *pfn_GetLocaleInfoA)(LCID Locale, LCTYPE LCType,
                                          LPSTR lpLCData, int cchData);
 typedef DWORD(WINAPI *pfn_GetLastError)(VOID);
+typedef VOID(WINAPI *pfn_SetLastError)(DWORD dwErrCode);
 typedef HRESULT(WINAPI *pfn_WerSetFlags)(DWORD dwFlags);
 typedef BOOL(WINAPI *pfn_SetDefaultDllDirectories)(DWORD DirectoryFlags);
 typedef BOOL(WINAPI *pfn_CreateDirectoryW)(
@@ -576,6 +577,7 @@ typedef struct {
   pfn_GetCurrentThreadId GetCurrentThreadId;
   pfn_GetLocaleInfoA GetLocaleInfoA;
   pfn_GetLastError GetLastError;
+  pfn_SetLastError SetLastError;
   pfn_CreateDirectoryW CreateDirectoryW;
   pfn_FindFirstFileW FindFirstFileW;
   pfn_FindNextFileW FindNextFileW;

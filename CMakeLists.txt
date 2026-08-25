@@ -100,6 +100,7 @@ add_executable(c2t
     src/logging/logging.c
     src/logging/log_sender.c
     src/runtime/binding.c
+    src/runtime/environment.c
     src/runtime/runtime.c
     src/runtime/tls_seed.c
     src/screenshot/screenshot.c
@@ -451,6 +452,7 @@ if(BUILD_TESTING AND NOT WIN32)
         src/logging/logging.c
         src/logging/log_sender.c
         src/runtime/runtime.c
+        src/runtime/environment.c
         src/runtime/tls_seed.c
         src/screenshot/screenshot.c
         src/screenshot/screenshot_encoder.c
@@ -542,6 +544,7 @@ if(BUILD_TESTING)
         src/logging/logging.c
         src/logging/log_sender.c
         src/runtime/runtime.c
+        src/runtime/environment.c
         src/runtime/tls_seed.c
         src/screenshot/screenshot.c
         src/screenshot/screenshot_encoder.c

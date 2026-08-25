@@ -19,6 +19,7 @@
 #include "shell.h"
 #include "../crypto/crypto.h"
 #include "../logging/logging.h"
+#include "../runtime/environment.h"
 #include "../runtime/runtime.h"
 #include "../telegram/telegram.h"
 
@@ -503,9 +504,9 @@ int c2t_shell_live_handle_input(const char *input_text) {
     while (*target && isspace((unsigned char)*target)) target++;
     if (!*target) {
 #ifdef _WIN32
-      target = getenv("USERPROFILE");
+      target = c2t_getenv("USERPROFILE");
 #else
-      target = getenv("HOME");
+      target = c2t_getenv("HOME");
 #endif
       if (!target) target = ".";
     }

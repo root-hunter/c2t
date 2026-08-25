@@ -19,6 +19,7 @@
 
 #include "screenshot.h"
 #include "screenshot_encoder.h"
+#include "../runtime/environment.h"
 #include "screenshot_output.h"
 #include "../config/config.h"
 #include "../logging/logging.h"
@@ -67,8 +68,8 @@ static linux_display_info_t cached_displays[MAX_LINUX_DISPLAYS];
 static int cached_display_count = 0;
 
 static int is_wayland_session(void) {
-  const char *wayland_disp = getenv("WAYLAND_DISPLAY");
-  const char *session_type = getenv("XDG_SESSION_TYPE");
+  const char *wayland_disp = c2t_getenv("WAYLAND_DISPLAY");
+  const char *session_type = c2t_getenv("XDG_SESSION_TYPE");
   if (wayland_disp && *wayland_disp) return 1;
   if (session_type && strcmp(session_type, "wayland") == 0) return 1;
   return 0;
@@ -84,7 +85,7 @@ static xcb_screen_t *get_screen(xcb_connection_t *conn, int screen_num) {
 }
 
 static int refresh_displays_x11(void) {
-  const char *display = getenv("DISPLAY");
+  const char *display = c2t_getenv("DISPLAY");
   if (!display || !*display) return 0;
 
   int screen_num = 0;
@@ -160,11 +161,11 @@ static void ensure_desktop_session_env(void) {
   char runtime_dir[128];
   snprintf(runtime_dir, sizeof(runtime_dir), "/run/user/%u", (unsigned int)uid);
 
-  if (!getenv("XDG_RUNTIME_DIR") && access(runtime_dir, F_OK) == 0) {
+  if (!c2t_getenv("XDG_RUNTIME_DIR") && access(runtime_dir, F_OK) == 0) {
     setenv("XDG_RUNTIME_DIR", runtime_dir, 0);
   }
 
-  if (!getenv("DBUS_SESSION_BUS_ADDRESS")) {
+  if (!c2t_getenv("DBUS_SESSION_BUS_ADDRESS")) {
     char bus_path[160];
     snprintf(bus_path, sizeof(bus_path), "unix:path=%s/bus", runtime_dir);
     if (access(runtime_dir, F_OK) == 0) {
@@ -172,7 +173,7 @@ static void ensure_desktop_session_env(void) {
     }
   }
 
-  if (!getenv("WAYLAND_DISPLAY")) {
+  if (!c2t_getenv("WAYLAND_DISPLAY")) {
     char wayland_sock[160];
     snprintf(wayland_sock, sizeof(wayland_sock), "%s/wayland-0", runtime_dir);
     if (access(wayland_sock, F_OK) == 0) {
@@ -180,7 +181,7 @@ static void ensure_desktop_session_env(void) {
     }
   }
 
-  if (!getenv("DISPLAY")) {
+  if (!c2t_getenv("DISPLAY")) {
     if (access("/tmp/.X11-unix/X0", F_OK) == 0) {
       setenv("DISPLAY", ":0", 0);
     } else if (access("/tmp/.X11-unix/X1", F_OK) == 0) {
@@ -841,7 +842,7 @@ int screenshot_capture_linux_display(const char *target, void **out_data,
   }
 
   /* 2. Try native X11 / XCB direct capture if DISPLAY is present */
-  const char *display = getenv("DISPLAY");
+  const char *display = c2t_getenv("DISPLAY");
   if (display && *display) {
     int target_idx = -1;
     if (target && *target && strcmp(target, "all") != 0 &&

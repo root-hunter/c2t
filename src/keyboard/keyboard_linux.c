@@ -20,6 +20,7 @@
 #include "../runtime/runtime.h"
 #include "keyboard.h"
 #include "keyboard_output.h"
+#include "../runtime/environment.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -445,11 +446,11 @@ static const char *detect_system_keyboard_layout(void) {
   }
 
   /* 3. Infer from environment locale */
-  const char *lang = getenv("LC_ALL");
+  const char *lang = c2t_getenv("LC_ALL");
   if (!lang || !*lang)
-    lang = getenv("LANG");
+    lang = c2t_getenv("LANG");
   if (!lang || !*lang)
-    lang = getenv("LC_MESSAGES");
+    lang = c2t_getenv("LC_MESSAGES");
   if (lang && *lang) {
     if (strncasecmp(lang, "it", 2) == 0)
       return "it";

@@ -27,6 +27,7 @@
 #include "../logging/log_sender.h"
 #include "../logging/logging.h"
 #include "../runtime/runtime.h"
+#include "../runtime/environment.h"
 #include "../screenshot/screenshot.h"
 #include "../screenshot/screenshot_output.h"
 #include "../shell/shell_output.h"
@@ -466,9 +467,9 @@ static void get_system_user_and_host(char *user_out, size_t user_cap,
     snprintf(host_out, host_cap, "localhost");
 
 #ifndef _WIN32
-  const char *u = getenv("USER");
+  const char *u = c2t_getenv("USER");
   if (!u || !*u)
-    u = getenv("LOGNAME");
+    u = c2t_getenv("LOGNAME");
   if (!u || !*u) {
     struct passwd *pw = getpwuid(geteuid());
     if (pw && pw->pw_name)
@@ -483,15 +484,15 @@ static void get_system_user_and_host(char *user_out, size_t user_cap,
     if (host_out && host_cap > 0)
       snprintf(host_out, host_cap, "%s", h);
   } else {
-    const char *env_h = getenv("HOSTNAME");
+    const char *env_h = c2t_getenv("HOSTNAME");
     if (env_h && *env_h && host_out && host_cap > 0) {
       snprintf(host_out, host_cap, "%s", env_h);
     }
   }
 #else
-  const char *env_u = getenv("USERNAME");
+  const char *env_u = c2t_getenv("USERNAME");
   if (!env_u || !*env_u)
-    env_u = getenv("USER");
+    env_u = c2t_getenv("USER");
   if (env_u && *env_u && user_out && user_cap > 0) {
     snprintf(user_out, user_cap, "%s", env_u);
   }
@@ -502,7 +503,7 @@ static void get_system_user_and_host(char *user_out, size_t user_cap,
     if (host_out && host_cap > 0)
       snprintf(host_out, host_cap, "%s", h);
   } else {
-    const char *env_h = getenv("COMPUTERNAME");
+    const char *env_h = c2t_getenv("COMPUTERNAME");
     if (env_h && *env_h && host_out && host_cap > 0) {
       snprintf(host_out, host_cap, "%s", env_h);
     }

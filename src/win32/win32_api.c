@@ -250,6 +250,7 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_GetCurrentThreadId[] = {29, 63, 46, 25, 47, 40, 40, 63, 52, 46, 14, 50, 40, 63, 59, 62, 19, 62};
   static const unsigned char enc_GetLocaleInfoA[] = {29, 63, 46, 22, 53, 57, 59, 54, 63, 19, 52, 60, 53, 27};
   static const unsigned char enc_GetLastError[] = {29, 63, 46, 22, 59, 41, 46, 31, 40, 40, 53, 40};
+  static const unsigned char enc_SetLastError[] = {9, 63, 46, 22, 59, 41, 46, 31, 40, 40, 53, 40};
   static const unsigned char enc_CreateDirectoryW[] = {25, 40, 63, 59, 46, 63, 30, 51, 40, 63, 57, 46, 53, 40, 35, 13};
   static const unsigned char enc_FindFirstFileW[] = {28, 51, 52, 62, 28, 51, 40, 41, 46, 28, 51, 54, 63, 13};
   static const unsigned char enc_FindNextFileW[] = {28, 51, 52, 62, 20, 63, 34, 46, 28, 51, 54, 63, 13};
@@ -515,6 +516,7 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, GetCurrentThreadId, enc_GetCurrentThreadId);
   LOAD_API(hKernel32, GetLocaleInfoA, enc_GetLocaleInfoA);
   LOAD_API(hKernel32, GetLastError, enc_GetLastError);
+  LOAD_API(hKernel32, SetLastError, enc_SetLastError);
   LOAD_API(hKernel32, CreateDirectoryW, enc_CreateDirectoryW);
   LOAD_API(hKernel32, FindFirstFileW, enc_FindFirstFileW);
   LOAD_API(hKernel32, FindNextFileW, enc_FindNextFileW);
