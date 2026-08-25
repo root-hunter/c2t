@@ -197,7 +197,10 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_WaitForSingleObject[] = {13, 59, 51, 46, 28, 53, 40, 9, 51, 52, 61, 54, 63, 21, 56, 48, 63, 57, 46};
   static const unsigned char enc_Sleep[] = {9, 54, 63, 63, 42};
   static const unsigned char enc_GetTickCount64[] = {29, 63, 46, 14, 51, 57, 49, 25, 53, 47, 52, 46, 108, 110};
+  static const unsigned char enc_QueryPerformanceFrequency[] = {11, 47, 63, 40, 35, 10, 63, 40, 60, 53, 40, 55, 59, 52, 57, 63, 28, 40, 63, 43, 47, 63, 52, 57, 35};
+  static const unsigned char enc_QueryPerformanceCounter[] = {11, 47, 63, 40, 35, 10, 63, 40, 60, 53, 40, 55, 59, 52, 57, 63, 25, 53, 47, 52, 46, 63, 40};
   static const unsigned char enc_GetCurrentProcessId[] = {29, 63, 46, 25, 47, 40, 40, 63, 52, 46, 10, 40, 53, 57, 63, 41, 41, 19, 62};
+  static const unsigned char enc_GetStdHandle[] = {29, 63, 46, 9, 46, 62, 18, 59, 52, 62, 54, 63};
   static const unsigned char enc_ProcessIdToSessionId[] = {10, 40, 53, 57, 63, 41, 41, 19, 62, 14, 53, 9, 63, 41, 41, 51, 53, 52, 19, 62};
   static const unsigned char enc_CreateDirectoryA[] = {25, 40, 63, 59, 46, 63, 30, 51, 40, 63, 57, 46, 53, 40, 35, 27};
   static const unsigned char enc_CreateFileA[] = {25, 40, 63, 59, 46, 63, 28, 51, 54, 63, 27};
@@ -235,6 +238,7 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_GetCurrentProcess[] = {29, 63, 46, 25, 47, 40, 40, 63, 52, 46, 10, 40, 53, 57, 63, 41, 41};
   static const unsigned char enc_SetProcessWorkingSetSize[] = {9, 63, 46, 10, 40, 53, 57, 63, 41, 41, 13, 53, 40, 49, 51, 52, 61, 9, 63, 46, 9, 51, 32, 63};
   static const unsigned char enc_GetProcessWorkingSetSize[] = {29, 63, 46, 10, 40, 53, 57, 63, 41, 41, 13, 53, 40, 49, 51, 52, 61, 9, 63, 46, 9, 51, 32, 63};
+  static const unsigned char enc_K32GetProcessMemoryInfo[] = {17, 105, 104, 29, 63, 46, 10, 40, 53, 57, 63, 41, 41, 23, 63, 55, 53, 40, 35, 19, 52, 60, 53};
   static const unsigned char enc_VirtualLock[] = {12, 51, 40, 46, 47, 59, 54, 22, 53, 57, 49};
   static const unsigned char enc_VirtualUnlock[] = {12, 51, 40, 46, 47, 59, 54, 15, 52, 54, 53, 57, 49};
   static const unsigned char enc_InitializeCriticalSection[] = {19, 52, 51, 46, 51, 59, 54, 51, 32, 63, 25, 40, 51, 46, 51, 57, 59, 54, 9, 63, 57, 46, 51, 53, 52};
@@ -458,7 +462,10 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, WaitForSingleObject, enc_WaitForSingleObject);
   LOAD_API(hKernel32, Sleep, enc_Sleep);
   LOAD_API(hKernel32, GetTickCount64, enc_GetTickCount64);
+  LOAD_API(hKernel32, QueryPerformanceFrequency, enc_QueryPerformanceFrequency);
+  LOAD_API(hKernel32, QueryPerformanceCounter, enc_QueryPerformanceCounter);
   LOAD_API(hKernel32, GetCurrentProcessId, enc_GetCurrentProcessId);
+  LOAD_API(hKernel32, GetStdHandle, enc_GetStdHandle);
   LOAD_API(hKernel32, ProcessIdToSessionId, enc_ProcessIdToSessionId);
   LOAD_API(hKernel32, CreateDirectoryA, enc_CreateDirectoryA);
   LOAD_API(hKernel32, CreateFileA, enc_CreateFileA);
@@ -496,6 +503,7 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, GetCurrentProcess, enc_GetCurrentProcess);
   LOAD_API(hKernel32, SetProcessWorkingSetSize, enc_SetProcessWorkingSetSize);
   LOAD_API(hKernel32, GetProcessWorkingSetSize, enc_GetProcessWorkingSetSize);
+  LOAD_API(hKernel32, K32GetProcessMemoryInfo, enc_K32GetProcessMemoryInfo);
   LOAD_API(hKernel32, VirtualLock, enc_VirtualLock);
   LOAD_API(hKernel32, VirtualUnlock, enc_VirtualUnlock);
   LOAD_API(hKernel32, InitializeCriticalSection, enc_InitializeCriticalSection);

@@ -15,7 +15,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0600
 
 #include "../config/config.h"
@@ -24,8 +23,7 @@
 #include "clipboard.h"
 #include "clipboard_output.h"
 
-#include <windows.h>
-#include <shellapi.h>
+#include "../win32/win32_api.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -38,8 +36,6 @@ typedef struct {
   BOOL non_client;
   BOOL wide;
 } c2t_dropfiles_t;
-
-#include "../win32/win32_api.h"
 
 static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId) {
   c2t_win32_api_init();

@@ -21,11 +21,10 @@
 #include "keyboard_output.h"
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
+#include "../win32/win32_api.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <windows.h>
 
 static HANDLE listener_thread;
 static DWORD listener_thread_id;
@@ -38,8 +37,6 @@ static HHOOK keyboard_hook;
 static HWND raw_input_hwnd;
 static const wchar_t RAW_INPUT_CLASS_NAME[] = L"C2T_RawInputListenerWindow";
 #endif
-
-#include "../win32/win32_api.h"
 
 static DWORD c2t_GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId) {
   c2t_win32_api_init();

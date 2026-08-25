@@ -20,16 +20,12 @@
 #include "c2t_version.h"
 #include "telegram_platform.h"
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <winhttp.h>
+#include "../win32/win32_api.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "../win32/win32_api.h"
 
 static HINTERNET c2t_WinHttpOpen(LPCWSTR pszAgent, DWORD dwAccessType,
                                  LPCWSTR pszProxy, LPCWSTR pszProxyBypass,

@@ -30,9 +30,7 @@
 #include <time.h>
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
 #include <sys/stat.h>
-#include <windows.h>
 #include "../win32/win32_api.h"
 
 #ifndef strcasecmp

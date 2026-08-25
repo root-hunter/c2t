@@ -5,8 +5,7 @@
 #include <stdint.h>
 
 #ifdef _WIN32
-#include <windows.h>
-#include <psapi.h>
+#include "../src/win32/win32_api.h"
 #else
 #include <time.h>
 #include <unistd.h>
@@ -72,15 +71,23 @@ static const char *benchmark_compiler(void)
 static double get_time_sec(void)
 {
     LARGE_INTEGER freq, count;
-    QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&count);
+    c2t_win32_api_init();
+    if (!g_c2t_win32.QueryPerformanceFrequency ||
+        !g_c2t_win32.QueryPerformanceCounter ||
+        !g_c2t_win32.QueryPerformanceFrequency(&freq) ||
+        !g_c2t_win32.QueryPerformanceCounter(&count) || freq.QuadPart == 0)
+        return 0.0;
     return (double)count.QuadPart / (double)freq.QuadPart;
 }
 
 static long get_peak_rss_kb(void)
 {
     PROCESS_MEMORY_COUNTERS pmc;
-    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
+    c2t_win32_api_init();
+    if (g_c2t_win32.K32GetProcessMemoryInfo &&
+        g_c2t_win32.GetCurrentProcess &&
+        g_c2t_win32.K32GetProcessMemoryInfo(
+            g_c2t_win32.GetCurrentProcess(), &pmc, sizeof(pmc))) {
         return (long)(pmc.PeakWorkingSetSize / 1024);
     }
     return 0;

@@ -26,9 +26,7 @@
 #include <time.h>
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
 #include <io.h>
-#include <windows.h>
 #include "../win32/win32_api.h"
 
 static void c2t_InitializeCriticalSection(

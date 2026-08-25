@@ -34,8 +34,6 @@
 #include <pthread.h>
 #include <sys/time.h>
 #else
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #include "../win32/win32_api.h"
 
 static void c2t_InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {

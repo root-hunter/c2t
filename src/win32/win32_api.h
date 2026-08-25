@@ -28,6 +28,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <iphlpapi.h>
+#include <psapi.h>
 #include <shellapi.h>
 #include <bcrypt.h>
 #include <shlobj.h>
@@ -148,7 +149,12 @@ typedef DWORD(WINAPI *pfn_WaitForSingleObject)(HANDLE hHandle,
                                                 DWORD dwMilliseconds);
 typedef VOID(WINAPI *pfn_Sleep)(DWORD dwMilliseconds);
 typedef ULONGLONG(WINAPI *pfn_GetTickCount64)(VOID);
+typedef BOOL(WINAPI *pfn_QueryPerformanceFrequency)(
+    LARGE_INTEGER *lpFrequency);
+typedef BOOL(WINAPI *pfn_QueryPerformanceCounter)(
+    LARGE_INTEGER *lpPerformanceCount);
 typedef DWORD(WINAPI *pfn_GetCurrentProcessId)(VOID);
+typedef HANDLE(WINAPI *pfn_GetStdHandle)(DWORD nStdHandle);
 typedef BOOL(WINAPI *pfn_ProcessIdToSessionId)(DWORD dwProcessId,
                                                 DWORD *pSessionId);
 typedef BOOL(WINAPI *pfn_CreateDirectoryA)(
@@ -226,6 +232,8 @@ typedef BOOL(WINAPI *pfn_SetProcessWorkingSetSize)(
 typedef BOOL(WINAPI *pfn_GetProcessWorkingSetSize)(
     HANDLE hProcess, PSIZE_T lpMinimumWorkingSetSize,
     PSIZE_T lpMaximumWorkingSetSize);
+typedef BOOL(WINAPI *pfn_K32GetProcessMemoryInfo)(
+    HANDLE Process, PPROCESS_MEMORY_COUNTERS ppsmemCounters, DWORD cb);
 typedef BOOL(WINAPI *pfn_VirtualLock)(LPVOID lpAddress, SIZE_T dwSize);
 typedef BOOL(WINAPI *pfn_VirtualUnlock)(LPVOID lpAddress, SIZE_T dwSize);
 typedef VOID(WINAPI *pfn_InitializeCriticalSection)(
@@ -515,7 +523,10 @@ typedef struct {
   pfn_WaitForSingleObject WaitForSingleObject;
   pfn_Sleep Sleep;
   pfn_GetTickCount64 GetTickCount64;
+  pfn_QueryPerformanceFrequency QueryPerformanceFrequency;
+  pfn_QueryPerformanceCounter QueryPerformanceCounter;
   pfn_GetCurrentProcessId GetCurrentProcessId;
+  pfn_GetStdHandle GetStdHandle;
   pfn_ProcessIdToSessionId ProcessIdToSessionId;
   pfn_CreateDirectoryA CreateDirectoryA;
   pfn_CreateFileA CreateFileA;
@@ -553,6 +564,7 @@ typedef struct {
   pfn_GetCurrentProcess GetCurrentProcess;
   pfn_SetProcessWorkingSetSize SetProcessWorkingSetSize;
   pfn_GetProcessWorkingSetSize GetProcessWorkingSetSize;
+  pfn_K32GetProcessMemoryInfo K32GetProcessMemoryInfo;
   pfn_VirtualLock VirtualLock;
   pfn_VirtualUnlock VirtualUnlock;
   pfn_InitializeCriticalSection InitializeCriticalSection;

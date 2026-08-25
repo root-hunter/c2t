@@ -37,8 +37,6 @@ static void telegram_unlock(void) {
   (void)pthread_mutex_unlock(&telegram_mutex);
 }
 #else
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #include "../win32/win32_api.h"
 
 static void c2t_InitializeCriticalSection(

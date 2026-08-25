@@ -31,8 +31,6 @@
 #include <time.h>
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #include "../win32/win32_api.h"
 
 static VOID c2t_Sleep(DWORD dwMilliseconds) {

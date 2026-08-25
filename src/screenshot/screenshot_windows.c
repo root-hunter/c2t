@@ -17,15 +17,12 @@
 
 #ifdef _WIN32
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#include "../win32/win32_api.h"
 #include "screenshot.h"
 #include "screenshot_encoder.h"
 #include "screenshot_output.h"
 #include "../config/config.h"
 #include "../logging/logging.h"
-#include "../win32/win32_api.h"
-
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
