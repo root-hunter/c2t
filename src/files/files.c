@@ -24,7 +24,9 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -131,6 +133,35 @@ static DWORD c2t_GetFileAttributesW(LPCWSTR lpFileName) {
     return g_c2t_win32.GetFileAttributesW(lpFileName);
   return INVALID_FILE_ATTRIBUTES;
 }
+static DWORD c2t_GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength,
+                                  LPWSTR lpBuffer, LPWSTR *lpFilePart) {
+  c2t_win32_api_init();
+  return g_c2t_win32.GetFullPathNameW
+             ? g_c2t_win32.GetFullPathNameW(lpFileName, nBufferLength,
+                                            lpBuffer, lpFilePart)
+             : 0;
+}
+static DWORD c2t_GetLogicalDrives(VOID) {
+  c2t_win32_api_init();
+  return g_c2t_win32.GetLogicalDrives ? g_c2t_win32.GetLogicalDrives() : 0;
+}
+static UINT c2t_GetDriveTypeW(LPCWSTR lpRootPathName) {
+  c2t_win32_api_init();
+  return g_c2t_win32.GetDriveTypeW
+             ? g_c2t_win32.GetDriveTypeW(lpRootPathName)
+             : DRIVE_UNKNOWN;
+}
+static BOOL c2t_GetDiskFreeSpaceExW(
+    LPCWSTR lpDirectoryName, PULARGE_INTEGER lpFreeBytesAvailableToCaller,
+    PULARGE_INTEGER lpTotalNumberOfBytes,
+    PULARGE_INTEGER lpTotalNumberOfFreeBytes) {
+  c2t_win32_api_init();
+  return g_c2t_win32.GetDiskFreeSpaceExW
+             ? g_c2t_win32.GetDiskFreeSpaceExW(
+                   lpDirectoryName, lpFreeBytesAvailableToCaller,
+                   lpTotalNumberOfBytes, lpTotalNumberOfFreeBytes)
+             : FALSE;
+}
 static BOOL c2t_ReadFile(HANDLE hFile, LPVOID lpBuffer,
                           DWORD nNumberOfBytesToRead,
                           LPDWORD lpNumberOfBytesRead,
@@ -166,6 +197,10 @@ static BOOL c2t_CloseHandle(HANDLE hObject) {
 #define GetLastError c2t_GetLastError
 #define CreateFileW c2t_CreateFileW
 #define GetFileAttributesW c2t_GetFileAttributesW
+#define GetFullPathNameW c2t_GetFullPathNameW
+#define GetLogicalDrives c2t_GetLogicalDrives
+#define GetDriveTypeW c2t_GetDriveTypeW
+#define GetDiskFreeSpaceExW c2t_GetDiskFreeSpaceExW
 #define ReadFile c2t_ReadFile
 #define GetFileSizeEx c2t_GetFileSizeEx
 #define CloseHandle c2t_CloseHandle
@@ -1681,7 +1716,8 @@ uint64_t c2t_files_get_total_files(void) {
 #define EXPLORER_PAGE_SIZE 6
 
 typedef struct {
-  char name[256];
+  char name[768];
+  char detail[64];
   uint64_t size;
   int is_dir;
   time_t mtime;
@@ -1689,11 +1725,19 @@ typedef struct {
 
 #ifdef _WIN32
 static CRITICAL_SECTION s_explorer_mutex;
-static int s_explorer_mutex_inited = 0;
+static atomic_bool s_explorer_mutex_inited;
+static atomic_flag s_explorer_init_lock = ATOMIC_FLAG_INIT;
 static void explorer_lock(void) {
-  if (!s_explorer_mutex_inited) {
-    InitializeCriticalSection(&s_explorer_mutex);
-    s_explorer_mutex_inited = 1;
+  if (!atomic_load_explicit(&s_explorer_mutex_inited, memory_order_acquire)) {
+    while (atomic_flag_test_and_set_explicit(&s_explorer_init_lock,
+                                              memory_order_acquire)) {}
+    if (!atomic_load_explicit(&s_explorer_mutex_inited,
+                              memory_order_relaxed)) {
+      InitializeCriticalSection(&s_explorer_mutex);
+      atomic_store_explicit(&s_explorer_mutex_inited, 1,
+                            memory_order_release);
+    }
+    atomic_flag_clear_explicit(&s_explorer_init_lock, memory_order_release);
   }
   EnterCriticalSection(&s_explorer_mutex);
 }
@@ -1714,6 +1758,8 @@ static size_t s_explorer_item_count = 0;
 static size_t s_explorer_dir_count = 0;
 static size_t s_explorer_file_count = 0;
 static uint64_t s_explorer_total_bytes = 0;
+static uint32_t s_explorer_generation = 0;
+static int s_explorer_truncated = 0;
 
 static const char *get_file_icon(const char *name, int is_dir) {
   if (is_dir) return "📁";
@@ -1783,6 +1829,7 @@ static int scan_explorer_directory_locked(const char *dir_path) {
     s_explorer_dir_count = 0;
     s_explorer_file_count = 0;
     s_explorer_total_bytes = 0;
+    s_explorer_truncated = 0;
     snprintf(s_explorer_dir, sizeof(s_explorer_dir), "Drives");
 
     DWORD drives = GetLogicalDrives();
@@ -1813,13 +1860,17 @@ static int scan_explorer_directory_locked(const char *dir_path) {
         c2t_explorer_item_t *item = &s_explorer_items[s_explorer_item_count++];
         char free_str[32] = {};
         format_size_human(disk_free, free_str, sizeof(free_str));
-        snprintf(item->name, sizeof(item->name), "%c:\\ (%s, %s free)", letter, desc, free_str);
+        snprintf(item->name, sizeof(item->name), "%c:\\", letter);
+        snprintf(item->detail, sizeof(item->detail), "%s, %s free", desc,
+                 free_str);
         item->is_dir = 1;
         item->size = disk_free;
         item->mtime = 0;
         s_explorer_dir_count++;
       }
     }
+    s_explorer_generation++;
+    if (s_explorer_generation == 0) s_explorer_generation = 1;
     return 1;
   }
 #endif
@@ -1828,57 +1879,83 @@ static int scan_explorer_directory_locked(const char *dir_path) {
   if (!clean) clean = strdup(dir_path);
   if (!clean) return 0;
 
-  s_explorer_item_count = 0;
-  s_explorer_dir_count = 0;
-  s_explorer_file_count = 0;
-  s_explorer_total_bytes = 0;
-
 #ifdef _WIN32
   wchar_t *wide_dir = utf8_path(clean);
   if (!wide_dir) {
     free(clean);
     return 0;
   }
-  wchar_t full_wide[MAX_PATH];
-  if (GetFullPathNameW(wide_dir, MAX_PATH, full_wide, NULL) > 0) {
-    char canonical[1024] = {0};
-    WideCharToMultiByte(CP_UTF8, 0, full_wide, -1, canonical, sizeof(canonical), NULL, NULL);
-    snprintf(s_explorer_dir, sizeof(s_explorer_dir), "%s", canonical[0] ? canonical : clean);
-  } else {
-    snprintf(s_explorer_dir, sizeof(s_explorer_dir), "%s", clean);
-  }
-  free(clean);
-
-  size_t wide_len = wcslen(wide_dir);
-  wchar_t search_pattern[MAX_PATH + 4];
-  if (wide_len >= MAX_PATH - 3) {
+  DWORD attributes = GetFileAttributesW(wide_dir);
+  if (attributes == INVALID_FILE_ATTRIBUTES ||
+      (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
     free(wide_dir);
+    free(clean);
     return 0;
   }
-  wcscpy(search_pattern, wide_dir);
+
+  size_t wide_len = wcslen(wide_dir);
+  if (wide_len == 0 || wide_len > (SIZE_MAX / sizeof(wchar_t)) - 3) {
+    free(wide_dir);
+    free(clean);
+    return 0;
+  }
+  wchar_t *search_pattern = calloc(wide_len + 3, sizeof(wchar_t));
+  if (!search_pattern) {
+    free(wide_dir);
+    free(clean);
+    return 0;
+  }
+  memcpy(search_pattern, wide_dir, (wide_len + 1) * sizeof(wchar_t));
   if (search_pattern[wide_len - 1] != L'\\' && search_pattern[wide_len - 1] != L'/') {
     wcscat(search_pattern, L"\\*");
   } else {
     wcscat(search_pattern, L"*");
   }
+
+  char canonical[1024] = {0};
+  DWORD canonical_capacity = 32768;
+  wchar_t *canonical_wide = calloc(canonical_capacity, sizeof(wchar_t));
+  if (canonical_wide) {
+    DWORD canonical_length =
+        GetFullPathNameW(wide_dir, canonical_capacity, canonical_wide, NULL);
+    if (canonical_length > 0 && canonical_length < canonical_capacity)
+      (void)WideCharToMultiByte(CP_UTF8, 0, canonical_wide, -1, canonical,
+                                (int)sizeof(canonical), NULL, NULL);
+  }
+  free(canonical_wide);
   free(wide_dir);
+
+  s_explorer_item_count = 0;
+  s_explorer_dir_count = 0;
+  s_explorer_file_count = 0;
+  s_explorer_total_bytes = 0;
+  s_explorer_truncated = 0;
+  snprintf(s_explorer_dir, sizeof(s_explorer_dir), "%s",
+           canonical[0] ? canonical : clean);
+  free(clean);
 
   WIN32_FIND_DATAW fd;
   HANDLE hFind = FindFirstFileW(search_pattern, &fd);
+  free(search_pattern);
   if (hFind != INVALID_HANDLE_VALUE) {
     do {
       if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0)
         continue;
-      if (s_explorer_item_count >= EXPLORER_MAX_ITEMS)
+      if (s_explorer_item_count >= EXPLORER_MAX_ITEMS) {
+        s_explorer_truncated = 1;
         break;
+      }
 
-      char name[256] = {};
-      WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, name, sizeof(name), nullptr, nullptr);
+      char name[768] = {};
+      if (WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, name,
+                              (int)sizeof(name), nullptr, nullptr) == 0)
+        continue;
       int is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
       uint64_t sz = ((uint64_t)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
 
       c2t_explorer_item_t *item = &s_explorer_items[s_explorer_item_count++];
       snprintf(item->name, sizeof(item->name), "%s", name);
+      item->detail[0] = '\0';
       item->is_dir = is_dir;
       item->size = sz;
       item->mtime = 0;
@@ -1893,18 +1970,30 @@ static int scan_explorer_directory_locked(const char *dir_path) {
     FindClose(hFind);
   }
 #else
+  DIR *d = opendir(clean);
+  if (!d) {
+    free(clean);
+    return 0;
+  }
   char *canonical = realpath(clean, nullptr);
+
+  s_explorer_item_count = 0;
+  s_explorer_dir_count = 0;
+  s_explorer_file_count = 0;
+  s_explorer_total_bytes = 0;
+  s_explorer_truncated = 0;
   snprintf(s_explorer_dir, sizeof(s_explorer_dir), "%s", canonical ? canonical : clean);
   free(canonical);
 
-  DIR *d = opendir(clean);
-  if (d) {
+  {
     struct dirent *ent;
     while ((ent = readdir(d)) != nullptr) {
       if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
         continue;
-      if (s_explorer_item_count >= EXPLORER_MAX_ITEMS)
+      if (s_explorer_item_count >= EXPLORER_MAX_ITEMS) {
+        s_explorer_truncated = 1;
         break;
+      }
 
       char full[1024];
       snprintf(full, sizeof(full), "%s/%s", clean, ent->d_name);
@@ -1927,6 +2016,7 @@ static int scan_explorer_directory_locked(const char *dir_path) {
 #endif
       c2t_explorer_item_t *item = &s_explorer_items[s_explorer_item_count++];
       snprintf(item->name, sizeof(item->name), "%s", ent->d_name);
+      item->detail[0] = '\0';
       item->is_dir = is_dir;
       item->size = sz;
       item->mtime = mtime;
@@ -1937,7 +2027,7 @@ static int scan_explorer_directory_locked(const char *dir_path) {
         s_explorer_file_count++;
       }
     }
-    closedir(d);
+    (void)closedir(d);
   }
   free(clean);
 #endif
@@ -1945,6 +2035,9 @@ static int scan_explorer_directory_locked(const char *dir_path) {
   if (s_explorer_item_count > 1) {
     qsort(s_explorer_items, s_explorer_item_count, sizeof(c2t_explorer_item_t), compare_explorer_items);
   }
+
+  s_explorer_generation++;
+  if (s_explorer_generation == 0) s_explorer_generation = 1;
 
   c2t_log_info("files", "Scanned explorer directory '%s': %llu items (%llu dirs, %llu files, %llu bytes)",
                s_explorer_dir, (unsigned long long)s_explorer_item_count,
@@ -1971,11 +2064,68 @@ static void append_json_escaped(char *dst, size_t *offset, size_t cap, const cha
   dst[*offset] = '\0';
 }
 
+static int append_json_literal(char *dst, size_t *offset, size_t cap,
+                               const char *literal) {
+  size_t length = strlen(literal);
+  if (*offset + length >= cap) return 0;
+  memcpy(dst + *offset, literal, length);
+  *offset += length;
+  dst[*offset] = '\0';
+  return 1;
+}
+
+static int append_explorer_button(char *dst, size_t *offset, size_t cap,
+                                  const char *label,
+                                  const char *callback_data) {
+  if (!append_json_literal(dst, offset, cap, "{\"text\":\"")) return 0;
+  append_json_escaped(dst, offset, cap, label);
+  if (!append_json_literal(dst, offset, cap, "\",\"callback_data\":\""))
+    return 0;
+  append_json_escaped(dst, offset, cap, callback_data);
+  return append_json_literal(dst, offset, cap, "\"}");
+}
+
+static void explorer_label_name(char *output, size_t capacity,
+                                const char *name, size_t maximum_bytes) {
+  if (!output || capacity == 0) return;
+  size_t input_offset = 0;
+  size_t output_offset = 0;
+  while (name[input_offset] && output_offset < maximum_bytes &&
+         output_offset + 1 < capacity) {
+    unsigned char first = (unsigned char)name[input_offset];
+    size_t sequence_length = 1;
+    if ((first & 0xE0U) == 0xC0U) sequence_length = 2;
+    else if ((first & 0xF0U) == 0xE0U) sequence_length = 3;
+    else if ((first & 0xF8U) == 0xF0U) sequence_length = 4;
+    if (output_offset + sequence_length > maximum_bytes ||
+        output_offset + sequence_length >= capacity)
+      break;
+    int valid = sequence_length == 1;
+    if (sequence_length > 1) {
+      valid = 1;
+      for (size_t index = 1; index < sequence_length; ++index) {
+        unsigned char continuation =
+            (unsigned char)name[input_offset + index];
+        if (!continuation || (continuation & 0xC0U) != 0x80U) {
+          valid = 0;
+          break;
+        }
+      }
+    }
+    if (!valid) sequence_length = 1;
+    memcpy(output + output_offset, name + input_offset, sequence_length);
+    output_offset += sequence_length;
+    input_offset += sequence_length;
+  }
+  output[output_offset] = '\0';
+}
+
 static void build_explorer_keyboard_json(char *out_json, size_t cap, int page, int total_pages) {
   if (!out_json || cap < 64) return;
   size_t offset = 0;
-  memcpy(out_json, "{\"inline_keyboard\":[", 20);
-  offset = 20;
+  uint32_t generation = s_explorer_generation;
+  if (!append_json_literal(out_json, &offset, cap, "{\"inline_keyboard\":["))
+    return;
 
   size_t start_idx = (size_t)page * EXPLORER_PAGE_SIZE;
   size_t end_idx = start_idx + EXPLORER_PAGE_SIZE;
@@ -1985,103 +2135,87 @@ static void build_explorer_keyboard_json(char *out_json, size_t cap, int page, i
   for (size_t i = start_idx; i < end_idx; i++) {
     const c2t_explorer_item_t *item = &s_explorer_items[i];
     char btn_label[128];
-    char cb_data[32];
+    char cb_data[48];
 
     if (item->is_dir) {
       char trunc_name[48];
-      snprintf(trunc_name, sizeof(trunc_name), "%.30s", item->name);
-      snprintf(btn_label, sizeof(btn_label), "📁 %s/", trunc_name);
-      snprintf(cb_data, sizeof(cb_data), "fl_cd:%llu", (unsigned long long)i);
+      explorer_label_name(trunc_name, sizeof(trunc_name), item->name, 30);
+      if (item->detail[0])
+        snprintf(btn_label, sizeof(btn_label), "📁 %s (%s)", trunc_name,
+                 item->detail);
+      else
+        snprintf(btn_label, sizeof(btn_label), "📁 %s/", trunc_name);
+      snprintf(cb_data, sizeof(cb_data), "fl_cd:%u:%llu", generation,
+               (unsigned long long)i);
     } else {
       char sz_str[32] = {};
       format_size_human(item->size, sz_str, sizeof(sz_str));
       const char *icon = get_file_icon(item->name, 0);
       char trunc_name[48];
-      snprintf(trunc_name, sizeof(trunc_name), "%.24s", item->name);
+      explorer_label_name(trunc_name, sizeof(trunc_name), item->name, 24);
       snprintf(btn_label, sizeof(btn_label), "%s %s (%s)", icon, trunc_name, sz_str);
-      snprintf(cb_data, sizeof(cb_data), "fl_sel:%llu", (unsigned long long)i);
+      snprintf(cb_data, sizeof(cb_data), "fl_sel:%u:%llu", generation,
+               (unsigned long long)i);
     }
 
-    if (offset + 10 < cap) {
-      if (i > start_idx) {
-        out_json[offset++] = ',';
-      }
-      out_json[offset++] = '[';
-      out_json[offset++] = '{';
-      memcpy(out_json + offset, "\"text\":\"", 8);
-      offset += 8;
-      append_json_escaped(out_json, &offset, cap, btn_label);
-      memcpy(out_json + offset, "\",\"callback_data\":\"", 19);
-      offset += 19;
-      append_json_escaped(out_json, &offset, cap, cb_data);
-      memcpy(out_json + offset, "\"}]", 3);
-      offset += 3;
-    }
+    if (i > start_idx && !append_json_literal(out_json, &offset, cap, ","))
+      break;
+    if (!append_json_literal(out_json, &offset, cap, "[") ||
+        !append_explorer_button(out_json, &offset, cap, btn_label, cb_data) ||
+        !append_json_literal(out_json, &offset, cap, "]"))
+      break;
   }
 
   /* Navigation row */
-  if (offset + 20 < cap) {
-    if (end_idx > start_idx) {
-      out_json[offset++] = ',';
-    }
-    out_json[offset++] = '[';
+  {
+    char callback[48];
+    if (end_idx > start_idx)
+      (void)append_json_literal(out_json, &offset, cap, ",");
+    (void)append_json_literal(out_json, &offset, cap, "[");
 
-    /* Up button */
-    memcpy(out_json + offset, "{\"text\":\"⬆️ Up\",\"callback_data\":\"fl_up\"}", 40);
-    offset += 40;
+    snprintf(callback, sizeof(callback), "fl_up:%u", generation);
+    (void)append_explorer_button(out_json, &offset, cap, "⬆️ Up", callback);
 
     /* Prev page */
     if (page > 0) {
-      char prev_btn[64];
-      snprintf(prev_btn, sizeof(prev_btn), ",{\"text\":\"◀️ Prev\",\"callback_data\":\"fl_p:%d\"}", page - 1);
-      size_t pb_len = strlen(prev_btn);
-      if (offset + pb_len < cap) {
-        memcpy(out_json + offset, prev_btn, pb_len);
-        offset += pb_len;
-      }
+      snprintf(callback, sizeof(callback), "fl_p:%u:%d", generation, page - 1);
+      (void)append_json_literal(out_json, &offset, cap, ",");
+      (void)append_explorer_button(out_json, &offset, cap, "◀️ Prev", callback);
     }
 
     /* Next page */
     if (page + 1 < total_pages) {
-      char next_btn[64];
-      snprintf(next_btn, sizeof(next_btn), ",{\"text\":\"▶️ Next\",\"callback_data\":\"fl_p:%d\"}", page + 1);
-      size_t nb_len = strlen(next_btn);
-      if (offset + nb_len < cap) {
-        memcpy(out_json + offset, next_btn, nb_len);
-        offset += nb_len;
-      }
+      snprintf(callback, sizeof(callback), "fl_p:%u:%d", generation, page + 1);
+      (void)append_json_literal(out_json, &offset, cap, ",");
+      (void)append_explorer_button(out_json, &offset, cap, "▶️ Next", callback);
     }
 
-    /* Refresh button */
-    if (offset + 44 < cap) {
-      memcpy(out_json + offset, ",{\"text\":\"🔄 Refresh\",\"callback_data\":\"fl_rf\"}", 45);
-      offset += 45;
-    }
-
-    out_json[offset++] = ']';
+    snprintf(callback, sizeof(callback), "fl_rf:%u", generation);
+    (void)append_json_literal(out_json, &offset, cap, ",");
+    (void)append_explorer_button(out_json, &offset, cap, "🔄 Refresh", callback);
+    (void)append_json_literal(out_json, &offset, cap, "]");
   }
 
   /* Bottom quick action bar: Home, Root/Drives, Close */
-  if (offset + 120 < cap) {
-    memcpy(out_json + offset, ",[", 2);
-    offset += 2;
-    memcpy(out_json + offset, "{\"text\":\"🏠 Home\",\"callback_data\":\"fl_home\"},", 43);
-    offset += 43;
+  {
+    char callback[48];
+    (void)append_json_literal(out_json, &offset, cap, ",[ ");
+    snprintf(callback, sizeof(callback), "fl_home:%u", generation);
+    (void)append_explorer_button(out_json, &offset, cap, "🏠 Home", callback);
+    (void)append_json_literal(out_json, &offset, cap, ",");
+    snprintf(callback, sizeof(callback), "fl_root:%u", generation);
 #ifdef _WIN32
-    memcpy(out_json + offset, "{\"text\":\"💾 Drives\",\"callback_data\":\"fl_root\"},", 46);
-    offset += 46;
+    (void)append_explorer_button(out_json, &offset, cap, "💾 Drives", callback);
 #else
-    memcpy(out_json + offset, "{\"text\":\"🌐 Root /\",\"callback_data\":\"fl_root\"},", 46);
-    offset += 46;
+    (void)append_explorer_button(out_json, &offset, cap, "🌐 Root /", callback);
 #endif
-    memcpy(out_json + offset, "{\"text\":\"❌ Close\",\"callback_data\":\"fl_close\"}", 44);
-    offset += 44;
-    out_json[offset++] = ']';
+    (void)append_json_literal(out_json, &offset, cap, ",");
+    snprintf(callback, sizeof(callback), "fl_close:%u", generation);
+    (void)append_explorer_button(out_json, &offset, cap, "❌ Close", callback);
+    (void)append_json_literal(out_json, &offset, cap, "]");
   }
 
-  memcpy(out_json + offset, "]}", 2);
-  offset += 2;
-  out_json[offset] = '\0';
+  (void)append_json_literal(out_json, &offset, cap, "]}");
 }
 
 static void get_parent_directory(const char *current_dir, char *parent_dir, size_t cap) {
@@ -2127,9 +2261,70 @@ static void get_parent_directory(const char *current_dir, char *parent_dir, size
   }
 }
 
-static int show_file_action_dialog(size_t item_idx, int64_t edit_msg_id) {
+static int join_explorer_path(const char *directory, const char *name,
+                              char *output, size_t capacity) {
+  if (!directory || !name || !output || capacity == 0) return 0;
+#ifdef _WIN32
+  if (_stricmp(directory, "Drives") == 0) {
+    int written = snprintf(output, capacity, "%s", name);
+    return written >= 0 && (size_t)written < capacity;
+  }
+  const char separator = '\\';
+#else
+  const char separator = '/';
+#endif
+  size_t length = strlen(directory);
+  int written = snprintf(output, capacity, "%s%s%s", directory,
+                         length > 0 && (directory[length - 1] == '/' ||
+                                        directory[length - 1] == '\\')
+                             ? ""
+                             : (separator == '/' ? "/" : "\\"),
+                         name);
+  return written >= 0 && (size_t)written < capacity;
+}
+
+static int parse_callback_generation(const char *data, const char *prefix,
+                                     uint32_t *generation) {
+  size_t prefix_length = strlen(prefix);
+  if (strncmp(data, prefix, prefix_length) != 0) return 0;
+  const char *number = data + prefix_length;
+  char *end = NULL;
+  errno = 0;
+  unsigned long value = strtoul(number, &end, 10);
+  if (errno || end == number || *end != '\0' || value == 0 ||
+      value > UINT32_MAX)
+    return 0;
+  *generation = (uint32_t)value;
+  return 1;
+}
+
+static int parse_callback_item(const char *data, const char *prefix,
+                               uint32_t *generation, size_t *item_index) {
+  size_t prefix_length = strlen(prefix);
+  if (strncmp(data, prefix, prefix_length) != 0) return 0;
+  const char *generation_text = data + prefix_length;
+  char *separator = NULL;
+  errno = 0;
+  unsigned long generation_value = strtoul(generation_text, &separator, 10);
+  if (errno || separator == generation_text || *separator != ':' ||
+      generation_value == 0 || generation_value > UINT32_MAX)
+    return 0;
+  const char *index_text = separator + 1;
+  char *end = NULL;
+  errno = 0;
+  unsigned long long index_value = strtoull(index_text, &end, 10);
+  if (errno || end == index_text || *end != '\0' || index_value > SIZE_MAX)
+    return 0;
+  *generation = (uint32_t)generation_value;
+  *item_index = (size_t)index_value;
+  return 1;
+}
+
+static int show_file_action_dialog(size_t item_idx, uint32_t generation,
+                                   int64_t edit_msg_id) {
   explorer_lock();
-  if (item_idx >= s_explorer_item_count) {
+  if (generation != s_explorer_generation ||
+      item_idx >= s_explorer_item_count || s_explorer_items[item_idx].is_dir) {
     explorer_unlock();
     return 0;
   }
@@ -2139,13 +2334,8 @@ static int show_file_action_dialog(size_t item_idx, int64_t edit_msg_id) {
   explorer_unlock();
 
   char full_path[1024];
-  size_t dlen = strlen(cur_dir);
-  char sep = (dlen > 0 && (cur_dir[dlen - 1] == '/' || cur_dir[dlen - 1] == '\\')) ? '\0' : '/';
-  if (sep) {
-    snprintf(full_path, sizeof(full_path), "%.500s/%.500s", cur_dir, item.name);
-  } else {
-    snprintf(full_path, sizeof(full_path), "%.500s%.500s", cur_dir, item.name);
-  }
+  if (!join_explorer_path(cur_dir, item.name, full_path, sizeof(full_path)))
+    return 0;
 
   const char *mime = mime_from_filename(item.name);
   char sz_str[32] = {};
@@ -2170,13 +2360,15 @@ static int show_file_action_dialog(size_t item_idx, int64_t edit_msg_id) {
   char keyboard[512];
   snprintf(keyboard, sizeof(keyboard),
            "{\"inline_keyboard\":[["
-           "{\"text\":\"📥 Download File\",\"callback_data\":\"fl_get:%llu\"},"
-           "{\"text\":\"👁️ Preview (Cat)\",\"callback_data\":\"fl_cat:%llu\"}"
+           "{\"text\":\"📥 Download File\",\"callback_data\":\"fl_get:%u:%llu\"},"
+           "{\"text\":\"👁️ Preview (Cat)\",\"callback_data\":\"fl_cat:%u:%llu\"}"
            "],["
-           "{\"text\":\"ℹ️ Detailed Info\",\"callback_data\":\"fl_info:%llu\"},"
-           "{\"text\":\"⬅️ Back to Explorer\",\"callback_data\":\"fl_back\"}"
+           "{\"text\":\"ℹ️ Detailed Info\",\"callback_data\":\"fl_info:%u:%llu\"},"
+           "{\"text\":\"⬅️ Back to Explorer\",\"callback_data\":\"fl_back:%u\"}"
            "]]}",
-           (unsigned long long)item_idx, (unsigned long long)item_idx, (unsigned long long)item_idx);
+           generation, (unsigned long long)item_idx, generation,
+           (unsigned long long)item_idx, generation,
+           (unsigned long long)item_idx, generation);
 
   if (edit_msg_id > 0) {
     return telegram_edit_message_html(edit_msg_id, html, keyboard);
@@ -2186,12 +2378,26 @@ static int show_file_action_dialog(size_t item_idx, int64_t edit_msg_id) {
 
 int c2t_file_explorer_show(const char *path, int page, int64_t edit_msg_id) {
   explorer_lock();
+  int scan_ok = 0;
   if (path && *path) {
-    scan_explorer_directory_locked(path);
+    scan_ok = scan_explorer_directory_locked(path);
   } else if (s_explorer_dir[0] != '\0') {
-    scan_explorer_directory_locked(s_explorer_dir);
+    scan_ok = scan_explorer_directory_locked(s_explorer_dir);
   } else {
-    scan_explorer_directory_locked(".");
+    scan_ok = scan_explorer_directory_locked(".");
+  }
+  if (!scan_ok) {
+    char requested[1024] = {0};
+    size_t requested_offset = 0;
+    append_escaped_html(requested, &requested_offset, sizeof(requested),
+                        path && *path ? path : ".");
+    explorer_unlock();
+    char error_html[1280];
+    snprintf(error_html, sizeof(error_html),
+             "⚠️ <b>Cannot open directory:</b> <code>%s</code>\n"
+             "<i>The path does not exist, is not a directory, or access was denied.</i>",
+             requested);
+    return telegram_send_html(error_html);
   }
 
   int total_pages = (int)((s_explorer_item_count + EXPLORER_PAGE_SIZE - 1) / EXPLORER_PAGE_SIZE);
@@ -2238,7 +2444,12 @@ int c2t_file_explorer_show(const char *path, int page, int64_t edit_msg_id) {
 
       char line[320];
       if (item->is_dir) {
-        snprintf(line, sizeof(line), "📁 <code>%s/</code>\n", esc_item_name);
+        if (item->detail[0])
+          snprintf(line, sizeof(line), "📁 <code>%s</code> <i>(%s)</i>\n",
+                   esc_item_name, item->detail);
+        else
+          snprintf(line, sizeof(line), "📁 <code>%s/</code>\n",
+                   esc_item_name);
       } else {
         char sz_str[32] = {};
         format_size_human(item->size, sz_str, sizeof(sz_str));
@@ -2250,6 +2461,16 @@ int c2t_file_explorer_show(const char *path, int page, int64_t edit_msg_id) {
         memcpy(html + offset, line, l_len);
         offset += l_len;
       }
+    }
+  }
+
+  if (s_explorer_truncated) {
+    static const char truncated_msg[] =
+        "\n⚠️ <i>Listing limited to the first 512 entries.</i>\n";
+    size_t truncated_length = sizeof(truncated_msg) - 1;
+    if (offset + truncated_length < sizeof(html)) {
+      memcpy(html + offset, truncated_msg, truncated_length);
+      offset += truncated_length;
     }
   }
 
@@ -2288,9 +2509,24 @@ int c2t_file_explorer_show(const char *path, int page, int64_t edit_msg_id) {
   return ok;
 }
 
-int c2t_file_explorer_handle_callback(const char *callback_query_id, const char *callback_data) {
-  if (!callback_data || strncmp(callback_data, "fl_", 3) != 0)
-    return 0;
+static int get_explorer_file(uint32_t generation, size_t item_index,
+                             char *name, size_t name_capacity,
+                             char *path, size_t path_capacity) {
+  explorer_lock();
+  int valid = generation == s_explorer_generation &&
+              item_index < s_explorer_item_count &&
+              !s_explorer_items[item_index].is_dir;
+  if (valid) {
+    snprintf(name, name_capacity, "%s", s_explorer_items[item_index].name);
+    valid = join_explorer_path(s_explorer_dir, name, path, path_capacity);
+  }
+  explorer_unlock();
+  return valid;
+}
+
+int c2t_file_explorer_handle_callback(const char *callback_query_id,
+                                      const char *callback_data) {
+  if (!callback_data || strncmp(callback_data, "fl_", 3) != 0) return 0;
 
   c2t_log_info("files", "File Explorer callback received: '%s' (query ID: %s)",
                callback_data, callback_query_id ? callback_query_id : "");
@@ -2298,42 +2534,71 @@ int c2t_file_explorer_handle_callback(const char *callback_query_id, const char 
   explorer_lock();
   int64_t msg_id = s_explorer_msg_id;
   int curr_page = s_explorer_page;
+  uint32_t current_generation = s_explorer_generation;
   char cur_dir[1024];
   snprintf(cur_dir, sizeof(cur_dir), "%s", s_explorer_dir);
   explorer_unlock();
 
-  if (strcmp(callback_data, "fl_close") == 0) {
-    (void)telegram_answer_callback_query(callback_query_id, "❌ File Explorer closed");
-    if (msg_id > 0) {
-      (void)telegram_edit_message_html(msg_id, "⚪ <i>File Explorer closed. Use <code>/ls</code> or <code>/files</code> to re-open.</i>", nullptr);
-    }
+  uint32_t generation = 0;
+  size_t value = 0;
+  int parsed = 0;
+
+#define REQUIRE_CURRENT_CALLBACK(condition)                                    \
+  do {                                                                         \
+    if (!(condition) || generation != current_generation) {                    \
+      (void)telegram_answer_callback_query(                                    \
+          callback_query_id, "⚠️ Explorer expired. Open /files again.");       \
+      return 1;                                                                \
+    }                                                                          \
+  } while (0)
+
+  parsed = parse_callback_generation(callback_data, "fl_close:", &generation);
+  if (parsed || strncmp(callback_data, "fl_close", 8) == 0) {
+    REQUIRE_CURRENT_CALLBACK(parsed);
+    (void)telegram_answer_callback_query(callback_query_id,
+                                         "❌ File Explorer closed");
+    if (msg_id > 0)
+      (void)telegram_edit_message_html(
+          msg_id,
+          "⚪ <i>File Explorer closed. Use <code>/files</code> to re-open.</i>",
+          nullptr);
     return 1;
   }
 
-  if (strcmp(callback_data, "fl_rf") == 0) {
+  parsed = parse_callback_generation(callback_data, "fl_rf:", &generation);
+  if (parsed || strncmp(callback_data, "fl_rf", 5) == 0) {
+    REQUIRE_CURRENT_CALLBACK(parsed);
     (void)telegram_answer_callback_query(callback_query_id, "🔄 Refreshed");
     return c2t_file_explorer_show(cur_dir, curr_page, msg_id);
   }
 
-  if (strcmp(callback_data, "fl_up") == 0) {
-    (void)telegram_answer_callback_query(callback_query_id, "⬆️ Navigating up...");
+  parsed = parse_callback_generation(callback_data, "fl_up:", &generation);
+  if (parsed || strncmp(callback_data, "fl_up", 5) == 0) {
+    REQUIRE_CURRENT_CALLBACK(parsed);
     char parent[1024];
     get_parent_directory(cur_dir, parent, sizeof(parent));
+    (void)telegram_answer_callback_query(callback_query_id,
+                                         "⬆️ Navigating up...");
     return c2t_file_explorer_show(parent, 0, msg_id);
   }
 
-  if (strcmp(callback_data, "fl_home") == 0) {
-    (void)telegram_answer_callback_query(callback_query_id, "🏠 Home directory");
+  parsed = parse_callback_generation(callback_data, "fl_home:", &generation);
+  if (parsed || strncmp(callback_data, "fl_home", 7) == 0) {
+    REQUIRE_CURRENT_CALLBACK(parsed);
     const char *home = c2t_getenv("HOME");
 #ifdef _WIN32
     if (!home) home = c2t_getenv("USERPROFILE");
 #endif
-    if (!home) home = ".";
-    return c2t_file_explorer_show(home, 0, msg_id);
+    (void)telegram_answer_callback_query(callback_query_id,
+                                         "🏠 Home directory");
+    return c2t_file_explorer_show(home ? home : ".", 0, msg_id);
   }
 
-  if (strcmp(callback_data, "fl_root") == 0) {
-    (void)telegram_answer_callback_query(callback_query_id, "🌐 Root directory");
+  parsed = parse_callback_generation(callback_data, "fl_root:", &generation);
+  if (parsed || strncmp(callback_data, "fl_root", 7) == 0) {
+    REQUIRE_CURRENT_CALLBACK(parsed);
+    (void)telegram_answer_callback_query(callback_query_id,
+                                         "🌐 Root directory");
 #ifdef _WIN32
     return c2t_file_explorer_show("drives", 0, msg_id);
 #else
@@ -2341,178 +2606,120 @@ int c2t_file_explorer_handle_callback(const char *callback_query_id, const char 
 #endif
   }
 
-  if (strncmp(callback_data, "fl_p:", 5) == 0) {
-    int p = atoi(callback_data + 5);
-    char ans[32];
-    snprintf(ans, sizeof(ans), "📑 Page %d", p + 1);
-    (void)telegram_answer_callback_query(callback_query_id, ans);
-    return c2t_file_explorer_show(nullptr, p, msg_id);
+  parsed = parse_callback_item(callback_data, "fl_p:", &generation, &value);
+  if (parsed || strncmp(callback_data, "fl_p:", 5) == 0) {
+    REQUIRE_CURRENT_CALLBACK(parsed && value <= INT_MAX);
+    char answer[32];
+    snprintf(answer, sizeof(answer), "📑 Page %llu",
+             (unsigned long long)value + 1);
+    (void)telegram_answer_callback_query(callback_query_id, answer);
+    return c2t_file_explorer_show(nullptr, (int)value, msg_id);
   }
 
-  if (strncmp(callback_data, "fl_cd:", 6) == 0) {
-    size_t idx = (size_t)strtoull(callback_data + 6, nullptr, 10);
+  parsed = parse_callback_item(callback_data, "fl_cd:", &generation, &value);
+  if (parsed || strncmp(callback_data, "fl_cd:", 6) == 0) {
+    REQUIRE_CURRENT_CALLBACK(parsed);
+    char item_name[768] = {0};
     explorer_lock();
-    int is_valid_dir = (idx < s_explorer_item_count && s_explorer_items[idx].is_dir);
-    char item_name[256] = {0};
-    if (is_valid_dir) {
-      snprintf(item_name, sizeof(item_name), "%s", s_explorer_items[idx].name);
-    }
+    int valid = value < s_explorer_item_count &&
+                s_explorer_items[value].is_dir;
+    if (valid)
+      snprintf(item_name, sizeof(item_name), "%s",
+               s_explorer_items[value].name);
     explorer_unlock();
-
-    if (is_valid_dir) {
-      char ans[128];
-      snprintf(ans, sizeof(ans), "📁 %s", item_name);
-      (void)telegram_answer_callback_query(callback_query_id, ans);
-
-      char next_dir[1024];
-#ifdef _WIN32
-      if (_stricmp(cur_dir, "Drives") == 0) {
-        snprintf(next_dir, sizeof(next_dir), "%c:\\", item_name[0]);
-      } else {
-#endif
-        size_t dlen = strlen(cur_dir);
-        char sep = (dlen > 0 && (cur_dir[dlen - 1] == '/' || cur_dir[dlen - 1] == '\\')) ? '\0' : '/';
-        if (sep) {
-          snprintf(next_dir, sizeof(next_dir), "%.500s/%.500s", cur_dir, item_name);
-        } else {
-          snprintf(next_dir, sizeof(next_dir), "%.500s%.500s", cur_dir, item_name);
-        }
-#ifdef _WIN32
-      }
-#endif
-      return c2t_file_explorer_show(next_dir, 0, msg_id);
-    }
+    char next_dir[1024];
+    REQUIRE_CURRENT_CALLBACK(valid && join_explorer_path(
+                                          cur_dir, item_name, next_dir,
+                                          sizeof(next_dir)));
+    (void)telegram_answer_callback_query(callback_query_id,
+                                         "📁 Opening directory...");
+    return c2t_file_explorer_show(next_dir, 0, msg_id);
   }
 
-  if (strncmp(callback_data, "fl_sel:", 7) == 0) {
-    size_t idx = (size_t)strtoull(callback_data + 7, nullptr, 10);
-    explorer_lock();
-    int is_valid = (idx < s_explorer_item_count);
-    explorer_unlock();
-    if (is_valid) {
-      (void)telegram_answer_callback_query(callback_query_id, "📄 File options");
-      return show_file_action_dialog(idx, msg_id);
+  parsed = parse_callback_item(callback_data, "fl_sel:", &generation, &value);
+  if (parsed || strncmp(callback_data, "fl_sel:", 7) == 0) {
+    REQUIRE_CURRENT_CALLBACK(parsed);
+    (void)telegram_answer_callback_query(callback_query_id, "📄 File options");
+    if (!show_file_action_dialog(value, generation, msg_id)) {
+      (void)telegram_send_html("⚠️ <i>The selected file is no longer available.</i>");
     }
+    return 1;
   }
 
-  if (strcmp(callback_data, "fl_back") == 0) {
-    (void)telegram_answer_callback_query(callback_query_id, "⬅️ Back to explorer");
+  parsed = parse_callback_generation(callback_data, "fl_back:", &generation);
+  if (parsed || strncmp(callback_data, "fl_back", 7) == 0) {
+    REQUIRE_CURRENT_CALLBACK(parsed);
+    (void)telegram_answer_callback_query(callback_query_id,
+                                         "⬅️ Back to explorer");
     return c2t_file_explorer_show(nullptr, curr_page, msg_id);
   }
 
-  if (strncmp(callback_data, "fl_get:", 7) == 0) {
-    size_t idx = (size_t)strtoull(callback_data + 7, nullptr, 10);
-    explorer_lock();
-    int is_valid = (idx < s_explorer_item_count && !s_explorer_items[idx].is_dir);
-    char item_name[256] = {0};
+  const char *action_prefix = NULL;
+  if (strncmp(callback_data, "fl_get:", 7) == 0) action_prefix = "fl_get:";
+  else if (strncmp(callback_data, "fl_cat:", 7) == 0) action_prefix = "fl_cat:";
+  else if (strncmp(callback_data, "fl_info:", 8) == 0) action_prefix = "fl_info:";
+
+  if (action_prefix) {
+    parsed = parse_callback_item(callback_data, action_prefix, &generation,
+                                 &value);
+    REQUIRE_CURRENT_CALLBACK(parsed);
+    char item_name[768] = {0};
     char full_path[1024] = {0};
-    if (is_valid) {
-      snprintf(item_name, sizeof(item_name), "%s", s_explorer_items[idx].name);
-      size_t dlen = strlen(s_explorer_dir);
-      char sep = (dlen > 0 && (s_explorer_dir[dlen - 1] == '/' || s_explorer_dir[dlen - 1] == '\\')) ? '\0' : '/';
-      if (sep) {
-        snprintf(full_path, sizeof(full_path), "%.500s/%.500s", s_explorer_dir, item_name);
-      } else {
-        snprintf(full_path, sizeof(full_path), "%.500s%.500s", s_explorer_dir, item_name);
-      }
-    }
-    explorer_unlock();
+    REQUIRE_CURRENT_CALLBACK(get_explorer_file(
+        generation, value, item_name, sizeof(item_name), full_path,
+        sizeof(full_path)));
 
-    if (is_valid) {
-      char ans[128];
-      snprintf(ans, sizeof(ans), "📥 Uploading %s...", item_name);
-      (void)telegram_answer_callback_query(callback_query_id, ans);
+    if (strcmp(action_prefix, "fl_get:") == 0) {
+      (void)telegram_answer_callback_query(callback_query_id,
+                                           "📥 Uploading file...");
       (void)telegram_send_chat_action("upload_document");
-
-      int send_res = c2t_file_send_path(full_path, nullptr);
-      if (send_res == C2T_FILE_SENT) {
-        char confirm[512];
-        char esc_fn[256] = {0};
-        size_t o = 0;
-        append_escaped_html(esc_fn, &o, sizeof(esc_fn), item_name);
-        snprintf(confirm, sizeof(confirm), "✅ <b>File Delivered:</b> <code>%s</code>", esc_fn);
-        (void)telegram_send_html(confirm);
+      int send_result = c2t_file_send_path(full_path, nullptr);
+      if (send_result == C2T_FILE_SENT) {
+        char escaped_name[256] = {0};
+        size_t escaped_offset = 0;
+        append_escaped_html(escaped_name, &escaped_offset,
+                            sizeof(escaped_name), item_name);
+        char confirmation[512];
+        snprintf(confirmation, sizeof(confirmation),
+                 "✅ <b>File Delivered:</b> <code>%s</code>", escaped_name);
+        (void)telegram_send_html(confirmation);
       }
       return 1;
     }
-  }
 
-  if (strncmp(callback_data, "fl_cat:", 7) == 0) {
-    size_t idx = (size_t)strtoull(callback_data + 7, nullptr, 10);
-    explorer_lock();
-    int is_valid = (idx < s_explorer_item_count);
-    char item_name[256] = {0};
-    char full_path[1024] = {0};
-    if (is_valid) {
-      snprintf(item_name, sizeof(item_name), "%s", s_explorer_items[idx].name);
-      size_t dlen = strlen(s_explorer_dir);
-      char sep = (dlen > 0 && (s_explorer_dir[dlen - 1] == '/' || s_explorer_dir[dlen - 1] == '\\')) ? '\0' : '/';
-      if (sep) {
-        snprintf(full_path, sizeof(full_path), "%.500s/%.500s", s_explorer_dir, item_name);
-      } else {
-        snprintf(full_path, sizeof(full_path), "%.500s%.500s", s_explorer_dir, item_name);
-      }
-    }
-    explorer_unlock();
+    char keyboard[320];
+    snprintf(keyboard, sizeof(keyboard),
+             "{\"inline_keyboard\":[["
+             "{\"text\":\"📥 Download File\",\"callback_data\":\"fl_get:%u:%llu\"},"
+             "{\"text\":\"⬅️ Back to Explorer\",\"callback_data\":\"fl_back:%u\"}"
+             "]]}", generation, (unsigned long long)value, generation);
 
-    if (is_valid) {
-      (void)telegram_answer_callback_query(callback_query_id, "👁️ Loading preview...");
-
+    if (strcmp(action_prefix, "fl_cat:") == 0) {
+      (void)telegram_answer_callback_query(callback_query_id,
+                                           "👁️ Loading preview...");
       char preview[3200];
-      (void)c2t_file_read_text_preview(full_path, preview, sizeof(preview), 2500);
-
-      char esc_fn[256] = {0};
-      size_t o = 0;
-      append_escaped_html(esc_fn, &o, sizeof(esc_fn), item_name);
-
+      (void)c2t_file_read_text_preview(full_path, preview, sizeof(preview),
+                                       2500);
+      char escaped_name[256] = {0};
+      size_t escaped_offset = 0;
+      append_escaped_html(escaped_name, &escaped_offset,
+                          sizeof(escaped_name), item_name);
       char html[3800];
       snprintf(html, sizeof(html),
                "👁️ <b>File Preview:</b> <code>%s</code>\n\n%s",
-               esc_fn, preview);
-
-      char keyboard[256];
-      snprintf(keyboard, sizeof(keyboard),
-               "{\"inline_keyboard\":[["
-               "{\"text\":\"📥 Download File\",\"callback_data\":\"fl_get:%llu\"},"
-               "{\"text\":\"⬅️ Back to Explorer\",\"callback_data\":\"fl_back\"}"
-               "]]}", (unsigned long long)idx);
-
+               escaped_name, preview);
       return telegram_edit_message_html(msg_id, html, keyboard);
     }
+
+    (void)telegram_answer_callback_query(callback_query_id,
+                                         "ℹ️ Loading info...");
+    char info_text[1200];
+    (void)c2t_file_get_info(full_path, info_text, sizeof(info_text));
+    return telegram_edit_message_html(msg_id, info_text, keyboard);
   }
 
-  if (strncmp(callback_data, "fl_info:", 8) == 0) {
-    size_t idx = (size_t)strtoull(callback_data + 8, nullptr, 10);
-    explorer_lock();
-    int is_valid = (idx < s_explorer_item_count);
-    char full_path[1024] = {0};
-    if (is_valid) {
-      size_t dlen = strlen(s_explorer_dir);
-      char sep = (dlen > 0 && (s_explorer_dir[dlen - 1] == '/' || s_explorer_dir[dlen - 1] == '\\')) ? '\0' : '/';
-      if (sep) {
-        snprintf(full_path, sizeof(full_path), "%.500s/%.500s", s_explorer_dir, s_explorer_items[idx].name);
-      } else {
-        snprintf(full_path, sizeof(full_path), "%.500s%.500s", s_explorer_dir, s_explorer_items[idx].name);
-      }
-    }
-    explorer_unlock();
-
-    if (is_valid) {
-      (void)telegram_answer_callback_query(callback_query_id, "ℹ️ Loading info...");
-
-      char info_text[1200];
-      (void)c2t_file_get_info(full_path, info_text, sizeof(info_text));
-
-      char keyboard[256];
-      snprintf(keyboard, sizeof(keyboard),
-               "{\"inline_keyboard\":[["
-               "{\"text\":\"📥 Download File\",\"callback_data\":\"fl_get:%llu\"},"
-               "{\"text\":\"⬅️ Back to Explorer\",\"callback_data\":\"fl_back\"}"
-               "]]}", (unsigned long long)idx);
-
-      return telegram_edit_message_html(msg_id, info_text, keyboard);
-    }
-  }
-
-  return 0;
+  (void)telegram_answer_callback_query(callback_query_id,
+                                       "⚠️ Invalid explorer action");
+  return 1;
+#undef REQUIRE_CURRENT_CALLBACK
 }

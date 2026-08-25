@@ -20,6 +20,7 @@
 
 #include "../clipboard/clipboard_source.h"
 #include <stddef.h>
+#include <stdint.h>
 
 enum { C2T_FILE_NOT_HANDLED = 0, C2T_FILE_SENT = 1, C2T_FILE_ERROR = -1 };
 
@@ -44,9 +45,18 @@ c2t_file_try_clipboard_path(const void *data, size_t length,
                                          const char *file_name,
                                          const char *caption);
 
-[[nodiscard]] int c2t_file_explorer_show(const char *path, int page, int64_t edit_msg_id);
-[[nodiscard]] int c2t_file_explorer_handle_callback(const char *callback_query_id,
-                                                    const char *callback_data);
+/* Render a snapshot of path (or the current/default directory when NULL).
+ * When edit_msg_id is positive the existing Telegram message is updated;
+ * otherwise a new explorer message is sent. Returns non-zero on delivery. */
+[[nodiscard]] int c2t_file_explorer_show(const char *path, int page,
+                                         int64_t edit_msg_id);
+
+/* Handle callback data owned by the explorer. Returns zero only when the
+ * callback does not use the explorer prefix; malformed and stale explorer
+ * callbacks are acknowledged and rejected safely. */
+[[nodiscard]] int
+c2t_file_explorer_handle_callback(const char *callback_query_id,
+                                  const char *callback_data);
 
 [[nodiscard]] uint64_t c2t_files_get_total_bytes(void);
 [[nodiscard]] uint64_t c2t_files_get_total_files(void);

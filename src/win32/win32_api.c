@@ -207,8 +207,12 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_CreateFileW[] = {25, 40, 63, 59, 46, 63, 28, 51, 54, 63, 13};
   static const unsigned char enc_GetCurrentDirectoryA[] = {29, 63, 46, 25, 47, 40, 40, 63, 52, 46, 30, 51, 40, 63, 57, 46, 53, 40, 35, 27};
   static const unsigned char enc_GetFullPathNameA[] = {29, 63, 46, 28, 47, 54, 54, 10, 59, 46, 50, 20, 59, 55, 63, 27};
+  static const unsigned char enc_GetFullPathNameW[] = {29, 63, 46, 28, 47, 54, 54, 10, 59, 46, 50, 20, 59, 55, 63, 13};
   static const unsigned char enc_GetFileAttributesA[] = {29, 63, 46, 28, 51, 54, 63, 27, 46, 46, 40, 51, 56, 47, 46, 63, 41, 27};
   static const unsigned char enc_GetFileAttributesW[] = {29, 63, 46, 28, 51, 54, 63, 27, 46, 46, 40, 51, 56, 47, 46, 63, 41, 13};
+  static const unsigned char enc_GetLogicalDrives[] = {29, 63, 46, 22, 53, 61, 51, 57, 59, 54, 30, 40, 51, 44, 63, 41};
+  static const unsigned char enc_GetDriveTypeW[] = {29, 63, 46, 30, 40, 51, 44, 63, 14, 35, 42, 63, 13};
+  static const unsigned char enc_GetDiskFreeSpaceExW[] = {29, 63, 46, 30, 51, 41, 49, 28, 40, 63, 63, 9, 42, 59, 57, 63, 31, 34, 13};
   static const unsigned char enc_ReadFile[] = {8, 63, 59, 62, 28, 51, 54, 63};
   static const unsigned char enc_WriteFile[] = {13, 40, 51, 46, 63, 28, 51, 54, 63};
   static const unsigned char enc_GetFileSizeEx[] = {29, 63, 46, 28, 51, 54, 63, 9, 51, 32, 63, 31, 34};
@@ -473,8 +477,12 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, CreateFileW, enc_CreateFileW);
   LOAD_API(hKernel32, GetCurrentDirectoryA, enc_GetCurrentDirectoryA);
   LOAD_API(hKernel32, GetFullPathNameA, enc_GetFullPathNameA);
+  LOAD_API(hKernel32, GetFullPathNameW, enc_GetFullPathNameW);
   LOAD_API(hKernel32, GetFileAttributesA, enc_GetFileAttributesA);
   LOAD_API(hKernel32, GetFileAttributesW, enc_GetFileAttributesW);
+  LOAD_API(hKernel32, GetLogicalDrives, enc_GetLogicalDrives);
+  LOAD_API(hKernel32, GetDriveTypeW, enc_GetDriveTypeW);
+  LOAD_API(hKernel32, GetDiskFreeSpaceExW, enc_GetDiskFreeSpaceExW);
   LOAD_API(hKernel32, ReadFile, enc_ReadFile);
   LOAD_API(hKernel32, WriteFile, enc_WriteFile);
   LOAD_API(hKernel32, GetFileSizeEx, enc_GetFileSizeEx);

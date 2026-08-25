@@ -140,6 +140,24 @@ static int body_contains(const void *value, size_t length) {
   return 0;
 }
 
+static unsigned long explorer_callback_generation(void) {
+  static const char marker[] = "fl_rf%3A";
+  if (last_body_length < sizeof(marker)) return 0;
+  for (size_t index = 0; index + sizeof(marker) - 1 < last_body_length;
+       ++index) {
+    if (memcmp(last_body + index, marker, sizeof(marker) - 1) != 0) continue;
+    const unsigned char *cursor = last_body + index + sizeof(marker) - 1;
+    const unsigned char *end = last_body + last_body_length;
+    unsigned long value = 0;
+    while (cursor < end && *cursor >= '0' && *cursor <= '9') {
+      value = value * 10UL + (unsigned long)(*cursor - '0');
+      ++cursor;
+    }
+    return value;
+  }
+  return 0;
+}
+
 int telegram_http_init(void) {
   ++http_init_calls;
   return 1;
@@ -1129,47 +1147,93 @@ int main(void) {
     c2t_telegram_listener_handle_update(&update_files);
     if (!body_contains("File%20Explorer", sizeof("File%20Explorer") - 1))
       return fail("/files alias failed to launch File Explorer");
+    unsigned long explorer_generation = explorer_callback_generation();
+    if (explorer_generation == 0)
+      return fail("/files keyboard missing session token");
 
-    /* Test File Explorer inline button callbacks */
-    telegram_incoming_update_t update_cb_rf = {
+    telegram_incoming_update_t update_files_invalid = {
         .update_id = 1024,
         .date = 0,
         .chat_id = target_chat,
-        .callback_query_id = "cb_query_101",
-        .callback_data = "fl_rf",
+        .text = "/files /c2t/path/that/must/not/exist",
     };
-    c2t_telegram_listener_handle_update(&update_cb_rf);
+    c2t_telegram_listener_handle_update(&update_files_invalid);
+    if (!body_contains("Cannot%20open%20directory",
+                       sizeof("Cannot%20open%20directory") - 1))
+      return fail("/files invalid path was reported as an empty directory");
 
-    telegram_incoming_update_t update_cb_up = {
+    /* Test File Explorer inline button callbacks */
+    char callback_data[64];
+    snprintf(callback_data, sizeof(callback_data), "fl_rf:%lu",
+             explorer_generation);
+    telegram_incoming_update_t update_cb_rf = {
         .update_id = 1025,
         .date = 0,
         .chat_id = target_chat,
-        .callback_query_id = "cb_query_102",
-        .callback_data = "fl_up",
+        .callback_query_id = "cb_query_101",
+        .callback_data = callback_data,
     };
-    c2t_telegram_listener_handle_update(&update_cb_up);
+    c2t_telegram_listener_handle_update(&update_cb_rf);
+    unsigned long refreshed_generation = explorer_callback_generation();
+    if (refreshed_generation == 0 ||
+        refreshed_generation == explorer_generation)
+      return fail("File Explorer refresh did not rotate its session token");
 
-    telegram_incoming_update_t update_cb_home = {
+    snprintf(callback_data, sizeof(callback_data), "fl_rf:%lu",
+             explorer_generation);
+    telegram_incoming_update_t update_cb_stale = {
         .update_id = 1026,
         .date = 0,
         .chat_id = target_chat,
-        .callback_query_id = "cb_query_103",
-        .callback_data = "fl_home",
+        .callback_query_id = "cb_query_stale",
+        .callback_data = callback_data,
     };
-    c2t_telegram_listener_handle_update(&update_cb_home);
+    c2t_telegram_listener_handle_update(&update_cb_stale);
+    if (!body_contains("Explorer%20expired", sizeof("Explorer%20expired") - 1))
+      return fail("stale File Explorer callback was not rejected");
 
-    telegram_incoming_update_t update_cb_close = {
+    snprintf(callback_data, sizeof(callback_data), "fl_up:%lu",
+             refreshed_generation);
+    telegram_incoming_update_t update_cb_up = {
         .update_id = 1027,
         .date = 0,
         .chat_id = target_chat,
+        .callback_query_id = "cb_query_102",
+        .callback_data = callback_data,
+    };
+    c2t_telegram_listener_handle_update(&update_cb_up);
+    explorer_generation = explorer_callback_generation();
+    if (explorer_generation == 0)
+      return fail("File Explorer up navigation failed");
+
+    snprintf(callback_data, sizeof(callback_data), "fl_home:%lu",
+             explorer_generation);
+    telegram_incoming_update_t update_cb_home = {
+        .update_id = 1028,
+        .date = 0,
+        .chat_id = target_chat,
+        .callback_query_id = "cb_query_103",
+        .callback_data = callback_data,
+    };
+    c2t_telegram_listener_handle_update(&update_cb_home);
+    explorer_generation = explorer_callback_generation();
+    if (explorer_generation == 0)
+      return fail("File Explorer home navigation failed");
+
+    snprintf(callback_data, sizeof(callback_data), "fl_close:%lu",
+             explorer_generation);
+    telegram_incoming_update_t update_cb_close = {
+        .update_id = 1029,
+        .date = 0,
+        .chat_id = target_chat,
         .callback_query_id = "cb_query_104",
-        .callback_data = "fl_close",
+        .callback_data = callback_data,
     };
     c2t_telegram_listener_handle_update(&update_cb_close);
 
     /* Verify /help contains /install, /restart, and /files */
     telegram_incoming_update_t update_help = {
-        .update_id = 1028,
+        .update_id = 1030,
         .date = 0,
         .chat_id = target_chat,
         .text = "/help",

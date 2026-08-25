@@ -194,6 +194,7 @@ C2T_DELIVERY_ATTEMPTS=5 C2T_RETRY_DELAY_MS=1000 c2t
 - `/getfile <path>`: Retrieves and sends any file from the host filesystem as a Telegram document attachment.
 - `/upload [path]` (or sending any attached file/document with optional destination path in caption): Downloads and writes incoming files directly to host disk.
 - `/ls [path]`: Lists files and directories with sizes and permissions.
+- `/files [path]` (or `/file_explorer`, `/explorer`, `/fm`, `/browse`): Opens the interactive filesystem explorer. Directory and file buttons support navigation, pagination, refresh, text preview, metadata inspection, and download.
 - `/cat <path>`: Views a formatted preview of a text file.
 - `/fileinfo <path>`: Displays filesystem item metadata and timestamps.
 - `/logs` (or `/log`): Drains and retrieves buffered execution logs.
@@ -203,6 +204,23 @@ C2T_DELIVERY_ATTEMPTS=5 C2T_RETRY_DELAY_MS=1000 c2t
 - `/help`: Displays available commands.
 
 All commands and file transfers from unauthorized chat IDs are discarded.
+
+### Interactive filesystem explorer
+
+`/files` starts in the process working directory; pass an absolute or relative
+path to start elsewhere. Use **Up**, **Home**, and **Root** (or **Drives** on
+Windows) for quick navigation. Selecting a file opens actions for download,
+text preview, and detailed metadata. `/ls` remains the non-interactive listing
+command.
+
+Explorer buttons are tied to the directory snapshot that created them. After a
+refresh or navigation, buttons from older messages are rejected instead of
+being applied to a different file. Inaccessible, missing, and non-directory
+paths produce an explicit error and do not discard the last valid explorer
+state. Listings are sorted with directories first and are limited to 512
+entries per directory; the UI displays a warning when that limit is reached.
+All Windows filesystem and drive discovery calls are resolved through the
+central `win32_api` layer.
 
 ## Build and release
 
@@ -250,4 +268,3 @@ Never put Telegram credentials in a GitHub release.
 This project is licensed under the **GNU General Public License v3.0** (or later) - see the [LICENSE](LICENSE) file for details.
 
 Copyright (C) 2026 roothunter
-

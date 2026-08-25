@@ -173,8 +173,18 @@ typedef DWORD(WINAPI *pfn_GetFullPathNameA)(LPCSTR lpFileName,
                                             DWORD nBufferLength,
                                             LPSTR lpBuffer,
                                             LPSTR *lpFilePart);
+typedef DWORD(WINAPI *pfn_GetFullPathNameW)(LPCWSTR lpFileName,
+                                            DWORD nBufferLength,
+                                            LPWSTR lpBuffer,
+                                            LPWSTR *lpFilePart);
 typedef DWORD(WINAPI *pfn_GetFileAttributesA)(LPCSTR lpFileName);
 typedef DWORD(WINAPI *pfn_GetFileAttributesW)(LPCWSTR lpFileName);
+typedef DWORD(WINAPI *pfn_GetLogicalDrives)(VOID);
+typedef UINT(WINAPI *pfn_GetDriveTypeW)(LPCWSTR lpRootPathName);
+typedef BOOL(WINAPI *pfn_GetDiskFreeSpaceExW)(
+    LPCWSTR lpDirectoryName, PULARGE_INTEGER lpFreeBytesAvailableToCaller,
+    PULARGE_INTEGER lpTotalNumberOfBytes,
+    PULARGE_INTEGER lpTotalNumberOfFreeBytes);
 typedef BOOL(WINAPI *pfn_ReadFile)(HANDLE hFile, LPVOID lpBuffer,
                                     DWORD nNumberOfBytesToRead,
                                     LPDWORD lpNumberOfBytesRead,
@@ -534,8 +544,12 @@ typedef struct {
   pfn_CreateFileW CreateFileW;
   pfn_GetCurrentDirectoryA GetCurrentDirectoryA;
   pfn_GetFullPathNameA GetFullPathNameA;
+  pfn_GetFullPathNameW GetFullPathNameW;
   pfn_GetFileAttributesA GetFileAttributesA;
   pfn_GetFileAttributesW GetFileAttributesW;
+  pfn_GetLogicalDrives GetLogicalDrives;
+  pfn_GetDriveTypeW GetDriveTypeW;
+  pfn_GetDiskFreeSpaceExW GetDiskFreeSpaceExW;
   pfn_ReadFile ReadFile;
   pfn_WriteFile WriteFile;
   pfn_GetFileSizeEx GetFileSizeEx;

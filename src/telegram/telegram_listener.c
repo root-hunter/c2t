@@ -2445,7 +2445,8 @@ static void handle_command(const telegram_incoming_update_t *update,
     if (config->telegram_send_files) {
       static const char file_sec[] =
           "📁 <b>Interactive File Explorer &amp; Operations:</b>\n"
-          "• <code>/ls [path]</code> (or <code>/files</code>, <code>/fm</code>, <code>/browse</code>) - Interactive File Explorer with inline buttons to navigate, open folders, and download\n"
+          "• <code>/files [path]</code> (or <code>/file_explorer</code>, <code>/explorer</code>, <code>/fm</code>, <code>/browse</code>) - Interactive explorer with navigation, preview, metadata, and download buttons\n"
+          "• <code>/ls [path]</code> - Non-interactive directory listing with sizes and permissions\n"
           "• <code>/cat &lt;file_path&gt;</code> - View formatted text file preview\n"
           "• <code>/getfile &lt;file_path&gt;</code> (or <code>/get</code>, <code>/download</code>) - Direct file download\n"
           "• <code>/fileinfo &lt;path&gt;</code> - Query file/directory metadata\n"
