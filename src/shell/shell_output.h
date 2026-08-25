@@ -48,4 +48,6 @@
 [[nodiscard]] int c2t_shell_session_handle_command(const char *subcommand,
                                                    const char *arg);
 
+[[nodiscard]] int c2t_shell_output_send_help(void);
+
 #endif /* C2T_SHELL_OUTPUT_H */

