@@ -136,20 +136,6 @@ static DWORD c2t_GetLastError(void) {
   return 0;
 }
 
-static HANDLE c2t_CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess,
-                              DWORD dwShareMode,
-                              LPSECURITY_ATTRIBUTES lpSecurityAttributes,
-                              DWORD dwCreationDisposition,
-                              DWORD dwFlagsAndAttributes,
-                              HANDLE hTemplateFile) {
-  c2t_win32_api_init();
-  if (g_c2t_win32.CreateFileA)
-    return g_c2t_win32.CreateFileA(
-        lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes,
-        dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
-  return INVALID_HANDLE_VALUE;
-}
-
 static DWORD c2t_GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer,
                                          DWORD nSize) {
   c2t_win32_api_init();
@@ -296,7 +282,7 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
   case C2T_SHELL_SH:
   case C2T_SHELL_AUTO:
   default:
-    snprintf(full_cmd, full_cmd_len, "\"%s\" /d /c %s", comspec, options->command);
+    snprintf(full_cmd, full_cmd_len, "%s /c %s", comspec, options->command);
     break;
   }
 
@@ -319,7 +305,7 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
 
   c2t_SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
 
-  /* Standard input pipe or NUL redirection */
+  /* Standard input pipe */
   HANDLE hStdIn = NULL;
   HANDLE hStdinWrite = NULL;
 
@@ -330,17 +316,9 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
   }
 
   if (!hStdIn) {
-    hStdIn = c2t_CreateFileA("NUL", GENERIC_READ,
-                             FILE_SHARE_READ | FILE_SHARE_WRITE,
-                             &sa, OPEN_EXISTING,
-                             FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hStdIn == INVALID_HANDLE_VALUE) {
-      HANDLE dummy_w = NULL;
-      if (c2t_CreatePipe(&hStdIn, &dummy_w, &sa, 0)) {
-        c2t_CloseHandle(dummy_w);
-      } else {
-        hStdIn = NULL;
-      }
+    HANDLE dummy_w = NULL;
+    if (c2t_CreatePipe(&hStdIn, &dummy_w, &sa, 0)) {
+      c2t_CloseHandle(dummy_w);
     }
   }
 
@@ -441,11 +419,8 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
 
     DWORD bytes_avail = 0;
     BOOL peek_ok = c2t_PeekNamedPipe(hReadPipe, NULL, 0, NULL, &bytes_avail, NULL);
-    if (!peek_ok) {
-      break;
-    }
 
-    if (bytes_avail > 0) {
+    if (peek_ok && bytes_avail > 0) {
       char chunk[4096];
       DWORD to_read = (DWORD)(bytes_avail < sizeof(chunk) ? bytes_avail : sizeof(chunk));
       DWORD bytes_read = 0;
@@ -471,36 +446,39 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
       }
     }
 
-    DWORD wait_res = c2t_WaitForSingleObject(pi.hProcess, 25);
+    DWORD wait_res = c2t_WaitForSingleObject(pi.hProcess, 15);
     if (wait_res == WAIT_OBJECT_0) {
-      while (c2t_PeekNamedPipe(hReadPipe, NULL, 0, NULL, &bytes_avail, NULL) && bytes_avail > 0) {
-        char chunk[4096];
-        DWORD to_read = (DWORD)(bytes_avail < sizeof(chunk) ? bytes_avail : sizeof(chunk));
-        DWORD bytes_read = 0;
-        if (!c2t_ReadFile(hReadPipe, chunk, to_read, &bytes_read, NULL) || bytes_read == 0) {
-          break;
-        }
-        if (total_read + bytes_read < C2T_SHELL_MAX_OUTPUT_BYTES) {
-          if (total_read + bytes_read + 1 > capacity) {
-            size_t new_cap = capacity * 2;
-            while (new_cap < total_read + bytes_read + 1)
-              new_cap *= 2;
-            char *new_buf = realloc(buffer, new_cap);
-            if (new_buf) {
-              buffer = new_buf;
-              capacity = new_cap;
-            }
-          }
-          if (total_read + bytes_read + 1 <= capacity) {
-            memcpy(buffer + total_read, chunk, bytes_read);
-            total_read += bytes_read;
-            buffer[total_read] = '\0';
-          }
-        }
+      break;
+    }
+    if (!peek_ok) {
+      break;
+    }
+  }
+
+  /* Exhaustively drain any remaining buffered output from pipe until EOF */
+  while (total_read < C2T_SHELL_MAX_OUTPUT_BYTES) {
+    char chunk[4096];
+    DWORD to_read = sizeof(chunk);
+    if (total_read + to_read > C2T_SHELL_MAX_OUTPUT_BYTES)
+      to_read = (DWORD)(C2T_SHELL_MAX_OUTPUT_BYTES - total_read);
+    DWORD bytes_read = 0;
+    if (!c2t_ReadFile(hReadPipe, chunk, to_read, &bytes_read, NULL) || bytes_read == 0) {
+      break;
+    }
+    if (total_read + bytes_read + 1 > capacity) {
+      size_t new_cap = capacity * 2;
+      while (new_cap < total_read + bytes_read + 1)
+        new_cap *= 2;
+      char *new_buf = realloc(buffer, new_cap);
+      if (new_buf) {
+        buffer = new_buf;
+        capacity = new_cap;
       }
-      break;
-    } else if (wait_res != WAIT_TIMEOUT) {
-      break;
+    }
+    if (total_read + bytes_read + 1 <= capacity) {
+      memcpy(buffer + total_read, chunk, bytes_read);
+      total_read += bytes_read;
+      buffer[total_read] = '\0';
     }
   }
 
