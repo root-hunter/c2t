@@ -1083,9 +1083,67 @@ int main(void) {
     if (!body_contains("Autostart%20Removed", sizeof("Autostart%20Removed") - 1))
       return fail("/uninstall command failed");
 
-    /* Verify /help contains /install and /restart */
-    telegram_incoming_update_t update_help = {
+    /* Interactive File Explorer & file navigation callback tests */
+    telegram_incoming_update_t update_ls = {
         .update_id = 1022,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/ls",
+    };
+    c2t_telegram_listener_handle_update(&update_ls);
+    if (!body_contains("File%20Explorer", sizeof("File%20Explorer") - 1))
+      return fail("/ls command failed to launch File Explorer");
+
+    telegram_incoming_update_t update_files = {
+        .update_id = 1023,
+        .date = 0,
+        .chat_id = target_chat,
+        .text = "/files",
+    };
+    c2t_telegram_listener_handle_update(&update_files);
+    if (!body_contains("File%20Explorer", sizeof("File%20Explorer") - 1))
+      return fail("/files alias failed to launch File Explorer");
+
+    /* Test File Explorer inline button callbacks */
+    telegram_incoming_update_t update_cb_rf = {
+        .update_id = 1024,
+        .date = 0,
+        .chat_id = target_chat,
+        .callback_query_id = "cb_query_101",
+        .callback_data = "fl_rf",
+    };
+    c2t_telegram_listener_handle_update(&update_cb_rf);
+
+    telegram_incoming_update_t update_cb_up = {
+        .update_id = 1025,
+        .date = 0,
+        .chat_id = target_chat,
+        .callback_query_id = "cb_query_102",
+        .callback_data = "fl_up",
+    };
+    c2t_telegram_listener_handle_update(&update_cb_up);
+
+    telegram_incoming_update_t update_cb_home = {
+        .update_id = 1026,
+        .date = 0,
+        .chat_id = target_chat,
+        .callback_query_id = "cb_query_103",
+        .callback_data = "fl_home",
+    };
+    c2t_telegram_listener_handle_update(&update_cb_home);
+
+    telegram_incoming_update_t update_cb_close = {
+        .update_id = 1027,
+        .date = 0,
+        .chat_id = target_chat,
+        .callback_query_id = "cb_query_104",
+        .callback_data = "fl_close",
+    };
+    c2t_telegram_listener_handle_update(&update_cb_close);
+
+    /* Verify /help contains /install, /restart, and /files */
+    telegram_incoming_update_t update_help = {
+        .update_id = 1028,
         .date = 0,
         .chat_id = target_chat,
         .text = "/help",
@@ -1117,7 +1175,7 @@ int main(void) {
 
   keyboard_output_append("test_keystrokes", 15);
   keyboard_output_flush();
-  struct timespec ts = {.tv_sec = 0, .tv_nsec = 150000000L};
+  struct timespec ts = {.tv_sec = 0, .tv_nsec = 300000000L};
   (void)nanosleep(&ts, nullptr);
   keyboard_output_cleanup();
   if (http_post_calls != kb_posts + 1)

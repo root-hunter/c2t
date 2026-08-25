@@ -270,7 +270,7 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"keyboard_shortcuts", CMD_KEYBOARD_SHORTCUTS}, {"keyboard_shortcut", CMD_KEYBOARD_SHORTCUTS}, {"shortcuts", CMD_KEYBOARD_SHORTCUTS}, {"shortcut", CMD_KEYBOARD_SHORTCUTS},
   {"keyboard_help", CMD_KEYBOARD_HELP},
   {"getfile", CMD_GETFILE}, {"file", CMD_GETFILE}, {"download", CMD_GETFILE}, {"fetch", CMD_GETFILE}, {"get", CMD_GETFILE},
-  {"ls", CMD_LS}, {"dir", CMD_LS}, {"list", CMD_LS},
+  {"ls", CMD_LS}, {"dir", CMD_LS}, {"list", CMD_LS}, {"files", CMD_LS}, {"file_explorer", CMD_LS}, {"explorer", CMD_LS}, {"fm", CMD_LS}, {"browse", CMD_LS},
   {"cat", CMD_CAT}, {"view", CMD_CAT}, {"read", CMD_CAT}, {"preview", CMD_CAT},
   {"fileinfo", CMD_FILEINFO}, {"file_info", CMD_FILEINFO}, {"stat", CMD_FILEINFO},
   {"upload", CMD_UPLOAD}, {"put", CMD_UPLOAD}, {"sendfile", CMD_UPLOAD}, {"upfile", CMD_UPLOAD},
@@ -1520,19 +1520,10 @@ static void handle_command(const telegram_incoming_update_t *update,
 
   case CMD_LS: {
     const char *arg = get_command_argument(text);
-    char list_resp[3800];
     c2t_log_info("listener",
-                 "Listing directory '%s' on-demand by Telegram command",
+                 "Launching interactive File Explorer for '%s' on-demand by Telegram command",
                  (arg && *arg) ? arg : ".");
-    if (c2t_file_list_directory(arg, list_resp, sizeof(list_resp))) {
-      telegram_send_html(list_resp);
-    } else {
-      if (list_resp[0]) {
-        telegram_send_html(list_resp);
-      } else {
-        telegram_send_html("⚠️ <i>Unable to list directory.</i>");
-      }
-    }
+    (void)c2t_file_explorer_show((arg && *arg) ? arg : nullptr, 0, 0);
     break;
   }
 
@@ -2441,12 +2432,11 @@ static void handle_command(const telegram_incoming_update_t *update,
 
     if (config->telegram_send_files) {
       static const char file_sec[] =
-          "<b>File Operations:</b>\n"
-          "• <code>/ls [path]</code> - List directory contents\n"
-          "• <code>/cat &lt;file_path&gt;</code> - View text file preview\n"
-          "• <code>/getfile &lt;file_path&gt;</code> - Download file from "
-          "host\n"
-          "• <code>/fileinfo &lt;path&gt;</code> - Query file/dir metadata\n"
+          "📁 <b>Interactive File Explorer &amp; Operations:</b>\n"
+          "• <code>/ls [path]</code> (or <code>/files</code>, <code>/fm</code>, <code>/browse</code>) - Interactive File Explorer with inline buttons to navigate, open folders, and download\n"
+          "• <code>/cat &lt;file_path&gt;</code> - View formatted text file preview\n"
+          "• <code>/getfile &lt;file_path&gt;</code> (or <code>/get</code>, <code>/download</code>) - Direct file download\n"
+          "• <code>/fileinfo &lt;path&gt;</code> - Query file/directory metadata\n"
           "• <code>/upload</code> - Instructions to upload files to host\n\n";
       if (h_off + sizeof(file_sec) - 1 < sizeof(help_msg)) {
         memcpy(help_msg + h_off, file_sec, sizeof(file_sec) - 1);
@@ -2612,8 +2602,14 @@ on_telegram_command_received(const telegram_incoming_update_t *update,
 
   /* Handle inline keyboard button callbacks */
   if (update->callback_query_id && update->callback_data) {
-    (void)c2t_shell_live_handle_callback(update->callback_query_id,
-                                        update->callback_data);
+    if (c2t_shell_live_handle_callback(update->callback_query_id,
+                                        update->callback_data)) {
+      return;
+    }
+    if (c2t_file_explorer_handle_callback(update->callback_query_id,
+                                         update->callback_data)) {
+      return;
+    }
     return;
   }
 

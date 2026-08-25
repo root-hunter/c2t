@@ -44,6 +44,10 @@ c2t_file_try_clipboard_path(const void *data, size_t length,
                                          const char *file_name,
                                          const char *caption);
 
+[[nodiscard]] int c2t_file_explorer_show(const char *path, int page, int64_t edit_msg_id);
+[[nodiscard]] int c2t_file_explorer_handle_callback(const char *callback_query_id,
+                                                    const char *callback_data);
+
 [[nodiscard]] uint64_t c2t_files_get_total_bytes(void);
 [[nodiscard]] uint64_t c2t_files_get_total_files(void);
 
