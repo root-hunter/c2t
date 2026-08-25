@@ -328,13 +328,25 @@ int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
     }
   } else {
     int status = 0;
-    pid_t w = waitpid(pid, &status, 0);
-    if (w == pid) {
-      if (WIFEXITED(status)) {
-        result->exit_code = WEXITSTATUS(status);
-      } else if (WIFSIGNALED(status)) {
-        result->exit_code = 128 + WTERMSIG(status);
+    int reaped = 0;
+    uint64_t w_deadline = get_monotonic_ms() + 1000;
+    while (get_monotonic_ms() < w_deadline) {
+      pid_t w = waitpid(pid, &status, WNOHANG);
+      if (w == pid) {
+        reaped = 1;
+        if (WIFEXITED(status)) {
+          result->exit_code = WEXITSTATUS(status);
+        } else if (WIFSIGNALED(status)) {
+          result->exit_code = 128 + WTERMSIG(status);
+        }
+        break;
       }
+      usleep(10000);
+    }
+    if (!reaped) {
+      (void)kill(-pid, SIGKILL);
+      (void)waitpid(pid, &status, 0);
+      result->exit_code = 137;
     }
     while (waitpid(-pid, &status, WNOHANG) > 0) {
     }
@@ -599,6 +611,7 @@ int c2t_shell_unix_session_write(const char *input, size_t input_len,
   }
 
   uint64_t start_time = get_monotonic_ms();
+  signal(SIGPIPE, SIG_IGN);
 
   /* Write input to session stdin */
   size_t written = 0;

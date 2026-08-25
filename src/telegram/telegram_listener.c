@@ -2770,6 +2770,7 @@ static void *telegram_listener_worker_func([[maybe_unused]] void *context)
 }
 
 int c2t_telegram_listener_init(void) {
+  init_cmd_table();
   const c2t_config_t *config = c2t_config_get();
   if (!config->telegram_enabled || !config->telegram_bot_token ||
       !config->telegram_chat_id) {

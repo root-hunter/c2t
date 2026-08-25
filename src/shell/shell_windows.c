@@ -202,6 +202,31 @@ static void c2t_LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
     g_c2t_win32.LeaveCriticalSection(lpCriticalSection);
 }
 
+static char *b64_encode_bytes(const unsigned char *data, size_t input_length) {
+  static const char encoding_table[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  size_t output_length = 4 * ((input_length + 2) / 3);
+  char *encoded_data = malloc(output_length + 1);
+  if (!encoded_data)
+    return NULL;
+
+  size_t i = 0, j = 0;
+  while (i < input_length) {
+    uint32_t octet_a = i < input_length ? data[i++] : 0;
+    uint32_t octet_b = i < input_length ? data[i++] : 0;
+    uint32_t octet_c = i < input_length ? data[i++] : 0;
+    uint32_t triple = (octet_a << 16) + (octet_b << 8) + octet_c;
+
+    encoded_data[j++] = encoding_table[(triple >> 18) & 0x3F];
+    encoded_data[j++] = encoding_table[(triple >> 12) & 0x3F];
+    encoded_data[j++] =
+        (i > input_length + 1) ? '=' : encoding_table[(triple >> 6) & 0x3F];
+    encoded_data[j++] = (i > input_length) ? '=' : encoding_table[triple & 0x3F];
+  }
+  encoded_data[output_length] = '\0';
+  return encoded_data;
+}
+
 int c2t_shell_windows_execute(const char *command, c2t_shell_result_t *result,
                               uint32_t timeout_ms) {
   c2t_shell_options_t opts = {
@@ -251,7 +276,7 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
   }
 
   size_t cmd_len = strlen(options->command);
-  size_t full_cmd_len = strlen(comspec) + cmd_len + 64;
+  size_t full_cmd_len = strlen(comspec) + cmd_len * 4 + 256;
   char *full_cmd = malloc(full_cmd_len);
   if (!full_cmd) {
     c2t_log_error("shell", "Failed to allocate memory for shell command string");
@@ -260,13 +285,31 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
   }
 
   switch (options->shell_type) {
-  case C2T_SHELL_POWERSHELL:
-    snprintf(full_cmd, full_cmd_len,
-             "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"%s\"",
-             options->command);
+  case C2T_SHELL_POWERSHELL: {
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, options->command, -1, NULL, 0);
+    char *b64 = NULL;
+    if (wlen > 1) {
+      wchar_t *wbuf = malloc((size_t)wlen * sizeof(wchar_t));
+      if (wbuf) {
+        MultiByteToWideChar(CP_UTF8, 0, options->command, -1, wbuf, wlen);
+        b64 = b64_encode_bytes((const unsigned char *)wbuf, (size_t)(wlen - 1) * sizeof(wchar_t));
+        free(wbuf);
+      }
+    }
+    if (b64) {
+      snprintf(full_cmd, full_cmd_len,
+               "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand %s",
+               b64);
+      free(b64);
+    } else {
+      snprintf(full_cmd, full_cmd_len,
+               "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"%s\"",
+               options->command);
+    }
     break;
+  }
   case C2T_SHELL_PYTHON:
-    snprintf(full_cmd, full_cmd_len, "python.exe -c \"%s\"", options->command);
+    snprintf(full_cmd, full_cmd_len, "python.exe -u -c \"%s\"", options->command);
     break;
   case C2T_SHELL_BASH:
     snprintf(full_cmd, full_cmd_len, "bash.exe -c \"%s\"", options->command);
@@ -275,7 +318,7 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
   case C2T_SHELL_SH:
   case C2T_SHELL_AUTO:
   default:
-    snprintf(full_cmd, full_cmd_len, "\"%s\" /c %s", comspec, options->command);
+    snprintf(full_cmd, full_cmd_len, "\"%s\" /d /s /c \"%s\"", comspec, options->command);
     break;
   }
 
