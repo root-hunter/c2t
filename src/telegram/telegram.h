@@ -54,6 +54,7 @@ int telegram_send_html(const char *html_text);
 [[nodiscard]] int telegram_send_chat_action(const char *action);
 [[nodiscard]] int telegram_send_message_draft(int64_t draft_id, const char *html_text);
 [[nodiscard]] int telegram_send_rich_message_draft(int64_t draft_id, const char *html_text);
+[[nodiscard]] int telegram_clear_message_draft(int64_t draft_id);
 [[nodiscard]] int telegram_get_bot_username(const char *token,
                                             char *username_out,
                                             size_t capacity);

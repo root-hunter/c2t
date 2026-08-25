@@ -191,6 +191,10 @@ int c2t_shell_format_telegram(const char *command,
 
 static int send_shell_result(const char *cmd_display, c2t_shell_result_t *result,
                              int exec_ok) {
+  for (int64_t d = 201; d <= 210; d++) {
+    (void)telegram_clear_message_draft(d);
+  }
+
   if (!exec_ok) {
     (void)atomic_fetch_add(&g_shell_failed_commands, 1);
     c2t_log_error("shell", "Execution failed for: '%s'", cmd_display);

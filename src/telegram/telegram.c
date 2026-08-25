@@ -1511,6 +1511,20 @@ int telegram_send_rich_message_draft(int64_t draft_id, const char *html_text) {
   return send_fields("sendRichMessageDraft", fields, 4);
 }
 
+int telegram_clear_message_draft(int64_t draft_id) {
+  if (!initialized || !chat_id || !bot_token)
+    return 0;
+
+  char draft_id_str[32];
+  snprintf(draft_id_str, sizeof(draft_id_str), "%lld", (long long)draft_id);
+
+  form_field_t fields[2] = {
+      {"draft_id", draft_id_str, strlen(draft_id_str)},
+      {"text", "", 0},
+  };
+  return send_fields("sendMessageDraft", fields, 2);
+}
+
 static const char *find_in_range(const char *start, const char *end,
                                  const char *needle, size_t needle_length) {
   if (!start || !end || start >= end || !needle || needle_length == 0 ||
