@@ -590,6 +590,7 @@ static int clipboard_listen_once(void) {
   MSG message = {};
   int result = 0;
   while (!c2t_runtime_stop_requested()) {
+    c2t_runtime_heartbeat();
     while (c2t_PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
       if (message.message == WM_QUIT)
         goto message_loop_finished;

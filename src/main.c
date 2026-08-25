@@ -353,9 +353,10 @@ static void print_usage(FILE *stream) {
     c2t_log_info("main", "Starting clipboard listener");
     result = clipboard_listen();
     c2t_log_info("main", "Clipboard listener stopped with result %d", result);
-  } else {
-    c2t_log_info("main", "Clipboard listener disabled by configuration; "
-                         "waiting for runtime termination");
+  }
+
+  if (!c2t_runtime_stop_requested()) {
+    c2t_log_info("main", "Continuing daemon operation; waiting for runtime termination");
     int stop_fd = c2t_runtime_stop_descriptor();
     while (!c2t_runtime_stop_requested()) {
       c2t_runtime_heartbeat();

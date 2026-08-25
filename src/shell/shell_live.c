@@ -34,7 +34,10 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <direct.h>
+#include <strings.h>
 #else
+#include <pthread.h>
+#include <strings.h>
 #include <unistd.h>
 #endif
 
@@ -42,6 +45,25 @@
 #define LIVE_HISTORY_INITIAL_CAP 4096U
 #define LIVE_HISTORY_MAX_BYTES 65536U
 #define LIVE_MSG_CAPACITY 4096U
+
+#ifdef _WIN32
+static CRITICAL_SECTION s_live_cs;
+static int s_live_cs_inited = 0;
+static void live_lock(void) {
+  if (!s_live_cs_inited) {
+    InitializeCriticalSection(&s_live_cs);
+    s_live_cs_inited = 1;
+  }
+  EnterCriticalSection(&s_live_cs);
+}
+static void live_unlock(void) {
+  LeaveCriticalSection(&s_live_cs);
+}
+#else
+static pthread_mutex_t s_live_mutex = PTHREAD_MUTEX_INITIALIZER;
+static void live_lock(void) { (void)pthread_mutex_lock(&s_live_mutex); }
+static void live_unlock(void) { (void)pthread_mutex_unlock(&s_live_mutex); }
+#endif
 
 static atomic_int s_live_active = 0;
 static int64_t s_live_message_id = 0;
@@ -146,7 +168,7 @@ static size_t escape_terminal_html(const char *src, char *dst, size_t dst_cap) {
   return d;
 }
 
-static void append_to_screen(const char *text, size_t text_len) {
+static void append_to_screen_locked(const char *text, size_t text_len) {
   if (!text || text_len == 0)
     return;
 
@@ -200,6 +222,12 @@ static void append_to_screen(const char *text, size_t text_len) {
   }
 }
 
+static void append_to_screen(const char *text, size_t text_len) {
+  live_lock();
+  append_to_screen_locked(text, text_len);
+  live_unlock();
+}
+
 static void render_live_message(char *out_html, size_t out_cap, int is_active) {
   if (!out_html || out_cap == 0)
     return;
@@ -210,10 +238,17 @@ static void render_live_message(char *out_html, size_t out_cap, int is_active) {
     return;
   }
   esc_screen[0] = '\0';
+
+  char esc_cwd[1100] = {0};
+  char esc_title[64] = {0};
+
+  live_lock();
   escape_terminal_html(s_screen_buffer, esc_screen, 2600);
+  escape_terminal_html(s_live_cwd[0] ? s_live_cwd : ".", esc_cwd, sizeof(esc_cwd));
+  escape_terminal_html(s_shell_title, esc_title, sizeof(esc_title));
+  live_unlock();
 
   const char *priv = c2t_runtime_get_privilege_str();
-  const char *cur_dir = s_live_cwd[0] ? s_live_cwd : ".";
 
   if (is_active) {
     snprintf(out_html, out_cap,
@@ -224,7 +259,7 @@ static void render_live_message(char *out_html, size_t out_cap, int is_active) {
              "• <b>Status:</b> ⚡ <i>Live (all chat messages are executed directly in shell)</i>\n\n"
              "<pre><code class=\"language-text\">%s</code></pre>\n\n"
              "💡 <i>Type any command (e.g. <code>dir</code>, <code>ls</code>, <code>whoami</code>) or <code>exit</code> to close.</i>",
-             s_shell_title, cur_dir, priv,
+             esc_title, esc_cwd, priv,
              esc_screen[0] ? esc_screen : "(Terminal session ready. Type a command...)");
   } else {
     snprintf(out_html, out_cap,
@@ -234,7 +269,7 @@ static void render_live_message(char *out_html, size_t out_cap, int is_active) {
              "• <b>Status:</b> ⏹️ <i>Session closed</i>\n\n"
              "<pre><code class=\"language-text\">%s</code></pre>\n\n"
              "💡 <i>Use <code>/shell_live</code> or tap Re-open to start a live session.</i>",
-             s_shell_title, cur_dir,
+             esc_title, esc_cwd,
              esc_screen[0] ? esc_screen : "(No terminal output recorded)");
   }
 
@@ -271,6 +306,7 @@ int c2t_shell_live_start(const char *shell_name) {
 #endif
   }
 
+  live_lock();
   s_active_shell_type = st;
   snprintf(s_shell_title, sizeof(s_shell_title), "%s", name);
 
@@ -285,20 +321,23 @@ int c2t_shell_live_start(const char *shell_name) {
     }
   }
 #endif
+  live_unlock();
 
   c2t_log_info("live_shell", "Starting interactive live shell '%s' in directory '%s'",
                s_shell_title, s_live_cwd);
 
   atomic_store(&s_live_active, 1);
 
+  live_lock();
   if (s_screen_buffer_len == 0) {
     char banner[256];
     int blen = snprintf(banner, sizeof(banner), "=== Live %s Console Started [%s] ===\n",
                         s_shell_title, c2t_runtime_get_privilege_str());
     if (blen > 0) {
-      append_to_screen(banner, (size_t)blen);
+      append_to_screen_locked(banner, (size_t)blen);
     }
   }
+  live_unlock();
 
   char *msg_html = malloc(LIVE_MSG_CAPACITY);
   if (!msg_html)
@@ -309,13 +348,15 @@ int c2t_shell_live_start(const char *shell_name) {
   int64_t msg_id = 0;
   int ok = telegram_send_html_keyboard_get_id(msg_html, s_live_keyboard_active, &msg_id);
   if (ok && msg_id > 0) {
+    live_lock();
     s_live_message_id = msg_id;
+    live_unlock();
     c2t_log_info("live_shell", "Live interactive console message created (ID: %lld)",
                  (long long)msg_id);
   }
   free(msg_html);
 
-  (void)telegram_send_message_draft(209, "🟢 Live Shell Active: Send any command directly in chat...");
+  (void)telegram_send_chat_action("typing");
   return ok;
 }
 
@@ -329,39 +370,73 @@ int c2t_shell_live_handle_input(const char *input_text) {
     return 1;
 
   /* Check for exit command */
-  if (strcmp(p, "exit") == 0 || strcmp(p, "/exit") == 0 ||
-      strcmp(p, "quit") == 0 || strcmp(p, "/quit") == 0 ||
-      strcmp(p, "/sh_exit") == 0 || strcmp(p, "/live_exit") == 0 ||
-      strcmp(p, "/sh_stop") == 0 || strcmp(p, "/shell_stop") == 0) {
+  if (strcasecmp(p, "exit") == 0 || strcasecmp(p, "/exit") == 0 ||
+      strcasecmp(p, "quit") == 0 || strcasecmp(p, "/quit") == 0 ||
+      strcasecmp(p, "/sh_exit") == 0 || strcasecmp(p, "/live_exit") == 0 ||
+      strcasecmp(p, "/sh_stop") == 0 || strcasecmp(p, "/shell_stop") == 0) {
     (void)c2t_shell_live_stop();
     telegram_send_html("🚪 <b>Live Shell Mode Exited</b>\n<i>Returning to normal bot command mode. Use <code>/shell_live</code> to re-enter.</i>");
     return 1;
   }
 
-  /* Any Telegram bot command starting with '/' passes through to listener */
-  if (*p == '/') {
+  /* If the user specifically intended a core bot control command, pass it to listener */
+  if (strcasecmp(p, "/help") == 0 || strcasecmp(p, "/start") == 0 ||
+      strcasecmp(p, "/info") == 0 || strcasecmp(p, "/sysinfo") == 0 ||
+      strcasecmp(p, "/status") == 0 || strcasecmp(p, "/ping") == 0 ||
+      strcasecmp(p, "/kill") == 0 || strcasecmp(p, "/stop") == 0 ||
+      strncmp(p, "/restart", 8) == 0 || strcasecmp(p, "/reboot") == 0 ||
+      strcasecmp(p, "/pause") == 0 || strcasecmp(p, "/resume") == 0 ||
+      strcasecmp(p, "/toggle") == 0 || strcasecmp(p, "/elevate") == 0 ||
+      strcasecmp(p, "/sudo") == 0 || strcasecmp(p, "/admin") == 0 ||
+      strcasecmp(p, "/screenshot") == 0 || strcasecmp(p, "/screen") == 0 ||
+      strcasecmp(p, "/shot") == 0 || strcasecmp(p, "/logs") == 0 ||
+      strcasecmp(p, "/log") == 0 || strcasecmp(p, "/files") == 0 ||
+      strcasecmp(p, "/explorer") == 0 || strcasecmp(p, "/file_explorer") == 0 ||
+      strcasecmp(p, "/sh_live") == 0 || strcasecmp(p, "/shell_live") == 0 ||
+      strcasecmp(p, "/live") == 0) {
     return 0;
   }
 
-  /* Live draft notification */
-  char draft[256];
-  snprintf(draft, sizeof(draft), "⌨️ Executing: %s", p);
-  (void)telegram_send_message_draft(209, draft);
+  /* Determine the exact command string to execute:
+   * If input starts with a single slash (e.g. /whoami, /ls, /dir, /ipconfig),
+   * strip the leading slash unless it looks like a Unix full path (e.g. /bin/ls).
+   */
+  const char *cmd_to_exec = p;
+  if (p[0] == '/') {
+#ifdef _WIN32
+    cmd_to_exec = p + 1;
+#else
+    if (strchr(p + 1, '/') == NULL) {
+      cmd_to_exec = p + 1;
+    }
+#endif
+  }
+
   (void)telegram_send_chat_action("typing");
 
   /* Record command prompt */
   char prompt_line[300];
-  int plen = snprintf(prompt_line, sizeof(prompt_line), "\n$ %s\n", p);
+  int plen = snprintf(prompt_line, sizeof(prompt_line), "\n$ %s\n", cmd_to_exec);
   if (plen > 0) {
     append_to_screen(prompt_line, (size_t)plen);
   }
 
+  live_lock();
+  char current_working_dir[1024] = {0};
+  strncpy(current_working_dir, s_live_cwd[0] ? s_live_cwd : ".", sizeof(current_working_dir) - 1);
+  c2t_shell_type_t shell_type = s_active_shell_type;
+  live_unlock();
+
   c2t_log_info("live_shell", "Executing live shell command: '%s' (cwd: '%s')",
-               p, s_live_cwd[0] ? s_live_cwd : ".");
+               cmd_to_exec, current_working_dir);
+
+  /* Prepare escaped command prompt for safe HTML formatting */
+  char esc_cmd[1024] = {0};
+  escape_terminal_html(cmd_to_exec, esc_cmd, sizeof(esc_cmd));
 
   /* Handle 'cd' directory change */
-  if (strcmp(p, "cd") == 0 || strncmp(p, "cd ", 3) == 0) {
-    const char *target = (strcmp(p, "cd") == 0) ? "" : p + 3;
+  if (strcmp(cmd_to_exec, "cd") == 0 || strncmp(cmd_to_exec, "cd ", 3) == 0) {
+    const char *target = (strcmp(cmd_to_exec, "cd") == 0) ? "" : cmd_to_exec + 3;
     while (*target && isspace((unsigned char)*target)) target++;
     if (!*target) {
 #ifdef _WIN32
@@ -376,53 +451,69 @@ int c2t_shell_live_handle_input(const char *input_text) {
 #ifdef _WIN32
     if (isalpha((unsigned char)target[0]) && target[1] == ':') {
       snprintf(resolved, sizeof(resolved), "%.1000s", target);
-    } else if (s_live_cwd[0]) {
-      snprintf(resolved, sizeof(resolved), "%.500s\\%.500s", s_live_cwd, target);
+    } else if (current_working_dir[0]) {
+      snprintf(resolved, sizeof(resolved), "%.500s\\%.500s", current_working_dir, target);
     } else {
       snprintf(resolved, sizeof(resolved), "%.1000s", target);
     }
 
     if (SetCurrentDirectoryA(resolved)) {
+      live_lock();
       GetCurrentDirectoryA(sizeof(s_live_cwd), s_live_cwd);
+      strncpy(current_working_dir, s_live_cwd, sizeof(current_working_dir) - 1);
+      live_unlock();
+
+      char esc_dir[1100] = {0};
+      escape_terminal_html(current_working_dir, esc_dir, sizeof(esc_dir));
       char resp[1200];
-      int rlen = snprintf(resp, sizeof(resp), "📁 <b>Working Directory:</b> <code>%s</code>", s_live_cwd);
+      int rlen = snprintf(resp, sizeof(resp), "📁 <b>Working Directory:</b> <code>%s</code>", esc_dir);
       if (rlen > 0) {
         append_to_screen(resp, (size_t)rlen);
         append_to_screen("\n", 1);
       }
       telegram_send_html(resp);
-      c2t_log_info("live_shell", "Changed directory to: '%s'", s_live_cwd);
+      c2t_log_info("live_shell", "Changed directory to: '%s'", current_working_dir);
     } else {
+      char esc_target[512] = {0};
+      escape_terminal_html(target, esc_target, sizeof(esc_target));
       char resp[512];
-      snprintf(resp, sizeof(resp), "⚠️ <b>Cannot access directory:</b> <code>%s</code>", target);
+      snprintf(resp, sizeof(resp), "⚠️ <b>Cannot access directory:</b> <code>%s</code>", esc_target);
       telegram_send_html(resp);
       c2t_log_warning("live_shell", "Failed to change directory to: '%s'", target);
     }
 #else
     if (target[0] == '/') {
       snprintf(resolved, sizeof(resolved), "%.1000s", target);
-    } else if (s_live_cwd[0]) {
-      snprintf(resolved, sizeof(resolved), "%.500s/%.500s", s_live_cwd, target);
+    } else if (current_working_dir[0]) {
+      snprintf(resolved, sizeof(resolved), "%.500s/%.500s", current_working_dir, target);
     } else {
       snprintf(resolved, sizeof(resolved), "%.1000s", target);
     }
 
     if (chdir(resolved) == 0) {
+      live_lock();
       if (getcwd(s_live_cwd, sizeof(s_live_cwd)) == nullptr) {
         snprintf(s_live_cwd, sizeof(s_live_cwd), "%.1000s", resolved);
       }
+      strncpy(current_working_dir, s_live_cwd, sizeof(current_working_dir) - 1);
+      live_unlock();
+
+      char esc_dir[1100] = {0};
+      escape_terminal_html(current_working_dir, esc_dir, sizeof(esc_dir));
       char resp[1200];
-      int rlen = snprintf(resp, sizeof(resp), "📁 <b>Working Directory:</b> <code>%s</code>", s_live_cwd);
+      int rlen = snprintf(resp, sizeof(resp), "📁 <b>Working Directory:</b> <code>%s</code>", esc_dir);
       if (rlen > 0) {
         append_to_screen(resp, (size_t)rlen);
         append_to_screen("\n", 1);
       }
       telegram_send_html(resp);
-      c2t_log_info("live_shell", "Changed directory to: '%s'", s_live_cwd);
+      c2t_log_info("live_shell", "Changed directory to: '%s'", current_working_dir);
     } else {
+      char esc_target[512] = {0};
+      escape_terminal_html(target, esc_target, sizeof(esc_target));
       char resp[512];
       snprintf(resp, sizeof(resp), "⚠️ <b>Cannot access directory:</b> <code>%s</code>\n<i>%s</i>",
-               target, strerror(errno));
+               esc_target, strerror(errno));
       telegram_send_html(resp);
       c2t_log_warning("live_shell", "Failed to change directory to: '%s': %s", target, strerror(errno));
     }
@@ -431,23 +522,25 @@ int c2t_shell_live_handle_input(const char *input_text) {
     char *msg_html = malloc(LIVE_MSG_CAPACITY);
     if (msg_html) {
       render_live_message(msg_html, LIVE_MSG_CAPACITY, 1);
-      if (s_live_message_id > 0) {
-        (void)telegram_edit_message_html(s_live_message_id, msg_html, s_live_keyboard_active);
+      live_lock();
+      int64_t mid = s_live_message_id;
+      live_unlock();
+      if (mid > 0) {
+        (void)telegram_edit_message_html(mid, msg_html, s_live_keyboard_active);
       }
       free(msg_html);
     }
-    (void)telegram_clear_message_draft(209);
     return 1;
   }
 
   /* Execute arbitrary shell command in live context */
   c2t_shell_options_t opts = {
-      .command = p,
-      .shell_type = s_active_shell_type,
+      .command = cmd_to_exec,
+      .shell_type = shell_type,
       .stdin_data = nullptr,
       .stdin_data_len = 0,
       .timeout_ms = 30000,
-      .working_dir = s_live_cwd[0] ? s_live_cwd : nullptr,
+      .working_dir = current_working_dir[0] ? current_working_dir : nullptr,
   };
 
   c2t_shell_result_t res;
@@ -456,47 +549,59 @@ int c2t_shell_live_handle_input(const char *input_text) {
 
   if (exec_ok) {
     c2t_log_info("live_shell", "Command '%s' completed in %llu ms (output: %llu bytes, exit: %d)",
-                 p, (unsigned long long)res.duration_ms, (unsigned long long)res.output_len, res.exit_code);
+                 cmd_to_exec, (unsigned long long)res.duration_ms, (unsigned long long)res.output_len, res.exit_code);
 
     if (res.output && *res.output) {
       strip_ansi_in_place(res.output);
       append_to_screen(res.output, strlen(res.output));
 
-      char *esc_out = malloc(3600);
+      char *esc_out = malloc(3200);
       char *reply_buf = malloc(LIVE_MSG_CAPACITY);
 
       if (esc_out && reply_buf) {
-        escape_terminal_html(res.output, esc_out, 3600);
+        size_t out_len = strlen(res.output);
+        if (out_len > 2500) {
+          /* Safely truncate preview for single message */
+          char trunc_note[] = "\n\n<i>[...output truncated - tap Log for full history]</i>";
+          escape_terminal_html(res.output, esc_out, 2400);
+          size_t curr = strlen(esc_out);
+          if (curr + sizeof(trunc_note) < 3150) {
+            strcat(esc_out, trunc_note);
+          }
+        } else {
+          escape_terminal_html(res.output, esc_out, 3150);
+        }
+
         if (esc_out[0]) {
           if (res.exit_code == 0) {
             snprintf(reply_buf, LIVE_MSG_CAPACITY,
                      "⚡ <b>$ %s</b>\n<pre><code class=\"language-shell\">%s</code></pre>",
-                     p, esc_out);
+                     esc_cmd, esc_out);
           } else {
             snprintf(reply_buf, LIVE_MSG_CAPACITY,
                      "⚡ <b>$ %s</b> (❌ Exit: %d)\n<pre><code class=\"language-shell\">%s</code></pre>",
-                     p, res.exit_code, esc_out);
+                     esc_cmd, res.exit_code, esc_out);
           }
         } else {
           snprintf(reply_buf, LIVE_MSG_CAPACITY,
-                   "⚡ <b>$ %s</b> (Exit: %d)\n<i>(Executed with no output)</i>", p, res.exit_code);
+                   "⚡ <b>$ %s</b> (Exit: %d)\n<i>(Executed with no output)</i>", esc_cmd, res.exit_code);
         }
         (void)telegram_send_html(reply_buf);
       }
       free(esc_out);
       free(reply_buf);
     } else {
-      char reply_buf[256];
+      char reply_buf[300];
       snprintf(reply_buf, sizeof(reply_buf),
-               "⚡ <b>$ %s</b> (Exit: %d)\n<i>(Executed with no output)</i>", p, res.exit_code);
+               "⚡ <b>$ %s</b> (Exit: %d)\n<i>(Executed with no output)</i>", esc_cmd, res.exit_code);
       (void)telegram_send_html(reply_buf);
     }
   } else {
-    c2t_log_warning("live_shell", "Command '%s' failed execution", p);
+    c2t_log_warning("live_shell", "Command '%s' failed execution", cmd_to_exec);
     char err_buf[512];
     snprintf(err_buf, sizeof(err_buf),
              "⚠️ <b>Command Execution Failed:</b> <code>%s</code>\n<i>Unable to spawn child process or command timed out.</i>",
-             p);
+             esc_cmd);
     telegram_send_html(err_buf);
   }
 
@@ -506,14 +611,16 @@ int c2t_shell_live_handle_input(const char *input_text) {
   char *msg_html = malloc(LIVE_MSG_CAPACITY);
   if (msg_html) {
     render_live_message(msg_html, LIVE_MSG_CAPACITY, c2t_shell_live_is_active());
-    if (s_live_message_id > 0) {
-      (void)telegram_edit_message_html(s_live_message_id, msg_html,
+    live_lock();
+    int64_t mid = s_live_message_id;
+    live_unlock();
+    if (mid > 0) {
+      (void)telegram_edit_message_html(mid, msg_html,
                                        c2t_shell_live_is_active() ? s_live_keyboard_active : s_live_keyboard_closed);
     }
     free(msg_html);
   }
 
-  (void)telegram_clear_message_draft(209);
   return 1;
 }
 
@@ -527,14 +634,27 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
 
   if (strcmp(callback_data, "sh_live_log") == 0) {
     (void)telegram_answer_callback_query(callback_query_id, "📥 Generating full terminal log...");
-    if (s_full_history && s_full_history_len > 0) {
+    live_lock();
+    char *hist_copy = nullptr;
+    size_t hist_len = s_full_history_len;
+    if (s_full_history && hist_len > 0) {
+      hist_copy = malloc(hist_len + 1);
+      if (hist_copy) {
+        memcpy(hist_copy, s_full_history, hist_len);
+        hist_copy[hist_len] = '\0';
+      }
+    }
+    live_unlock();
+
+    if (hist_copy && hist_len > 0) {
       char filename[64];
       snprintf(filename, sizeof(filename), "terminal_session_%llu.log",
                (unsigned long long)time(nullptr));
       c2t_log_info("live_shell", "Sending terminal session log (%llu bytes) as '%s'",
-                   (unsigned long long)s_full_history_len, filename);
-      return telegram_send_file(s_full_history, s_full_history_len, "text/plain",
-                                filename, nullptr);
+                   (unsigned long long)hist_len, filename);
+      int sent = telegram_send_file(hist_copy, hist_len, "text/plain", filename, nullptr);
+      free(hist_copy);
+      return sent;
     } else {
       return telegram_send_html("ℹ️ <i>No terminal output recorded yet.</i>");
     }
@@ -542,17 +662,22 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
 
   if (strcmp(callback_data, "sh_live_cls") == 0) {
     (void)telegram_answer_callback_query(callback_query_id, "🧹 Screen cleared");
+    live_lock();
     s_screen_buffer[0] = '\0';
     s_screen_buffer_len = 0;
     static const char banner[] = "=== Terminal Cleared ===\n";
-    append_to_screen(banner, sizeof(banner) - 1);
+    append_to_screen_locked(banner, sizeof(banner) - 1);
+    live_unlock();
     c2t_log_info("live_shell", "Terminal screen cleared by user");
 
     char *msg_html = malloc(LIVE_MSG_CAPACITY);
     if (msg_html) {
       render_live_message(msg_html, LIVE_MSG_CAPACITY, c2t_shell_live_is_active());
-      if (s_live_message_id > 0) {
-        (void)telegram_edit_message_html(s_live_message_id, msg_html,
+      live_lock();
+      int64_t mid = s_live_message_id;
+      live_unlock();
+      if (mid > 0) {
+        (void)telegram_edit_message_html(mid, msg_html,
                                          c2t_shell_live_is_active() ? s_live_keyboard_active : s_live_keyboard_closed);
       }
       free(msg_html);
@@ -569,8 +694,11 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
     char *msg_html = malloc(LIVE_MSG_CAPACITY);
     if (msg_html) {
       render_live_message(msg_html, LIVE_MSG_CAPACITY, c2t_shell_live_is_active());
-      if (s_live_message_id > 0) {
-        (void)telegram_edit_message_html(s_live_message_id, msg_html,
+      live_lock();
+      int64_t mid = s_live_message_id;
+      live_unlock();
+      if (mid > 0) {
+        (void)telegram_edit_message_html(mid, msg_html,
                                          c2t_shell_live_is_active() ? s_live_keyboard_active : s_live_keyboard_closed);
       }
       free(msg_html);
@@ -585,8 +713,11 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
     char *msg_html = malloc(LIVE_MSG_CAPACITY);
     if (msg_html) {
       render_live_message(msg_html, LIVE_MSG_CAPACITY, c2t_shell_live_is_active());
-      if (s_live_message_id > 0) {
-        (void)telegram_edit_message_html(s_live_message_id, msg_html,
+      live_lock();
+      int64_t mid = s_live_message_id;
+      live_unlock();
+      if (mid > 0) {
+        (void)telegram_edit_message_html(mid, msg_html,
                                          c2t_shell_live_is_active() ? s_live_keyboard_active : s_live_keyboard_closed);
       }
       free(msg_html);
@@ -611,25 +742,30 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
 }
 
 int c2t_shell_live_stop(void) {
+  live_lock();
+  size_t recorded = s_full_history_len;
+  int64_t mid = s_live_message_id;
+  live_unlock();
+
   c2t_log_info("live_shell", "Stopping live interactive mode (session recorded: %llu bytes)",
-               (unsigned long long)s_full_history_len);
+               (unsigned long long)recorded);
   atomic_store(&s_live_active, 0);
 
   char *msg_html = malloc(LIVE_MSG_CAPACITY);
   if (msg_html) {
     render_live_message(msg_html, LIVE_MSG_CAPACITY, 0);
-    if (s_live_message_id > 0) {
-      (void)telegram_edit_message_html(s_live_message_id, msg_html, s_live_keyboard_closed);
+    if (mid > 0) {
+      (void)telegram_edit_message_html(mid, msg_html, s_live_keyboard_closed);
     }
     free(msg_html);
   }
 
-  (void)telegram_clear_message_draft(209);
   return 1;
 }
 
 void c2t_shell_live_reset(void) {
   atomic_store(&s_live_active, 0);
+  live_lock();
   s_live_message_id = 0;
   c2t_secure_zero(s_screen_buffer, sizeof(s_screen_buffer));
   s_screen_buffer_len = 0;
@@ -641,6 +777,5 @@ void c2t_shell_live_reset(void) {
   }
   s_full_history_len = 0;
   s_full_history_cap = 0;
-
-  (void)telegram_clear_message_draft(209);
+  live_unlock();
 }

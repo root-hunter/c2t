@@ -1467,7 +1467,7 @@ int c2t_runtime_run_supervisor(int argc, char **argv) {
           time_t now = time(nullptr);
           if (cur_st.state == C2T_RUNTIME_RUNNING &&
               cur_st.last_heartbeat > 0 &&
-              now > (time_t)cur_st.last_heartbeat + 15) {
+              now > (time_t)cur_st.last_heartbeat + 60) {
             c2t_log_warning(
                 "supervisor",
                 "Worker daemon (PID %lu) unresponsive (heartbeat stale for %ld "
@@ -1493,7 +1493,7 @@ int c2t_runtime_run_supervisor(int argc, char **argv) {
           time_t now = time(nullptr);
           if (cur_st.state == C2T_RUNTIME_RUNNING &&
               cur_st.last_heartbeat > 0 &&
-              now > (time_t)cur_st.last_heartbeat + 15) {
+              now > (time_t)cur_st.last_heartbeat + 60) {
             c2t_log_warning(
                 "supervisor",
                 "Re-attached worker daemon (PID %lu) unresponsive (heartbeat "
@@ -1726,6 +1726,7 @@ static void *worker_watchdog_func(void *arg) {
   unsigned long last_supervisor_pid = 0;
 
   while (!c2t_runtime_stop_requested()) {
+    c2t_runtime_heartbeat();
     c2t_runtime_status_t status;
     if (state_read(&status) && status.supervisor_pid > 0) {
       last_supervisor_pid = status.supervisor_pid;
