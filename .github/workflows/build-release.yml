@@ -428,10 +428,11 @@ jobs:
           # If on a release tag, append VT report to GitHub Release notes asynchronously
           if [[ "${GITHUB_REF}" == refs/tags/* && -f virustotal-report.md ]]; then
             echo "[*] Updating GitHub Release notes with VirusTotal scan results..."
-            sleep 5
             current_notes="$(gh release view "${GITHUB_REF_NAME}" --json body --jq '.body' 2>/dev/null || true)"
             if [[ -n "${current_notes}" ]]; then
-              printf "%s\n\n---\n\n" "${current_notes}" > updated_notes.md
+              base_notes="${current_notes%%## 🛡️ VirusTotal Security Verification Report*}"
+              base_notes="$(printf "%s" "${base_notes}" | sed -e 's/[[:space:]]*$//' -e 's/---*$//' -e 's/[[:space:]]*$//')"
+              printf "%s\n\n---\n\n" "${base_notes}" > updated_notes.md
               cat virustotal-report.md >> updated_notes.md
               gh release edit "${GITHUB_REF_NAME}" --notes-file updated_notes.md || true
             fi
@@ -477,11 +478,17 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          args=(--verify-tag --generate-notes)
-          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
-            args+=(--prerelease)
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists. Updating release assets..."
+            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          else
+            echo "Creating release ${GITHUB_REF_NAME}..."
+            args=(--verify-tag --generate-notes)
+            if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+              args+=(--prerelease)
+            fi
+            gh release create "${GITHUB_REF_NAME}" dist/* "${args[@]}"
           fi
-          gh release create "${GITHUB_REF_NAME}" dist/* "${args[@]}"
 
       - name: Refresh GitHub Pages downloads
         shell: bash
