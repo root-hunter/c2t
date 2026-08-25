@@ -22,6 +22,7 @@
 #include <stdint.h>
 
 #define C2T_SHELL_DEFAULT_TIMEOUT_MS 30000U
+#define C2T_SHELL_SCRIPT_TIMEOUT_MS 60000U
 #define C2T_SHELL_MAX_OUTPUT_BYTES (1024U * 1024U)
 
 typedef struct {
@@ -37,6 +38,11 @@ typedef struct {
                                     c2t_shell_result_t *result,
                                     uint32_t timeout_ms);
 
+[[nodiscard]] int c2t_shell_execute_script_file(const char *script_path,
+                                                const char *args,
+                                                c2t_shell_result_t *result,
+                                                uint32_t timeout_ms);
+
 void c2t_shell_result_free(c2t_shell_result_t *result);
 
 [[nodiscard]] int c2t_shell_format_telegram(const char *command,
@@ -44,5 +50,12 @@ void c2t_shell_result_free(c2t_shell_result_t *result);
                                             char *output, size_t capacity);
 
 [[nodiscard]] int c2t_shell_run_and_send(const char *command);
+
+[[nodiscard]] int c2t_shell_run_script_file_and_send(const char *script_path,
+                                                     const char *args);
+
+[[nodiscard]] int c2t_shell_run_uploaded_script(const char *file_id,
+                                                const char *file_name,
+                                                const char *caption);
 
 #endif

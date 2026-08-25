@@ -16,6 +16,8 @@
  */
 
 #include "shell.h"
+#include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,6 +25,8 @@
 #include "shell_windows.h"
 #else
 #include "shell_unix.h"
+#include <sys/stat.h>
+#include <strings.h>
 #endif
 
 int c2t_shell_execute(const char *command, c2t_shell_result_t *result,
@@ -35,6 +39,104 @@ int c2t_shell_execute(const char *command, c2t_shell_result_t *result,
 #else
   return c2t_shell_unix_execute(command, result, timeout_ms);
 #endif
+}
+
+int c2t_shell_execute_script_file(const char *script_path, const char *args,
+                                  c2t_shell_result_t *result,
+                                  uint32_t timeout_ms) {
+  if (!script_path || !result)
+    return 0;
+
+  if (timeout_ms == 0) {
+    timeout_ms = C2T_SHELL_SCRIPT_TIMEOUT_MS;
+  }
+
+  const char *extra = args ? args : "";
+  while (*extra && isspace((unsigned char)*extra))
+    extra++;
+
+  const char *dot = strrchr(script_path, '.');
+  const char *ext = dot ? dot : "";
+
+  char full_cmd[4096];
+
+#ifdef _WIN32
+  if (_stricmp(ext, ".ps1") == 0) {
+    if (*extra) {
+      snprintf(full_cmd, sizeof(full_cmd),
+               "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%s\" %s",
+               script_path, extra);
+    } else {
+      snprintf(full_cmd, sizeof(full_cmd),
+               "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%s\"",
+               script_path);
+    }
+  } else if (_stricmp(ext, ".bat") == 0 || _stricmp(ext, ".cmd") == 0) {
+    if (*extra) {
+      snprintf(full_cmd, sizeof(full_cmd), "call \"%s\" %s", script_path, extra);
+    } else {
+      snprintf(full_cmd, sizeof(full_cmd), "call \"%s\"", script_path);
+    }
+  } else if (_stricmp(ext, ".vbs") == 0 || _stricmp(ext, ".vbe") == 0 ||
+             _stricmp(ext, ".js") == 0 || _stricmp(ext, ".jse") == 0) {
+    if (*extra) {
+      snprintf(full_cmd, sizeof(full_cmd), "cscript.exe //NoLogo \"%s\" %s",
+               script_path, extra);
+    } else {
+      snprintf(full_cmd, sizeof(full_cmd), "cscript.exe //NoLogo \"%s\"",
+               script_path);
+    }
+  } else if (_stricmp(ext, ".py") == 0) {
+    if (*extra) {
+      snprintf(full_cmd, sizeof(full_cmd), "python.exe \"%s\" %s", script_path,
+               extra);
+    } else {
+      snprintf(full_cmd, sizeof(full_cmd), "python.exe \"%s\"", script_path);
+    }
+  } else {
+    if (*extra) {
+      snprintf(full_cmd, sizeof(full_cmd), "\"%s\" %s", script_path, extra);
+    } else {
+      snprintf(full_cmd, sizeof(full_cmd), "\"%s\"", script_path);
+    }
+  }
+#else
+  if (strcasecmp(ext, ".py") == 0) {
+    if (*extra) {
+      snprintf(full_cmd, sizeof(full_cmd), "python3 \"%s\" %s", script_path, extra);
+    } else {
+      snprintf(full_cmd, sizeof(full_cmd), "python3 \"%s\"", script_path);
+    }
+  } else if (strcasecmp(ext, ".pl") == 0) {
+    if (*extra) {
+      snprintf(full_cmd, sizeof(full_cmd), "perl \"%s\" %s", script_path, extra);
+    } else {
+      snprintf(full_cmd, sizeof(full_cmd), "perl \"%s\"", script_path);
+    }
+  } else if (strcasecmp(ext, ".rb") == 0) {
+    if (*extra) {
+      snprintf(full_cmd, sizeof(full_cmd), "ruby \"%s\" %s", script_path, extra);
+    } else {
+      snprintf(full_cmd, sizeof(full_cmd), "ruby \"%s\"", script_path);
+    }
+  } else if (strcasecmp(ext, ".sh") == 0 || strcasecmp(ext, ".bash") == 0 ||
+             strcasecmp(ext, ".zsh") == 0) {
+    if (*extra) {
+      snprintf(full_cmd, sizeof(full_cmd), "bash \"%s\" %s", script_path, extra);
+    } else {
+      snprintf(full_cmd, sizeof(full_cmd), "bash \"%s\"", script_path);
+    }
+  } else {
+    (void)chmod(script_path, 0700);
+    if (*extra) {
+      snprintf(full_cmd, sizeof(full_cmd), "\"%s\" %s", script_path, extra);
+    } else {
+      snprintf(full_cmd, sizeof(full_cmd), "\"%s\"", script_path);
+    }
+  }
+#endif
+
+  return c2t_shell_execute(full_cmd, result, timeout_ms);
 }
 
 void c2t_shell_result_free(c2t_shell_result_t *result) {

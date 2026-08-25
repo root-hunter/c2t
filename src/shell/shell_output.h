@@ -27,4 +27,11 @@
 
 [[nodiscard]] int c2t_shell_run_and_send(const char *command);
 
+[[nodiscard]] int c2t_shell_run_script_file_and_send(const char *script_path,
+                                                     const char *args);
+
+[[nodiscard]] int c2t_shell_run_uploaded_script(const char *file_id,
+                                                const char *file_name,
+                                                const char *caption);
+
 #endif /* C2T_SHELL_OUTPUT_H */

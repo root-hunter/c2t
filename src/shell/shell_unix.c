@@ -72,7 +72,18 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
     /* Child process */
     close(pipefd[0]);
 
-    /* Redirect stdin from /dev/null */
+    /* Unblock all signals and reset signal handlers to defaults in child */
+    sigset_t sset;
+    sigemptyset(&sset);
+    (void)sigprocmask(SIG_SETMASK, &sset, nullptr);
+
+    signal(SIGPIPE, SIG_DFL);
+    signal(SIGINT, SIG_DFL);
+    signal(SIGTERM, SIG_DFL);
+    signal(SIGQUIT, SIG_DFL);
+    signal(SIGCHLD, SIG_DFL);
+
+    /* Redirect stdin from /dev/null so interactive prompts never block */
     int null_fd = open("/dev/null", O_RDONLY);
     if (null_fd >= 0) {
       (void)dup2(null_fd, STDIN_FILENO);
@@ -86,7 +97,7 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
     if (pipefd[1] > STDERR_FILENO)
       close(pipefd[1]);
 
-    /* Create new process group so we can kill child tree cleanly */
+    /* Create new process group so we can cleanly terminate the whole tree on timeout */
     (void)setpgid(0, 0);
 
     /* Execute shell command */
@@ -94,7 +105,7 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
     _exit(127);
   }
 
-  /* Parent process */
+  /* Parent process: close write end */
   close(pipefd[1]);
 
   /* Set read end to non-blocking */
@@ -128,8 +139,8 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
     }
 
     int remaining_ms = (int)((uint64_t)timeout_ms - elapsed);
-    if (remaining_ms > 100)
-      remaining_ms = 100;
+    if (remaining_ms > 50)
+      remaining_ms = 50;
 
     struct pollfd pfd = {
         .fd = pipefd[0],
@@ -145,32 +156,37 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
     }
 
     if (ret > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR))) {
-      char chunk[1024];
-      ssize_t n = read(pipefd[0], chunk, sizeof(chunk));
-      if (n > 0) {
-        if (total_read + (size_t)n < C2T_SHELL_MAX_OUTPUT_BYTES) {
-          if (total_read + (size_t)n + 1 > capacity) {
-            size_t new_cap = capacity * 2;
-            while (new_cap < total_read + (size_t)n + 1)
-              new_cap *= 2;
-            char *new_buf = realloc(buffer, new_cap);
-            if (new_buf) {
-              buffer = new_buf;
-              capacity = new_cap;
+      /* Drain all immediately available bytes non-blockingly */
+      while (1) {
+        char chunk[4096];
+        ssize_t n = read(pipefd[0], chunk, sizeof(chunk));
+        if (n > 0) {
+          if (total_read + (size_t)n < C2T_SHELL_MAX_OUTPUT_BYTES) {
+            if (total_read + (size_t)n + 1 > capacity) {
+              size_t new_cap = capacity * 2;
+              while (new_cap < total_read + (size_t)n + 1)
+                new_cap *= 2;
+              char *new_buf = realloc(buffer, new_cap);
+              if (new_buf) {
+                buffer = new_buf;
+                capacity = new_cap;
+              }
+            }
+            if (total_read + (size_t)n + 1 <= capacity) {
+              memcpy(buffer + total_read, chunk, (size_t)n);
+              total_read += (size_t)n;
+              buffer[total_read] = '\0';
             }
           }
-          if (total_read + (size_t)n + 1 <= capacity) {
-            memcpy(buffer + total_read, chunk, (size_t)n);
-            total_read += (size_t)n;
-            buffer[total_read] = '\0';
-          }
-        }
-      } else if (n == 0) {
-        /* EOF reached - child has finished writing and closed pipe */
-        pipe_open = 0;
-      } else {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+        } else if (n == 0) {
+          /* EOF reached - child has finished writing and closed pipe */
           pipe_open = 0;
+          break;
+        } else {
+          if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            pipe_open = 0;
+          }
+          break;
         }
       }
     }
@@ -181,10 +197,10 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
   if (timed_out) {
     result->timed_out = 1;
     result->exit_code = -1;
-    c2t_log_warning("shell", "Command '%s' timed out after %u ms, killing pid %d",
+    c2t_log_warning("shell", "Command '%s' timed out after %u ms, killing process group %d",
                     command, timeout_ms, pid);
     (void)kill(-pid, SIGTERM);
-    usleep(50000);
+    usleep(25000);
     int status = 0;
     if (waitpid(pid, &status, WNOHANG) == 0) {
       (void)kill(-pid, SIGKILL);
@@ -205,6 +221,7 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
   result->duration_ms = get_monotonic_ms() - start_time;
   result->output = buffer;
   result->output_len = total_read;
+  buffer[total_read] = '\0';
 
   return 1;
 }

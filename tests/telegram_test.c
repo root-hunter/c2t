@@ -1983,6 +1983,35 @@ int main(void) {
       return fail("c2t_shell_format_telegram failed to escape raw HTML tags");
     if (!strstr(esc_buf, "&lt;script&gt;") || !strstr(esc_buf, "&amp;"))
       return fail("c2t_shell_format_telegram missing escaped HTML entities");
+
+    /* Test c2t_shell_execute_script_file */
+#ifdef _WIN32
+    const char *test_script = "c2t_test_script.bat";
+    FILE *sf = fopen(test_script, "w");
+    if (sf) {
+      fprintf(sf, "@echo off\necho script_result_%%1\n");
+      fclose(sf);
+    }
+#else
+    const char *test_script = "/tmp/c2t_test_script.sh";
+    FILE *sf = fopen(test_script, "w");
+    if (sf) {
+      fprintf(sf, "#!/bin/sh\necho script_result_$1\n");
+      fclose(sf);
+    }
+#endif
+    c2t_shell_result_t script_res;
+    if (!c2t_shell_execute_script_file(test_script, "hello_c2t", &script_res, 5000)) {
+      (void)remove(test_script);
+      return fail("c2t_shell_execute_script_file failed");
+    }
+    (void)remove(test_script);
+    if (script_res.exit_code != 0 || !script_res.output ||
+        !strstr(script_res.output, "script_result_hello_c2t")) {
+      c2t_shell_result_free(&script_res);
+      return fail("c2t_shell_execute_script_file missing expected argument output");
+    }
+    c2t_shell_result_free(&script_res);
   }
 
   c2t_crypto_cleanup();

