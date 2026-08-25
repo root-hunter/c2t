@@ -444,12 +444,27 @@ static size_t utf8_chunk_length(const char *text, size_t length,
   return offset;
 }
 
-static int send_fields(const char *method, const form_field_t *fields,
-                       size_t field_count) {
-  if (!method || !fields || field_count > 4 || !chat_id)
+static int parse_json_int64_value(const char *start, const char *end,
+                                  int64_t *value_out);
+
+static int send_fields_response(const char *method, const form_field_t *fields,
+                                size_t field_count, char *response_out,
+                                size_t response_capacity) {
+  if (!method || !fields || field_count > 10 || !bot_token)
     return 0;
 
-  size_t chat_len = strlen(chat_id);
+  int skip_chat_id = 0;
+  for (size_t index = 0; index < field_count; ++index) {
+    if (fields[index].name && strcmp(fields[index].name, "callback_query_id") == 0) {
+      skip_chat_id = 1;
+      break;
+    }
+  }
+
+  if (!skip_chat_id && !chat_id)
+    return 0;
+
+  size_t chat_len = (!skip_chat_id && chat_id) ? strlen(chat_id) : 0;
   if (chat_len > (SIZE_MAX - 9U) / 3U)
     return 0;
   size_t max_body_length = 8U + chat_len * 3U + 1U;
@@ -477,21 +492,25 @@ static int send_fields(const char *method, const form_field_t *fields,
   static const char hexadecimal[] = "0123456789ABCDEF";
   size_t offset = 0;
 
-  memcpy(body + offset, "chat_id=", 8);
-  offset += 8;
-  for (size_t i = 0; i < chat_len; ++i) {
-    unsigned char c = (unsigned char)chat_id[i];
-    if (is_unreserved(c)) {
-      body[offset++] = (char)c;
-    } else {
-      body[offset++] = '%';
-      body[offset++] = hexadecimal[c >> 4];
-      body[offset++] = hexadecimal[c & 0x0f];
+  if (!skip_chat_id && chat_id) {
+    memcpy(body + offset, "chat_id=", 8);
+    offset += 8;
+    for (size_t i = 0; i < chat_len; ++i) {
+      unsigned char c = (unsigned char)chat_id[i];
+      if (is_unreserved(c)) {
+        body[offset++] = (char)c;
+      } else {
+        body[offset++] = '%';
+        body[offset++] = hexadecimal[c >> 4];
+        body[offset++] = hexadecimal[c & 0x0f];
+      }
     }
   }
 
   for (size_t index = 0; index < field_count; ++index) {
-    body[offset++] = '&';
+    if (offset > 0) {
+      body[offset++] = '&';
+    }
     size_t nlen = strlen(fields[index].name);
     memcpy(body + offset, fields[index].name, nlen);
     offset += nlen;
@@ -511,8 +530,15 @@ static int send_fields(const char *method, const form_field_t *fields,
   }
   body[offset] = '\0';
 
-  int result = telegram_http_post(
-      bot_token, method, "application/x-www-form-urlencoded", body, offset);
+  int result = 0;
+  if (response_out && response_capacity > 0) {
+    result = telegram_http_post_response(
+        bot_token, method, "application/x-www-form-urlencoded", body, offset,
+        response_out, response_capacity);
+  } else {
+    result = telegram_http_post(
+        bot_token, method, "application/x-www-form-urlencoded", body, offset);
+  }
 
   c2t_secure_zero(body, offset);
   if (body != stack_body) {
@@ -520,6 +546,11 @@ static int send_fields(const char *method, const form_field_t *fields,
     free(body);
   }
   return result;
+}
+
+static int send_fields(const char *method, const form_field_t *fields,
+                       size_t field_count) {
+  return send_fields_response(method, fields, field_count, nullptr, 0);
 }
 
 static int send_form(const char *text, size_t length) {
@@ -1525,6 +1556,68 @@ int telegram_clear_message_draft(int64_t draft_id) {
   return send_fields("sendMessageDraft", fields, 2);
 }
 
+int telegram_send_html_keyboard_get_id(const char *html_text,
+                                       const char *reply_markup,
+                                       int64_t *out_msg_id) {
+  if (!initialized || !html_text || !*html_text || !chat_id || !bot_token)
+    return 0;
+
+  form_field_t fields[3];
+  size_t fc = 0;
+  fields[fc++] = (form_field_t){"text", html_text, strlen(html_text)};
+  fields[fc++] = (form_field_t){"parse_mode", "HTML", 4};
+  if (reply_markup && *reply_markup) {
+    fields[fc++] = (form_field_t){"reply_markup", reply_markup, strlen(reply_markup)};
+  }
+
+  char resp_buf[2048] = {};
+  int ok = send_fields_response("sendMessage", fields, fc, resp_buf, sizeof(resp_buf));
+  if (ok && out_msg_id) {
+    *out_msg_id = 0;
+    const char *p = strstr(resp_buf, "\"message_id\"");
+    if (p) {
+      p += 12;
+      while (*p == ' ' || *p == ':') p++;
+      (void)parse_json_int64_value(p, resp_buf + strlen(resp_buf), out_msg_id);
+    }
+  }
+  return ok;
+}
+
+int telegram_edit_message_html(int64_t message_id, const char *html_text,
+                               const char *reply_markup) {
+  if (!initialized || !html_text || !*html_text || message_id <= 0 || !chat_id || !bot_token)
+    return 0;
+
+  char msg_id_str[32];
+  snprintf(msg_id_str, sizeof(msg_id_str), "%lld", (long long)message_id);
+
+  form_field_t fields[4];
+  size_t fc = 0;
+  fields[fc++] = (form_field_t){"message_id", msg_id_str, strlen(msg_id_str)};
+  fields[fc++] = (form_field_t){"text", html_text, strlen(html_text)};
+  fields[fc++] = (form_field_t){"parse_mode", "HTML", 4};
+  if (reply_markup && *reply_markup) {
+    fields[fc++] = (form_field_t){"reply_markup", reply_markup, strlen(reply_markup)};
+  }
+
+  return send_fields("editMessageText", fields, fc);
+}
+
+int telegram_answer_callback_query(const char *callback_query_id,
+                                   const char *text) {
+  if (!initialized || !callback_query_id || !*callback_query_id || !bot_token)
+    return 0;
+
+  form_field_t fields[2];
+  size_t fc = 0;
+  fields[fc++] = (form_field_t){"callback_query_id", callback_query_id, strlen(callback_query_id)};
+  if (text && *text) {
+    fields[fc++] = (form_field_t){"text", text, strlen(text)};
+  }
+  return send_fields("answerCallbackQuery", fields, fc);
+}
+
 static const char *find_in_range(const char *start, const char *end,
                                  const char *needle, size_t needle_length) {
   if (!start || !end || start >= end || !needle || needle_length == 0 ||
@@ -1939,17 +2032,31 @@ int telegram_parse_updates_response(const char *response,
       }
     }
 
+    char item_cb_id[128] = {};
+    char item_cb_data[256] = {};
+    const char *cb_pos = find_in_range(curr, block_end, "\"callback_query\"", 16U);
+    if (cb_pos) {
+      parse_json_field_in_range(cb_pos, block_end, "id", item_cb_id, sizeof(item_cb_id));
+      parse_json_field_in_range(cb_pos, block_end, "data", item_cb_data, sizeof(item_cb_data));
+      if (!item_chat_id[0]) {
+        parse_json_chat_id_in_range(cb_pos, block_end, item_chat_id, sizeof(item_chat_id));
+      }
+    }
+
     if (callback) {
-      telegram_incoming_update_t update = {.update_id = uid,
-                                           .date = (int64_t)item_date,
-                                           .chat_id = item_chat_id,
-                                           .username = item_username,
-                                           .text = item_text,
-                                           .caption = item_caption,
-                                           .file_id = item_file_id,
-                                           .file_name = item_file_name,
-                                           .file_size = (size_t)item_file_size,
-                                           .mime_type = item_mime_type};
+      telegram_incoming_update_t update = {
+          .update_id = uid,
+          .date = (int64_t)item_date,
+          .chat_id = item_chat_id,
+          .username = item_username,
+          .text = item_text,
+          .caption = item_caption,
+          .file_id = item_file_id,
+          .file_name = item_file_name,
+          .file_size = (size_t)item_file_size,
+          .mime_type = item_mime_type,
+          .callback_query_id = item_cb_id[0] ? item_cb_id : nullptr,
+          .callback_data = item_cb_data[0] ? item_cb_data : nullptr};
       callback(&update, user_data);
     }
     updates_found++;

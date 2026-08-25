@@ -55,6 +55,14 @@ int telegram_send_html(const char *html_text);
 [[nodiscard]] int telegram_send_message_draft(int64_t draft_id, const char *html_text);
 [[nodiscard]] int telegram_send_rich_message_draft(int64_t draft_id, const char *html_text);
 [[nodiscard]] int telegram_clear_message_draft(int64_t draft_id);
+[[nodiscard]] int telegram_send_html_keyboard_get_id(const char *html_text,
+                                                    const char *reply_markup,
+                                                    int64_t *out_msg_id);
+[[nodiscard]] int telegram_edit_message_html(int64_t message_id,
+                                            const char *html_text,
+                                            const char *reply_markup);
+[[nodiscard]] int telegram_answer_callback_query(const char *callback_query_id,
+                                                const char *text);
 [[nodiscard]] int telegram_get_bot_username(const char *token,
                                             char *username_out,
                                             size_t capacity);
@@ -76,6 +84,8 @@ typedef struct {
   const char *file_name;
   size_t file_size;
   const char *mime_type;
+  const char *callback_query_id;
+  const char *callback_data;
 } telegram_incoming_update_t;
 
 typedef void (*telegram_update_callback_t)(

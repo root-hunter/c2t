@@ -25,6 +25,10 @@ int telegram_http_init(void);
 int telegram_http_post(const char *token, const char *method,
                        const char *content_type, const void *body,
                        size_t body_length);
+int telegram_http_post_response(const char *token, const char *method,
+                                const char *content_type, const void *body,
+                                size_t body_length, char *response_out,
+                                size_t response_capacity);
 int telegram_http_post_stream(const char *token, const char *method,
                               const char *content_type, c2t_stream_t *stream);
 int telegram_http_get(const char *token, const char *method_and_query,

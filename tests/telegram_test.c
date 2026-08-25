@@ -32,6 +32,7 @@
 #include "screenshot/screenshot_output.h"
 #include "shell/shell.h"
 #include "shell/shell_output.h"
+#include "shell/shell_live.h"
 #include "telegram/telegram.h"
 #include "telegram/telegram_listener.h"
 #include "telegram/telegram_platform.h"
@@ -148,6 +149,22 @@ int telegram_http_post([[maybe_unused]] const char *token, const char *method,
   if (!capture_body(body, body_length))
     return 0;
   return http_post_result;
+}
+
+int telegram_http_post_response([[maybe_unused]] const char *token,
+                                const char *method, const char *content_type,
+                                const void *body, size_t body_length,
+                                char *response_out, size_t response_capacity) {
+  int ok = telegram_http_post(token, method, content_type, body, body_length);
+  if (ok && response_out && response_capacity > 0) {
+    if (strcmp(method, "sendMessage") == 0) {
+      snprintf(response_out, response_capacity,
+               "{\"ok\":true,\"result\":{\"message_id\":998877,\"chat\":{\"id\":-12345}}}");
+    } else {
+      snprintf(response_out, response_capacity, "{\"ok\":true,\"result\":true}");
+    }
+  }
+  return ok;
 }
 
 int telegram_http_post_stream([[maybe_unused]] const char *token,
@@ -1429,6 +1446,8 @@ int main(void) {
 
   telegram_cleanup();
   free(last_body);
+  last_body = nullptr;
+  last_body_length = 0;
 
   /* Crypto & Secure Memory unit tests */
   if (!c2t_crypto_init())
@@ -2057,6 +2076,46 @@ int main(void) {
 
     if (!c2t_shell_session_get_info(&sess_info) || sess_info.is_active)
       return fail("c2t_shell_session_get_info reported active after stop");
+
+    /* Test Live Interactive Shell Console Mode */
+    setenv("TELEGRAM_ENABLED", "1", 1);
+    setenv("TELEGRAM_BOT_TOKEN", "123:test-token", 1);
+    setenv("TELEGRAM_CHAT_ID", "-12345", 1);
+    c2t_config_load_environment();
+    if (!telegram_init())
+      return fail("telegram_init for live shell test failed");
+
+    c2t_shell_live_reset();
+    if (!c2t_shell_live_start(nullptr))
+      return fail("c2t_shell_live_start failed");
+    if (!c2t_shell_live_is_active())
+      return fail("c2t_shell_live_is_active returned 0 after start");
+
+    if (!c2t_shell_live_handle_input("echo live_terminal_ok"))
+      return fail("c2t_shell_live_handle_input failed");
+
+    if (!c2t_shell_live_handle_callback("cb_1", "sh_live_refresh"))
+      return fail("c2t_shell_live_handle_callback refresh failed");
+
+    if (!c2t_shell_live_handle_callback("cb_2", "sh_live_cls"))
+      return fail("c2t_shell_live_handle_callback cls failed");
+
+    if (!c2t_shell_live_handle_callback("cb_3", "sh_live_ctrlc"))
+      return fail("c2t_shell_live_handle_callback ctrlc failed");
+
+    if (!c2t_shell_live_handle_callback("cb_4", "sh_live_exit"))
+      return fail("c2t_shell_live_handle_callback exit failed");
+
+    if (c2t_shell_live_is_active())
+      return fail("c2t_shell_live_is_active still true after exit");
+
+    c2t_shell_live_reset();
+    char live_stop_msg[256];
+    (void)c2t_shell_session_stop(live_stop_msg, sizeof(live_stop_msg));
+    telegram_cleanup();
+    free(last_body);
+    last_body = nullptr;
+    last_body_length = 0;
   }
 
   c2t_crypto_cleanup();
