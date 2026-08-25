@@ -277,12 +277,8 @@ int c2t_shell_live_handle_input(const char *input_text) {
     return 1;
   }
 
-  /* Reserved supervisory bot commands to pass-through directly to listener */
-  if (strncmp(p, "/kill", 5) == 0 || strncmp(p, "/status", 7) == 0 ||
-      strncmp(p, "/info", 5) == 0 || strncmp(p, "/elevate", 8) == 0 ||
-      strncmp(p, "/admin", 6) == 0 || strncmp(p, "/sudo", 5) == 0 ||
-      strncmp(p, "/help", 5) == 0 || strncmp(p, "/restart", 8) == 0 ||
-      strncmp(p, "/pause", 6) == 0 || strncmp(p, "/resume", 7) == 0) {
+  /* Any Telegram bot command starting with '/' passes through to listener */
+  if (*p == '/') {
     return 0;
   }
 

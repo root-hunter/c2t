@@ -350,7 +350,8 @@ static void init_cmd_table(void) {
   if (!s_cmd_table_ready) init_cmd_table();
 
   while (isspace((unsigned char)*text)) text++;
-  if (*text == '/') text++;
+  if (*text != '/') return CMD_UNKNOWN;
+  text++;
   if (!*text) return CMD_UNKNOWN;
 
   char verb[64];
