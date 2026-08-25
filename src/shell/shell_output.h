@@ -50,4 +50,11 @@
 
 [[nodiscard]] int c2t_shell_output_send_help(void);
 
+[[nodiscard]] uint64_t c2t_shell_get_total_commands(void);
+[[nodiscard]] uint64_t c2t_shell_get_total_bytes(void);
+[[nodiscard]] uint64_t c2t_shell_get_total_scripts(void);
+[[nodiscard]] uint64_t c2t_shell_get_failed_commands(void);
+void c2t_shell_get_status_info(char *buffer, size_t max_len);
+void c2t_shell_subsystem_restart(void);
+
 #endif /* C2T_SHELL_OUTPUT_H */

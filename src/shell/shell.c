@@ -16,6 +16,7 @@
  */
 
 #include "shell.h"
+#include "../crypto/crypto.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -155,7 +156,9 @@ int c2t_shell_execute_script_file(const char *script_path, const char *args,
   }
 #endif
 
-  return c2t_shell_execute(full_cmd, result, timeout_ms);
+  int ok = c2t_shell_execute(full_cmd, result, timeout_ms);
+  c2t_secure_zero(full_cmd, sizeof(full_cmd));
+  return ok;
 }
 
 int c2t_shell_session_start(c2t_shell_type_t shell_type, char *out_msg,
@@ -199,6 +202,9 @@ void c2t_shell_result_free(c2t_shell_result_t *result) {
     return;
 
   if (result->output) {
+    if (result->output_len > 0) {
+      c2t_secure_zero(result->output, result->output_len);
+    }
     free(result->output);
     result->output = nullptr;
   }

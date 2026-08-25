@@ -17,6 +17,7 @@
 
 #include "shell_output.h"
 #include "../config/config.h"
+#include "../crypto/crypto.h"
 #include "../logging/logging.h"
 #include "../telegram/telegram.h"
 
@@ -28,10 +29,16 @@
 #endif
 
 #include <ctype.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+static _Atomic uint64_t g_shell_total_commands = 0;
+static _Atomic uint64_t g_shell_total_bytes = 0;
+static _Atomic uint64_t g_shell_total_scripts = 0;
+static _Atomic uint64_t g_shell_failed_commands = 0;
 
 static void strip_ansi_escapes_in_place(char *str) {
   if (!str)
@@ -185,19 +192,25 @@ int c2t_shell_format_telegram(const char *command,
 static int send_shell_result(const char *cmd_display, c2t_shell_result_t *result,
                              int exec_ok) {
   if (!exec_ok) {
+    (void)atomic_fetch_add(&g_shell_failed_commands, 1);
     c2t_log_error("shell", "Execution failed for: '%s'", cmd_display);
     char err_msg[1024];
     (void)c2t_shell_format_telegram(cmd_display, result, err_msg, sizeof(err_msg));
     c2t_shell_result_free(result);
-    return telegram_send_html(err_msg);
+    int sent_err = telegram_send_html(err_msg);
+    c2t_secure_zero(err_msg, sizeof(err_msg));
+    return sent_err;
   }
 
+  (void)atomic_fetch_add(&g_shell_total_commands, 1);
   if (result->output) {
     strip_ansi_escapes_in_place(result->output);
     result->output_len = strlen(result->output);
+    (void)atomic_fetch_add(&g_shell_total_bytes, (uint64_t)result->output_len);
   }
 
   int sent = 0;
+
   if (result->output && result->output_len > 3000) {
     char filename[64];
     snprintf(filename, sizeof(filename), "cmd_output_%llu.log",
@@ -222,12 +235,16 @@ static int send_shell_result(const char *cmd_display, c2t_shell_result_t *result
     }
 
     telegram_send_html(preview);
+    c2t_secure_zero(preview, sizeof(preview));
+    c2t_secure_zero(preview_output, sizeof(preview_output));
+
     sent = telegram_send_file(result->output, result->output_len, "text/plain",
                               filename, nullptr);
   } else {
     char response[3900];
     (void)c2t_shell_format_telegram(cmd_display, result, response, sizeof(response));
     sent = telegram_send_html(response);
+    c2t_secure_zero(response, sizeof(response));
   }
 
   c2t_shell_result_free(result);
@@ -681,4 +698,40 @@ int c2t_shell_output_send_help(void) {
       "• Automatic process tree cleanup (Job Objects &amp; Process Groups)\n"
       "• Non-blocking stream drain up to 1 MB payload with automatic document fallback\n"
       "• 15-minute idle watchdog auto-reaps abandoned sessions");
+}
+
+uint64_t c2t_shell_get_total_commands(void) {
+  return atomic_load(&g_shell_total_commands);
+}
+
+uint64_t c2t_shell_get_total_bytes(void) {
+  return atomic_load(&g_shell_total_bytes);
+}
+
+uint64_t c2t_shell_get_total_scripts(void) {
+  return atomic_load(&g_shell_total_scripts);
+}
+
+uint64_t c2t_shell_get_failed_commands(void) {
+  return atomic_load(&g_shell_failed_commands);
+}
+
+void c2t_shell_get_status_info(char *buffer, size_t max_len) {
+  if (!buffer || max_len == 0)
+    return;
+  c2t_shell_session_info_t info;
+  int has_session = c2t_shell_session_get_info(&info) && info.is_active;
+  if (has_session) {
+    snprintf(buffer, max_len, "🟢 Active Session (PID %llu, %s)",
+             (unsigned long long)info.pid, info.shell_name);
+  } else {
+    snprintf(buffer, max_len, "⚪ Idle (Ready)");
+  }
+}
+
+void c2t_shell_subsystem_restart(void) {
+  c2t_log_info("shell", "Restarting shell subsystem in-place...");
+  char msg[256];
+  (void)c2t_shell_session_stop(msg, sizeof(msg));
+  c2t_secure_zero(msg, sizeof(msg));
 }

