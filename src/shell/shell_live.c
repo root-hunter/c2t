@@ -31,9 +31,7 @@
 #include <time.h>
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <direct.h>
+#include "../win32/win32_api.h"
 #define strcasecmp _stricmp
 #else
 #include <pthread.h>
@@ -55,15 +53,17 @@ static BOOL CALLBACK live_init_lock(PINIT_ONCE once, PVOID parameter,
   (void)once;
   (void)parameter;
   (void)context;
-  InitializeCriticalSection(&s_live_cs);
+  g_c2t_win32.InitializeCriticalSection(&s_live_cs);
   return TRUE;
 }
 static void live_lock(void) {
-  (void)InitOnceExecuteOnce(&s_live_once, live_init_lock, NULL, NULL);
-  EnterCriticalSection(&s_live_cs);
+  c2t_win32_api_init();
+  (void)g_c2t_win32.InitOnceExecuteOnce(&s_live_once, live_init_lock, NULL,
+                                        NULL);
+  g_c2t_win32.EnterCriticalSection(&s_live_cs);
 }
 static void live_unlock(void) {
-  LeaveCriticalSection(&s_live_cs);
+  g_c2t_win32.LeaveCriticalSection(&s_live_cs);
 }
 #else
 static pthread_mutex_t s_live_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -342,7 +342,10 @@ int c2t_shell_live_start(const char *shell_name) {
 
 #ifdef _WIN32
   if (s_live_cwd[0] == '\0') {
-    GetCurrentDirectoryA(sizeof(s_live_cwd), s_live_cwd);
+    if (!g_c2t_win32.GetCurrentDirectoryA(
+            (DWORD)sizeof(s_live_cwd), s_live_cwd)) {
+      snprintf(s_live_cwd, sizeof(s_live_cwd), ".");
+    }
   }
 #else
   if (s_live_cwd[0] == '\0') {
@@ -530,10 +533,10 @@ int c2t_shell_live_handle_input(const char *input_text) {
     }
 
     char canonical[1024] = {0};
-    DWORD canonical_len = GetFullPathNameA(resolved, (DWORD)sizeof(canonical),
-                                           canonical, NULL);
+    DWORD canonical_len = g_c2t_win32.GetFullPathNameA(
+        resolved, (DWORD)sizeof(canonical), canonical, NULL);
     DWORD attrs = canonical_len > 0 && canonical_len < sizeof(canonical)
-                      ? GetFileAttributesA(canonical)
+                      ? g_c2t_win32.GetFileAttributesA(canonical)
                       : INVALID_FILE_ATTRIBUTES;
     if (attrs != INVALID_FILE_ATTRIBUTES &&
         (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) {

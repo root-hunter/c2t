@@ -161,6 +161,13 @@ typedef HANDLE(WINAPI *pfn_CreateFileW)(
     LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
     LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
     DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+typedef DWORD(WINAPI *pfn_GetCurrentDirectoryA)(DWORD nBufferLength,
+                                                LPSTR lpBuffer);
+typedef DWORD(WINAPI *pfn_GetFullPathNameA)(LPCSTR lpFileName,
+                                            DWORD nBufferLength,
+                                            LPSTR lpBuffer,
+                                            LPSTR *lpFilePart);
+typedef DWORD(WINAPI *pfn_GetFileAttributesA)(LPCSTR lpFileName);
 typedef DWORD(WINAPI *pfn_GetFileAttributesW)(LPCWSTR lpFileName);
 typedef BOOL(WINAPI *pfn_ReadFile)(HANDLE hFile, LPVOID lpBuffer,
                                     DWORD nNumberOfBytesToRead,
@@ -229,6 +236,10 @@ typedef VOID(WINAPI *pfn_LeaveCriticalSection)(
     LPCRITICAL_SECTION lpCriticalSection);
 typedef VOID(WINAPI *pfn_DeleteCriticalSection)(
     LPCRITICAL_SECTION lpCriticalSection);
+typedef BOOL(WINAPI *pfn_InitOnceExecuteOnce)(PINIT_ONCE InitOnce,
+                                              PINIT_ONCE_FN InitFn,
+                                              PVOID Parameter,
+                                              LPVOID *Context);
 typedef HANDLE(WINAPI *pfn_CreateThread)(
     LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize,
     LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter,
@@ -509,6 +520,9 @@ typedef struct {
   pfn_CreateDirectoryA CreateDirectoryA;
   pfn_CreateFileA CreateFileA;
   pfn_CreateFileW CreateFileW;
+  pfn_GetCurrentDirectoryA GetCurrentDirectoryA;
+  pfn_GetFullPathNameA GetFullPathNameA;
+  pfn_GetFileAttributesA GetFileAttributesA;
   pfn_GetFileAttributesW GetFileAttributesW;
   pfn_ReadFile ReadFile;
   pfn_WriteFile WriteFile;
@@ -545,6 +559,7 @@ typedef struct {
   pfn_EnterCriticalSection EnterCriticalSection;
   pfn_LeaveCriticalSection LeaveCriticalSection;
   pfn_DeleteCriticalSection DeleteCriticalSection;
+  pfn_InitOnceExecuteOnce InitOnceExecuteOnce;
   pfn_CreateThread CreateThread;
   pfn_GetCurrentThreadId GetCurrentThreadId;
   pfn_GetLocaleInfoA GetLocaleInfoA;

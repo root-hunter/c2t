@@ -202,6 +202,9 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_CreateDirectoryA[] = {25, 40, 63, 59, 46, 63, 30, 51, 40, 63, 57, 46, 53, 40, 35, 27};
   static const unsigned char enc_CreateFileA[] = {25, 40, 63, 59, 46, 63, 28, 51, 54, 63, 27};
   static const unsigned char enc_CreateFileW[] = {25, 40, 63, 59, 46, 63, 28, 51, 54, 63, 13};
+  static const unsigned char enc_GetCurrentDirectoryA[] = {29, 63, 46, 25, 47, 40, 40, 63, 52, 46, 30, 51, 40, 63, 57, 46, 53, 40, 35, 27};
+  static const unsigned char enc_GetFullPathNameA[] = {29, 63, 46, 28, 47, 54, 54, 10, 59, 46, 50, 20, 59, 55, 63, 27};
+  static const unsigned char enc_GetFileAttributesA[] = {29, 63, 46, 28, 51, 54, 63, 27, 46, 46, 40, 51, 56, 47, 46, 63, 41, 27};
   static const unsigned char enc_GetFileAttributesW[] = {29, 63, 46, 28, 51, 54, 63, 27, 46, 46, 40, 51, 56, 47, 46, 63, 41, 13};
   static const unsigned char enc_ReadFile[] = {8, 63, 59, 62, 28, 51, 54, 63};
   static const unsigned char enc_WriteFile[] = {13, 40, 51, 46, 63, 28, 51, 54, 63};
@@ -238,6 +241,7 @@ void c2t_win32_api_init(void) {
   static const unsigned char enc_EnterCriticalSection[] = {31, 52, 46, 63, 40, 25, 40, 51, 46, 51, 57, 59, 54, 9, 63, 57, 46, 51, 53, 52};
   static const unsigned char enc_LeaveCriticalSection[] = {22, 63, 59, 44, 63, 25, 40, 51, 46, 51, 57, 59, 54, 9, 63, 57, 46, 51, 53, 52};
   static const unsigned char enc_DeleteCriticalSection[] = {30, 63, 54, 63, 46, 63, 25, 40, 51, 46, 51, 57, 59, 54, 9, 63, 57, 46, 51, 53, 52};
+  static const unsigned char enc_InitOnceExecuteOnce[] = {19, 52, 51, 46, 21, 52, 57, 63, 31, 34, 63, 57, 47, 46, 63, 21, 52, 57, 63};
   static const unsigned char enc_CreateThread[] = {25, 40, 63, 59, 46, 63, 14, 50, 40, 63, 59, 62};
   static const unsigned char enc_GetCurrentThreadId[] = {29, 63, 46, 25, 47, 40, 40, 63, 52, 46, 14, 50, 40, 63, 59, 62, 19, 62};
   static const unsigned char enc_GetLocaleInfoA[] = {29, 63, 46, 22, 53, 57, 59, 54, 63, 19, 52, 60, 53, 27};
@@ -459,6 +463,9 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, CreateDirectoryA, enc_CreateDirectoryA);
   LOAD_API(hKernel32, CreateFileA, enc_CreateFileA);
   LOAD_API(hKernel32, CreateFileW, enc_CreateFileW);
+  LOAD_API(hKernel32, GetCurrentDirectoryA, enc_GetCurrentDirectoryA);
+  LOAD_API(hKernel32, GetFullPathNameA, enc_GetFullPathNameA);
+  LOAD_API(hKernel32, GetFileAttributesA, enc_GetFileAttributesA);
   LOAD_API(hKernel32, GetFileAttributesW, enc_GetFileAttributesW);
   LOAD_API(hKernel32, ReadFile, enc_ReadFile);
   LOAD_API(hKernel32, WriteFile, enc_WriteFile);
@@ -495,6 +502,7 @@ void c2t_win32_api_init(void) {
   LOAD_API(hKernel32, EnterCriticalSection, enc_EnterCriticalSection);
   LOAD_API(hKernel32, LeaveCriticalSection, enc_LeaveCriticalSection);
   LOAD_API(hKernel32, DeleteCriticalSection, enc_DeleteCriticalSection);
+  LOAD_API(hKernel32, InitOnceExecuteOnce, enc_InitOnceExecuteOnce);
   LOAD_API(hKernel32, CreateThread, enc_CreateThread);
   LOAD_API(hKernel32, GetCurrentThreadId, enc_GetCurrentThreadId);
   LOAD_API(hKernel32, GetLocaleInfoA, enc_GetLocaleInfoA);
