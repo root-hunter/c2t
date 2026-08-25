@@ -23,11 +23,20 @@
 #include "../telegram/telegram.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <direct.h>
+#else
+#include <unistd.h>
+#endif
 
 #define LIVE_SCREEN_MAX_CHARS 1800U
 #define LIVE_HISTORY_MAX_BYTES 65536U
@@ -157,6 +166,9 @@ static void append_to_screen(const char *text) {
   }
 }
 
+static char s_live_cwd[1024] = {0};
+static c2t_shell_type_t s_active_shell_type = C2T_SHELL_AUTO;
+
 static void render_live_message(char *out_html, size_t out_cap, int is_active) {
   if (!out_html || out_cap == 0)
     return;
@@ -164,29 +176,30 @@ static void render_live_message(char *out_html, size_t out_cap, int is_active) {
   char esc_screen[2600] = {0};
   escape_terminal_html(s_screen_buffer, esc_screen, sizeof(esc_screen));
 
-  c2t_shell_session_info_t info;
-  int has_sess = c2t_shell_session_get_info(&info) && info.is_active;
-  uint64_t pid = has_sess ? info.pid : 0;
   const char *priv = c2t_runtime_get_privilege_str();
+  const char *cur_dir = s_live_cwd[0] ? s_live_cwd : ".";
 
   if (is_active) {
     snprintf(out_html, out_cap,
              "🟢 <b>Live Interactive Shell Console</b>\n"
-             "• <b>Shell:</b> <code>%s</code> (PID: <code>%llu</code>)\n"
+             "• <b>Shell:</b> <code>%s</code>\n"
+             "• <b>Directory:</b> <code>%s</code>\n"
              "• <b>Privileges:</b> %s\n"
-             "• <b>Status:</b> ⚡ <i>Live (all chat messages are sent directly to shell)</i>\n\n"
+             "• <b>Status:</b> ⚡ <i>Live (all chat messages are executed directly in shell)</i>\n\n"
              "<pre><code class=\"language-text\">%s</code></pre>\n\n"
-             "💡 <i>Type any command or <code>exit</code> / <code>/exit</code> to close.</i>",
-             s_shell_title, (unsigned long long)pid, priv,
+             "💡 <i>Type any command (e.g. <code>dir</code>, <code>ls</code>, <code>whoami</code>) or <code>exit</code> to close.</i>",
+             s_shell_title, cur_dir, priv,
              esc_screen[0] ? esc_screen : "(Terminal session ready. Type a command...)");
   } else {
     snprintf(out_html, out_cap,
              "⚪ <b>Live Shell Console (Disconnected)</b>\n"
              "• <b>Shell:</b> <code>%s</code>\n"
-             "• <b>Status:</b> ⏹️ <i>Session paused / closed</i>\n\n"
+             "• <b>Directory:</b> <code>%s</code>\n"
+             "• <b>Status:</b> ⏹️ <i>Session closed</i>\n\n"
              "<pre><code class=\"language-text\">%s</code></pre>\n\n"
              "💡 <i>Use <code>/shell_live</code> or tap Re-open to start a live session.</i>",
-             s_shell_title, esc_screen[0] ? esc_screen : "(No terminal output recorded)");
+             s_shell_title, cur_dir,
+             esc_screen[0] ? esc_screen : "(No terminal output recorded)");
   }
   c2t_secure_zero(esc_screen, sizeof(esc_screen));
 }
@@ -197,61 +210,55 @@ int c2t_shell_live_is_active(void) {
 
 int c2t_shell_live_start(const char *shell_name) {
   c2t_shell_type_t st = C2T_SHELL_AUTO;
+  const char *name = "cmd";
+#ifdef _WIN32
+  st = C2T_SHELL_CMD;
+  name = "cmd";
+#else
+  st = C2T_SHELL_BASH;
+  name = "bash";
+#endif
+
   if (shell_name && *shell_name) {
     while (isspace((unsigned char)*shell_name)) shell_name++;
 #ifdef _WIN32
-    if (_stricmp(shell_name, "bash") == 0) st = C2T_SHELL_BASH;
-    else if (_stricmp(shell_name, "ps") == 0 || _stricmp(shell_name, "powershell") == 0 || _stricmp(shell_name, "pwsh") == 0) st = C2T_SHELL_POWERSHELL;
-    else if (_stricmp(shell_name, "cmd") == 0) st = C2T_SHELL_CMD;
-    else if (_stricmp(shell_name, "py") == 0 || _stricmp(shell_name, "python") == 0) st = C2T_SHELL_PYTHON;
+    if (_stricmp(shell_name, "bash") == 0) { st = C2T_SHELL_BASH; name = "bash"; }
+    else if (_stricmp(shell_name, "ps") == 0 || _stricmp(shell_name, "powershell") == 0 || _stricmp(shell_name, "pwsh") == 0) { st = C2T_SHELL_POWERSHELL; name = "powershell"; }
+    else if (_stricmp(shell_name, "cmd") == 0) { st = C2T_SHELL_CMD; name = "cmd"; }
+    else if (_stricmp(shell_name, "py") == 0 || _stricmp(shell_name, "python") == 0) { st = C2T_SHELL_PYTHON; name = "python"; }
 #else
-    if (strcasecmp(shell_name, "bash") == 0) st = C2T_SHELL_BASH;
-    else if (strcasecmp(shell_name, "zsh") == 0) st = C2T_SHELL_ZSH;
-    else if (strcasecmp(shell_name, "ps") == 0 || strcasecmp(shell_name, "powershell") == 0) st = C2T_SHELL_POWERSHELL;
-    else if (strcasecmp(shell_name, "py") == 0 || strcasecmp(shell_name, "python") == 0) st = C2T_SHELL_PYTHON;
+    if (strcasecmp(shell_name, "bash") == 0) { st = C2T_SHELL_BASH; name = "bash"; }
+    else if (strcasecmp(shell_name, "zsh") == 0) { st = C2T_SHELL_ZSH; name = "zsh"; }
+    else if (strcasecmp(shell_name, "ps") == 0 || strcasecmp(shell_name, "powershell") == 0) { st = C2T_SHELL_POWERSHELL; name = "powershell"; }
+    else if (strcasecmp(shell_name, "py") == 0 || strcasecmp(shell_name, "python") == 0) { st = C2T_SHELL_PYTHON; name = "python"; }
 #endif
   }
 
-  c2t_log_info("live_shell", "Starting interactive live shell (requested: '%s')...",
-               (shell_name && *shell_name) ? shell_name : "default");
+  s_active_shell_type = st;
+  snprintf(s_shell_title, sizeof(s_shell_title), "%s", name);
 
-  c2t_shell_session_info_t info;
-  if (!c2t_shell_session_get_info(&info) || !info.is_active) {
-    char start_msg[2048] = {0};
-    if (!c2t_shell_session_start(st, start_msg, sizeof(start_msg))) {
-      c2t_log_error("live_shell", "Failed to launch interactive shell session backend");
-      telegram_send_html("❌ <b>Failed to launch interactive shell session.</b>");
-      return 0;
+#ifdef _WIN32
+  if (s_live_cwd[0] == '\0') {
+    GetCurrentDirectoryA(sizeof(s_live_cwd), s_live_cwd);
+  }
+#else
+  if (s_live_cwd[0] == '\0') {
+    if (getcwd(s_live_cwd, sizeof(s_live_cwd)) == nullptr) {
+      strncpy(s_live_cwd, ".", sizeof(s_live_cwd) - 1);
     }
-    c2t_log_info("live_shell", "Launched interactive shell session backend successfully");
   }
+#endif
 
-  if (c2t_shell_session_get_info(&info) && info.is_active) {
-    snprintf(s_shell_title, sizeof(s_shell_title), "%s", info.shell_name);
-    c2t_log_info("live_shell", "Live shell active with title '%s' (PID %llu)",
-                 s_shell_title, (unsigned long long)info.pid);
-  } else {
-    snprintf(s_shell_title, sizeof(s_shell_title), "Default OS Shell");
-  }
+  c2t_log_info("live_shell", "Starting interactive live shell '%s' in directory '%s'",
+               s_shell_title, s_live_cwd);
 
   atomic_store(&s_live_active, 1);
 
   if (s_screen_buffer[0] == '\0') {
     char banner[256];
-    snprintf(banner, sizeof(banner), "=== Live %s Session Started [%s] ===\n",
+    snprintf(banner, sizeof(banner), "=== Live %s Console Started [%s] ===\n",
              s_shell_title, c2t_runtime_get_privilege_str());
     append_to_screen(banner);
-
-    /* Initial passive drain for shell prompt */
-    c2t_shell_result_t init_res;
-    memset(&init_res, 0, sizeof(init_res));
-    if (c2t_shell_session_write("", 0, &init_res, 300) && init_res.output && *init_res.output) {
-      strip_ansi_in_place(init_res.output);
-      append_to_screen(init_res.output);
-      c2t_log_debug("live_shell", "Initial shell prompt drained: %llu bytes",
-                    (unsigned long long)init_res.output_len);
-    }
-    c2t_shell_result_free(&init_res);
   }
 
   char msg_html[4000] = {0};
@@ -304,16 +311,101 @@ int c2t_shell_live_handle_input(const char *input_text) {
   snprintf(prompt_line, sizeof(prompt_line), "\n$ %s\n", p);
   append_to_screen(prompt_line);
 
-  c2t_log_info("live_shell", "Executing live shell command: '%s'", p);
+  c2t_log_info("live_shell", "Executing live shell command: '%s' (cwd: '%s')",
+               p, s_live_cwd[0] ? s_live_cwd : ".");
 
-  /* Send input into active shell session */
+  /* Handle 'cd' directory change */
+  if (strcmp(p, "cd") == 0 || strncmp(p, "cd ", 3) == 0) {
+    const char *target = (strcmp(p, "cd") == 0) ? "" : p + 3;
+    while (*target && isspace((unsigned char)*target)) target++;
+    if (!*target) {
+#ifdef _WIN32
+      target = getenv("USERPROFILE");
+#else
+      target = getenv("HOME");
+#endif
+      if (!target) target = ".";
+    }
+
+    char resolved[1024] = {0};
+#ifdef _WIN32
+    if (isalpha((unsigned char)target[0]) && target[1] == ':') {
+      snprintf(resolved, sizeof(resolved), "%.1000s", target);
+    } else if (s_live_cwd[0]) {
+      snprintf(resolved, sizeof(resolved), "%.500s\\%.500s", s_live_cwd, target);
+    } else {
+      snprintf(resolved, sizeof(resolved), "%.1000s", target);
+    }
+
+    if (SetCurrentDirectoryA(resolved)) {
+      GetCurrentDirectoryA(sizeof(s_live_cwd), s_live_cwd);
+      char resp[1200];
+      snprintf(resp, sizeof(resp), "📁 <b>Working Directory:</b> <code>%s</code>", s_live_cwd);
+      append_to_screen(resp);
+      append_to_screen("\n");
+      telegram_send_html(resp);
+      c2t_log_info("live_shell", "Changed directory to: '%s'", s_live_cwd);
+    } else {
+      char resp[512];
+      snprintf(resp, sizeof(resp), "⚠️ <b>Cannot access directory:</b> <code>%s</code>", target);
+      telegram_send_html(resp);
+      c2t_log_warning("live_shell", "Failed to change directory to: '%s'", target);
+    }
+#else
+    if (target[0] == '/') {
+      snprintf(resolved, sizeof(resolved), "%.1000s", target);
+    } else if (s_live_cwd[0]) {
+      snprintf(resolved, sizeof(resolved), "%.500s/%.500s", s_live_cwd, target);
+    } else {
+      snprintf(resolved, sizeof(resolved), "%.1000s", target);
+    }
+
+    if (chdir(resolved) == 0) {
+      if (getcwd(s_live_cwd, sizeof(s_live_cwd)) == nullptr) {
+        snprintf(s_live_cwd, sizeof(s_live_cwd), "%s", resolved);
+      }
+      char resp[1200];
+      snprintf(resp, sizeof(resp), "📁 <b>Working Directory:</b> <code>%s</code>", s_live_cwd);
+      append_to_screen(resp);
+      append_to_screen("\n");
+      telegram_send_html(resp);
+      c2t_log_info("live_shell", "Changed directory to: '%s'", s_live_cwd);
+    } else {
+      char resp[512];
+      snprintf(resp, sizeof(resp), "⚠️ <b>Cannot access directory:</b> <code>%s</code>\n<i>%s</i>",
+               target, strerror(errno));
+      telegram_send_html(resp);
+      c2t_log_warning("live_shell", "Failed to change directory to: '%s': %s", target, strerror(errno));
+    }
+#endif
+
+    char msg_html[4000] = {0};
+    render_live_message(msg_html, sizeof(msg_html), 1);
+    if (s_live_message_id > 0) {
+      (void)telegram_edit_message_html(s_live_message_id, msg_html, s_live_keyboard_active);
+    }
+    (void)telegram_clear_message_draft(209);
+    return 1;
+  }
+
+  /* Execute arbitrary shell command in live context */
+  c2t_shell_options_t opts = {
+      .command = p,
+      .shell_type = s_active_shell_type,
+      .stdin_data = nullptr,
+      .stdin_data_len = 0,
+      .timeout_ms = 30000,
+      .working_dir = s_live_cwd[0] ? s_live_cwd : nullptr,
+  };
+
   c2t_shell_result_t res;
   memset(&res, 0, sizeof(res));
-  int write_ok = c2t_shell_session_write(p, strlen(p), &res, 1200);
+  int exec_ok = c2t_shell_execute_ex(&opts, &res);
 
-  if (write_ok) {
-    c2t_log_info("live_shell", "Command '%s' finished in %llu ms (output: %llu bytes)",
-                 p, (unsigned long long)res.duration_ms, (unsigned long long)res.output_len);
+  if (exec_ok) {
+    c2t_log_info("live_shell", "Command '%s' completed in %llu ms (output: %llu bytes, exit: %d)",
+                 p, (unsigned long long)res.duration_ms, (unsigned long long)res.output_len, res.exit_code);
+
     if (res.output && *res.output) {
       strip_ansi_in_place(res.output);
       append_to_screen(res.output);
@@ -321,25 +413,33 @@ int c2t_shell_live_handle_input(const char *input_text) {
       escape_terminal_html(res.output, esc_out, sizeof(esc_out));
       char reply_buf[4096];
       if (strlen(esc_out) > 0) {
-        snprintf(reply_buf, sizeof(reply_buf),
-                 "⚡ <b>$ %s</b>\n<pre><code class=\"language-shell\">%s</code></pre>",
-                 p, esc_out);
+        if (res.exit_code == 0) {
+          snprintf(reply_buf, sizeof(reply_buf),
+                   "⚡ <b>$ %s</b>\n<pre><code class=\"language-shell\">%s</code></pre>",
+                   p, esc_out);
+        } else {
+          snprintf(reply_buf, sizeof(reply_buf),
+                   "⚡ <b>$ %s</b> (❌ Exit: %d)\n<pre><code class=\"language-shell\">%s</code></pre>",
+                   p, res.exit_code, esc_out);
+        }
       } else {
         snprintf(reply_buf, sizeof(reply_buf),
-                 "⚡ <b>$ %s</b>\n<i>(Executed with no output)</i>", p);
+                 "⚡ <b>$ %s</b> (Exit: %d)\n<i>(Executed with no output)</i>", p, res.exit_code);
       }
       (void)telegram_send_html(reply_buf);
     } else {
       char reply_buf[256];
       snprintf(reply_buf, sizeof(reply_buf),
-               "⚡ <b>$ %s</b>\n<i>(Executed with no output)</i>", p);
+               "⚡ <b>$ %s</b> (Exit: %d)\n<i>(Executed with no output)</i>", p, res.exit_code);
       (void)telegram_send_html(reply_buf);
     }
   } else {
-    c2t_log_warning("live_shell", "Command '%s' failed: session closed or child process exited", p);
-    append_to_screen("[Process exited or session closed]\n");
-    atomic_store(&s_live_active, 0);
-    telegram_send_html("❌ <b>Session Process Exited</b>\n<i>The interactive shell process terminated. Use <code>/shell_live</code> to start a new session.</i>");
+    c2t_log_warning("live_shell", "Command '%s' failed execution", p);
+    char err_buf[512];
+    snprintf(err_buf, sizeof(err_buf),
+             "⚠️ <b>Command Execution Failed:</b> <code>%s</code>\n<i>Unable to spawn child process or command timed out.</i>",
+             p);
+    telegram_send_html(err_buf);
   }
 
   c2t_shell_result_free(&res);
