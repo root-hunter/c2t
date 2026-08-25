@@ -37,6 +37,7 @@
 #define strcasecmp _stricmp
 #else
 #include <pthread.h>
+#include <sys/stat.h>
 #include <strings.h>
 #include <unistd.h>
 #endif
@@ -48,12 +49,17 @@
 
 #ifdef _WIN32
 static CRITICAL_SECTION s_live_cs;
-static int s_live_cs_inited = 0;
+static INIT_ONCE s_live_once = INIT_ONCE_STATIC_INIT;
+static BOOL CALLBACK live_init_lock(PINIT_ONCE once, PVOID parameter,
+                                    PVOID *context) {
+  (void)once;
+  (void)parameter;
+  (void)context;
+  InitializeCriticalSection(&s_live_cs);
+  return TRUE;
+}
 static void live_lock(void) {
-  if (!s_live_cs_inited) {
-    InitializeCriticalSection(&s_live_cs);
-    s_live_cs_inited = 1;
-  }
+  (void)InitOnceExecuteOnce(&s_live_once, live_init_lock, NULL, NULL);
   EnterCriticalSection(&s_live_cs);
 }
 static void live_unlock(void) {
@@ -66,6 +72,8 @@ static void live_unlock(void) { (void)pthread_mutex_unlock(&s_live_mutex); }
 #endif
 
 static atomic_int s_live_active = 0;
+static atomic_int s_command_running = 0;
+static atomic_int s_cancel_requested = 0;
 static int64_t s_live_message_id = 0;
 static char s_screen_buffer[LIVE_SCREEN_MAX_CHARS + 512] = {0};
 static size_t s_screen_buffer_len = 0;
@@ -172,54 +180,64 @@ static void append_to_screen_locked(const char *text, size_t text_len) {
   if (!text || text_len == 0)
     return;
 
-  /* Dynamically grow full history on demand up to max limit */
-  if (s_full_history_len + text_len < LIVE_HISTORY_MAX_BYTES) {
-    if (s_full_history_len + text_len + 1 > s_full_history_cap) {
-      size_t new_cap = s_full_history_cap ? s_full_history_cap * 2 : LIVE_HISTORY_INITIAL_CAP;
-      while (new_cap < s_full_history_len + text_len + 1 && new_cap <= LIVE_HISTORY_MAX_BYTES) {
-        new_cap *= 2;
-      }
-      if (new_cap > LIVE_HISTORY_MAX_BYTES) {
-        new_cap = LIVE_HISTORY_MAX_BYTES;
-      }
-      char *new_hist = realloc(s_full_history, new_cap);
-      if (new_hist) {
-        s_full_history = new_hist;
-        s_full_history_cap = new_cap;
-      }
+  /* Keep the most recent history instead of silently dropping every future
+   * append after the fixed limit is reached. */
+  const size_t history_max = LIVE_HISTORY_MAX_BYTES - 1;
+  size_t history_copy = text_len > history_max ? history_max : text_len;
+  const char *history_src = text + (text_len - history_copy);
+  size_t history_keep = s_full_history_len;
+  if (history_keep > history_max - history_copy)
+    history_keep = history_max - history_copy;
+  if (history_keep < s_full_history_len && s_full_history) {
+    memmove(s_full_history, s_full_history + (s_full_history_len - history_keep),
+            history_keep);
+    s_full_history_len = history_keep;
+    s_full_history[s_full_history_len] = '\0';
+  }
+  size_t history_needed = history_keep + history_copy + 1;
+  if (history_needed > s_full_history_cap) {
+    size_t new_cap = s_full_history_cap ? s_full_history_cap
+                                       : LIVE_HISTORY_INITIAL_CAP;
+    while (new_cap < history_needed && new_cap < LIVE_HISTORY_MAX_BYTES)
+      new_cap *= 2;
+    if (new_cap > LIVE_HISTORY_MAX_BYTES)
+      new_cap = LIVE_HISTORY_MAX_BYTES;
+    char *new_hist = realloc(s_full_history, new_cap);
+    if (new_hist) {
+      s_full_history = new_hist;
+      s_full_history_cap = new_cap;
     }
-
-    if (s_full_history && s_full_history_len + text_len < s_full_history_cap) {
-      memcpy(s_full_history + s_full_history_len, text, text_len);
-      s_full_history_len += text_len;
-      s_full_history[s_full_history_len] = '\0';
-    }
+  }
+  if (s_full_history && history_needed <= s_full_history_cap) {
+    memcpy(s_full_history + history_keep, history_src, history_copy);
+    s_full_history_len = history_keep + history_copy;
+    s_full_history[s_full_history_len] = '\0';
   }
 
   /* Screen buffer rolling window */
-  if (s_screen_buffer_len + text_len < LIVE_SCREEN_MAX_CHARS) {
-    memcpy(s_screen_buffer + s_screen_buffer_len, text, text_len);
-    s_screen_buffer_len += text_len;
-    s_screen_buffer[s_screen_buffer_len] = '\0';
-  } else {
-    size_t overflow = (s_screen_buffer_len + text_len) - LIVE_SCREEN_MAX_CHARS + 256;
-    const char *start_pos = s_screen_buffer + overflow;
-    const char *nl = memchr(start_pos, '\n', s_screen_buffer_len - overflow);
-    if (nl && *(nl + 1)) {
-      start_pos = nl + 1;
-    }
-    size_t keep_len = (size_t)(s_screen_buffer + s_screen_buffer_len - start_pos);
-    memmove(s_screen_buffer, start_pos, keep_len);
-    s_screen_buffer_len = keep_len;
-
-    size_t copy_now = text_len;
-    if (s_screen_buffer_len + copy_now >= sizeof(s_screen_buffer) - 1) {
-      copy_now = sizeof(s_screen_buffer) - 1 - s_screen_buffer_len;
-    }
-    memcpy(s_screen_buffer + s_screen_buffer_len, text, copy_now);
-    s_screen_buffer_len += copy_now;
-    s_screen_buffer[s_screen_buffer_len] = '\0';
+  size_t screen_copy = text_len > LIVE_SCREEN_MAX_CHARS
+                           ? LIVE_SCREEN_MAX_CHARS
+                           : text_len;
+  const char *screen_src = text + (text_len - screen_copy);
+  while (screen_copy > 0 &&
+         ((unsigned char)*screen_src & 0xC0U) == 0x80U) {
+    screen_src++;
+    screen_copy--;
   }
+  size_t screen_keep = s_screen_buffer_len;
+  if (screen_keep > LIVE_SCREEN_MAX_CHARS - screen_copy)
+    screen_keep = LIVE_SCREEN_MAX_CHARS - screen_copy;
+  if (screen_keep < s_screen_buffer_len) {
+    memmove(s_screen_buffer,
+            s_screen_buffer + (s_screen_buffer_len - screen_keep), screen_keep);
+    while (screen_keep > 0 &&
+           ((unsigned char)s_screen_buffer[0] & 0xC0U) == 0x80U) {
+      memmove(s_screen_buffer, s_screen_buffer + 1, --screen_keep);
+    }
+  }
+  memcpy(s_screen_buffer + screen_keep, screen_src, screen_copy);
+  s_screen_buffer_len = screen_keep + screen_copy;
+  s_screen_buffer[s_screen_buffer_len] = '\0';
 }
 
 static void append_to_screen(const char *text, size_t text_len) {
@@ -277,10 +295,22 @@ static void render_live_message(char *out_html, size_t out_cap, int is_active) {
 }
 
 int c2t_shell_live_is_active(void) {
-  return atomic_load(&s_live_active);
+  return atomic_load(&s_live_active) == 1;
 }
 
 int c2t_shell_live_start(const char *shell_name) {
+  int expected = 0;
+  if (!atomic_compare_exchange_strong(&s_live_active, &expected, -1)) {
+    /* Repeated /live commands must not create competing console messages. */
+    return expected == 1;
+  }
+  if (atomic_load(&s_command_running)) {
+    atomic_store(&s_live_active, 0);
+    (void)telegram_send_html(
+        "⏳ <i>The previous live command is still shutting down. Please retry shortly.</i>");
+    return 0;
+  }
+
   c2t_shell_type_t st = C2T_SHELL_AUTO;
   const char *name = "cmd";
 #ifdef _WIN32
@@ -317,16 +347,20 @@ int c2t_shell_live_start(const char *shell_name) {
 #else
   if (s_live_cwd[0] == '\0') {
     if (getcwd(s_live_cwd, sizeof(s_live_cwd)) == nullptr) {
-      strncpy(s_live_cwd, ".", sizeof(s_live_cwd) - 1);
+      snprintf(s_live_cwd, sizeof(s_live_cwd), ".");
     }
   }
 #endif
   live_unlock();
 
+  char title_copy[sizeof(s_shell_title)];
+  char cwd_copy[sizeof(s_live_cwd)];
+  live_lock();
+  snprintf(title_copy, sizeof(title_copy), "%s", s_shell_title);
+  snprintf(cwd_copy, sizeof(cwd_copy), "%s", s_live_cwd);
+  live_unlock();
   c2t_log_info("live_shell", "Starting interactive live shell '%s' in directory '%s'",
-               s_shell_title, s_live_cwd);
-
-  atomic_store(&s_live_active, 1);
+               title_copy, cwd_copy);
 
   live_lock();
   if (s_screen_buffer_len == 0) {
@@ -340,8 +374,10 @@ int c2t_shell_live_start(const char *shell_name) {
   live_unlock();
 
   char *msg_html = malloc(LIVE_MSG_CAPACITY);
-  if (!msg_html)
+  if (!msg_html) {
+    atomic_store(&s_live_active, 0);
     return 0;
+  }
 
   render_live_message(msg_html, LIVE_MSG_CAPACITY, 1);
 
@@ -353,6 +389,17 @@ int c2t_shell_live_start(const char *shell_name) {
     live_unlock();
     c2t_log_info("live_shell", "Live interactive console message created (ID: %lld)",
                  (long long)msg_id);
+    expected = -1;
+    if (!atomic_compare_exchange_strong(&s_live_active, &expected, 1)) {
+      /* A concurrent stop/reset won while the Telegram request was in flight. */
+      render_live_message(msg_html, LIVE_MSG_CAPACITY, 0);
+      (void)telegram_edit_message_html(msg_id, msg_html,
+                                       s_live_keyboard_closed);
+      ok = 0;
+    }
+  } else {
+    expected = -1;
+    (void)atomic_compare_exchange_strong(&s_live_active, &expected, 0);
   }
   free(msg_html);
 
@@ -397,6 +444,15 @@ int c2t_shell_live_handle_input(const char *input_text) {
     return 0;
   }
 
+  int command_expected = 0;
+  if (!atomic_compare_exchange_strong(&s_command_running, &command_expected,
+                                      1)) {
+    (void)telegram_send_html(
+        "⏳ <b>Command already running</b>\n<i>Wait for it to finish or tap Ctrl+C.</i>");
+    return 1;
+  }
+  atomic_store(&s_cancel_requested, 0);
+
   /* Determine the exact command string to execute:
    * If input starts with a single slash (e.g. /whoami, /ls, /dir, /ipconfig),
    * strip the leading slash unless it looks like a Unix full path (e.g. /bin/ls).
@@ -418,12 +474,16 @@ int c2t_shell_live_handle_input(const char *input_text) {
   char prompt_line[300];
   int plen = snprintf(prompt_line, sizeof(prompt_line), "\n$ %s\n", cmd_to_exec);
   if (plen > 0) {
-    append_to_screen(prompt_line, (size_t)plen);
+    size_t prompt_len = (size_t)plen < sizeof(prompt_line)
+                            ? (size_t)plen
+                            : sizeof(prompt_line) - 1;
+    append_to_screen(prompt_line, prompt_len);
   }
 
   live_lock();
   char current_working_dir[1024] = {0};
-  strncpy(current_working_dir, s_live_cwd[0] ? s_live_cwd : ".", sizeof(current_working_dir) - 1);
+  snprintf(current_working_dir, sizeof(current_working_dir), "%s",
+           s_live_cwd[0] ? s_live_cwd : ".");
   c2t_shell_type_t shell_type = s_active_shell_type;
   live_unlock();
 
@@ -446,6 +506,18 @@ int c2t_shell_live_handle_input(const char *input_text) {
 #endif
       if (!target) target = ".";
     }
+    char target_unquoted[1024];
+    size_t target_len = strlen(target);
+    if (target_len >= 2 &&
+        ((target[0] == '"' && target[target_len - 1] == '"') ||
+         (target[0] == '\'' && target[target_len - 1] == '\''))) {
+      size_t copy_len = target_len - 2;
+      if (copy_len >= sizeof(target_unquoted))
+        copy_len = sizeof(target_unquoted) - 1;
+      memcpy(target_unquoted, target + 1, copy_len);
+      target_unquoted[copy_len] = '\0';
+      target = target_unquoted;
+    }
 
     char resolved[1024] = {0};
 #ifdef _WIN32
@@ -457,10 +529,18 @@ int c2t_shell_live_handle_input(const char *input_text) {
       snprintf(resolved, sizeof(resolved), "%.1000s", target);
     }
 
-    if (SetCurrentDirectoryA(resolved)) {
+    char canonical[1024] = {0};
+    DWORD canonical_len = GetFullPathNameA(resolved, (DWORD)sizeof(canonical),
+                                           canonical, NULL);
+    DWORD attrs = canonical_len > 0 && canonical_len < sizeof(canonical)
+                      ? GetFileAttributesA(canonical)
+                      : INVALID_FILE_ATTRIBUTES;
+    if (attrs != INVALID_FILE_ATTRIBUTES &&
+        (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) {
       live_lock();
-      GetCurrentDirectoryA(sizeof(s_live_cwd), s_live_cwd);
-      strncpy(current_working_dir, s_live_cwd, sizeof(current_working_dir) - 1);
+      snprintf(s_live_cwd, sizeof(s_live_cwd), "%s", canonical);
+      snprintf(current_working_dir, sizeof(current_working_dir), "%s",
+               s_live_cwd);
       live_unlock();
 
       char esc_dir[1100] = {0};
@@ -468,7 +548,9 @@ int c2t_shell_live_handle_input(const char *input_text) {
       char resp[1200];
       int rlen = snprintf(resp, sizeof(resp), "📁 <b>Working Directory:</b> <code>%s</code>", esc_dir);
       if (rlen > 0) {
-        append_to_screen(resp, (size_t)rlen);
+        size_t resp_len = (size_t)rlen < sizeof(resp) ? (size_t)rlen
+                                                      : sizeof(resp) - 1;
+        append_to_screen(resp, resp_len);
         append_to_screen("\n", 1);
       }
       telegram_send_html(resp);
@@ -490,25 +572,33 @@ int c2t_shell_live_handle_input(const char *input_text) {
       snprintf(resolved, sizeof(resolved), "%.1000s", target);
     }
 
-    if (chdir(resolved) == 0) {
+    char *canonical = realpath(resolved, nullptr);
+    struct stat target_stat;
+    if (canonical && stat(canonical, &target_stat) == 0 &&
+        S_ISDIR(target_stat.st_mode)) {
       live_lock();
-      if (getcwd(s_live_cwd, sizeof(s_live_cwd)) == nullptr) {
-        snprintf(s_live_cwd, sizeof(s_live_cwd), "%.1000s", resolved);
-      }
-      strncpy(current_working_dir, s_live_cwd, sizeof(current_working_dir) - 1);
+      snprintf(s_live_cwd, sizeof(s_live_cwd), "%.1000s", canonical);
+      snprintf(current_working_dir, sizeof(current_working_dir), "%s",
+               s_live_cwd);
       live_unlock();
+      free(canonical);
 
       char esc_dir[1100] = {0};
       escape_terminal_html(current_working_dir, esc_dir, sizeof(esc_dir));
       char resp[1200];
       int rlen = snprintf(resp, sizeof(resp), "📁 <b>Working Directory:</b> <code>%s</code>", esc_dir);
       if (rlen > 0) {
-        append_to_screen(resp, (size_t)rlen);
+        size_t resp_len = (size_t)rlen < sizeof(resp) ? (size_t)rlen
+                                                      : sizeof(resp) - 1;
+        append_to_screen(resp, resp_len);
         append_to_screen("\n", 1);
       }
       telegram_send_html(resp);
       c2t_log_info("live_shell", "Changed directory to: '%s'", current_working_dir);
     } else {
+      if (canonical)
+        errno = ENOTDIR;
+      free(canonical);
       char esc_target[512] = {0};
       escape_terminal_html(target, esc_target, sizeof(esc_target));
       char resp[512];
@@ -530,6 +620,7 @@ int c2t_shell_live_handle_input(const char *input_text) {
       }
       free(msg_html);
     }
+    atomic_store(&s_command_running, 0);
     return 1;
   }
 
@@ -541,13 +632,17 @@ int c2t_shell_live_handle_input(const char *input_text) {
       .stdin_data_len = 0,
       .timeout_ms = 30000,
       .working_dir = current_working_dir[0] ? current_working_dir : nullptr,
+      .cancel_requested = &s_cancel_requested,
   };
 
   c2t_shell_result_t res;
   memset(&res, 0, sizeof(res));
   int exec_ok = c2t_shell_execute_ex(&opts, &res);
 
-  if (exec_ok) {
+  if (exec_ok && res.cancelled) {
+    c2t_log_info("live_shell", "Command '%s' was cancelled by user", cmd_to_exec);
+    (void)telegram_send_html("🛑 <b>Command cancelled</b>");
+  } else if (exec_ok) {
     c2t_log_info("live_shell", "Command '%s' completed in %llu ms (output: %llu bytes, exit: %d)",
                  cmd_to_exec, (unsigned long long)res.duration_ms, (unsigned long long)res.output_len, res.exit_code);
 
@@ -621,6 +716,8 @@ int c2t_shell_live_handle_input(const char *input_text) {
     free(msg_html);
   }
 
+  atomic_store(&s_command_running, 0);
+
   return 1;
 }
 
@@ -686,10 +783,18 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
   }
 
   if (strcmp(callback_data, "sh_live_ctrlc") == 0) {
-    (void)telegram_answer_callback_query(callback_query_id, "🛑 Break signal sent");
+    int was_running = atomic_load(&s_command_running);
+    if (was_running)
+      atomic_store(&s_cancel_requested, 1);
+    (void)telegram_answer_callback_query(
+        callback_query_id,
+        was_running ? "🛑 Cancelling running command" : "ℹ️ No command is running");
     static const char ctrlc_msg[] = "\n^C\n";
-    append_to_screen(ctrlc_msg, sizeof(ctrlc_msg) - 1);
-    c2t_log_info("live_shell", "Sent Ctrl+C to terminal screen");
+    if (was_running)
+      append_to_screen(ctrlc_msg, sizeof(ctrlc_msg) - 1);
+    c2t_log_info("live_shell", "%s",
+                 was_running ? "Cancellation requested for running command"
+                             : "Ctrl+C ignored because no command is running");
 
     char *msg_html = malloc(LIVE_MSG_CAPACITY);
     if (msg_html) {
@@ -742,6 +847,8 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
 }
 
 int c2t_shell_live_stop(void) {
+  atomic_store(&s_live_active, 0);
+  atomic_store(&s_cancel_requested, 1);
   live_lock();
   size_t recorded = s_full_history_len;
   int64_t mid = s_live_message_id;
@@ -749,8 +856,6 @@ int c2t_shell_live_stop(void) {
 
   c2t_log_info("live_shell", "Stopping live interactive mode (session recorded: %llu bytes)",
                (unsigned long long)recorded);
-  atomic_store(&s_live_active, 0);
-
   char *msg_html = malloc(LIVE_MSG_CAPACITY);
   if (msg_html) {
     render_live_message(msg_html, LIVE_MSG_CAPACITY, 0);
@@ -765,6 +870,7 @@ int c2t_shell_live_stop(void) {
 
 void c2t_shell_live_reset(void) {
   atomic_store(&s_live_active, 0);
+  atomic_store(&s_cancel_requested, 1);
   live_lock();
   s_live_message_id = 0;
   c2t_secure_zero(s_screen_buffer, sizeof(s_screen_buffer));

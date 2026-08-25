@@ -247,8 +247,14 @@ int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
 
   int pipe_open = 1;
   int timed_out = 0;
+  int cancelled = 0;
 
   while (pipe_open) {
+    if (options->cancel_requested &&
+        atomic_load(options->cancel_requested)) {
+      cancelled = 1;
+      break;
+    }
     uint64_t now = get_monotonic_ms();
     uint64_t elapsed = now - start_time;
     if (elapsed >= (uint64_t)timeout_ms) {
@@ -310,12 +316,18 @@ int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
 
   close(stdout_pipe[0]);
 
-  if (timed_out) {
-    result->timed_out = 1;
+  if (timed_out || cancelled) {
+    result->timed_out = timed_out;
+    result->cancelled = cancelled;
     result->exit_code = -1;
-    c2t_log_warning("shell",
-                    "Command '%s' timed out after %u ms, killing process group %d",
-                    options->command, timeout_ms, pid);
+    if (cancelled) {
+      c2t_log_info("shell", "Command '%s' cancelled, killing process group %d",
+                   options->command, pid);
+    } else {
+      c2t_log_warning("shell",
+                      "Command '%s' timed out after %u ms, killing process group %d",
+                      options->command, timeout_ms, pid);
+    }
     (void)kill(-pid, SIGTERM);
     usleep(25000);
     int status = 0;

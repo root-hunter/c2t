@@ -20,6 +20,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
 
 #define C2T_SHELL_DEFAULT_TIMEOUT_MS 30000U
 #define C2T_SHELL_SCRIPT_TIMEOUT_MS 60000U
@@ -38,6 +39,7 @@ typedef enum {
 typedef struct {
   int exit_code;
   int timed_out;
+  int cancelled;
   int execution_error;
   char *output;
   size_t output_len;
@@ -51,6 +53,7 @@ typedef struct {
   size_t stdin_data_len;
   uint32_t timeout_ms;
   const char *working_dir;
+  const atomic_int *cancel_requested;
 } c2t_shell_options_t;
 
 typedef struct {

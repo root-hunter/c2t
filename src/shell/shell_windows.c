@@ -438,8 +438,14 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
   buffer[0] = '\0';
 
   int timed_out = 0;
+  int cancelled = 0;
 
   while (1) {
+    if (options->cancel_requested &&
+        atomic_load(options->cancel_requested)) {
+      cancelled = 1;
+      break;
+    }
     uint64_t now = c2t_GetTickCount64();
     if (now - start_time >= (uint64_t)timeout_ms) {
       timed_out = 1;
@@ -484,6 +490,16 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
     }
   }
 
+  /* A live writer keeps an anonymous pipe read blocking. Terminate cancelled
+   * or timed-out jobs before draining the final buffered output. */
+  if (timed_out || cancelled) {
+    if (hJob) {
+      c2t_TerminateJobObject(hJob, 1);
+    }
+    c2t_TerminateProcess(pi.hProcess, 1);
+    c2t_WaitForSingleObject(pi.hProcess, 500);
+  }
+
   /* Exhaustively drain any remaining buffered output from pipe until EOF */
   while (total_read < C2T_SHELL_MAX_OUTPUT_BYTES) {
     char chunk[4096];
@@ -513,16 +529,16 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
 
   c2t_CloseHandle(hReadPipe);
 
-  if (timed_out) {
-    result->timed_out = 1;
+  if (timed_out || cancelled) {
+    result->timed_out = timed_out;
+    result->cancelled = cancelled;
     result->exit_code = -1;
-    c2t_log_warning("shell", "Command '%s' timed out after %u ms, terminating process tree",
-                    options->command, timeout_ms);
-    if (hJob) {
-      c2t_TerminateJobObject(hJob, 1);
+    if (cancelled) {
+      c2t_log_info("shell", "Command '%s' cancelled", options->command);
+    } else {
+      c2t_log_warning("shell", "Command '%s' timed out after %u ms, terminating process tree",
+                      options->command, timeout_ms);
     }
-    c2t_TerminateProcess(pi.hProcess, 1);
-    c2t_WaitForSingleObject(pi.hProcess, 500);
   } else {
     c2t_WaitForSingleObject(pi.hProcess, 500);
     DWORD exit_code = 0;

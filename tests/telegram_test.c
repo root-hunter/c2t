@@ -38,11 +38,13 @@
 #include "telegram/telegram_platform.h"
 
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
 
 static char last_method[32];
 static char last_content_type[128];
@@ -74,6 +76,14 @@ static int capture_body(const void *body, size_t body_length) {
 static int fail(const char *message) {
   fprintf(stderr, "FAIL: %s\n", message);
   return 1;
+}
+
+static void *request_shell_cancel(void *arg) {
+  atomic_int *cancel_requested = (atomic_int *)arg;
+  struct timespec delay = {.tv_sec = 0, .tv_nsec = 100000000L};
+  (void)nanosleep(&delay, nullptr);
+  atomic_store(cancel_requested, 1);
+  return nullptr;
 }
 
 static int test_arena(void) {
@@ -2111,6 +2121,29 @@ int main(void) {
     }
     c2t_shell_result_free(&stdin_res);
 
+    /* A caller-controlled cancellation must terminate the whole command tree
+     * promptly rather than waiting for the normal timeout. */
+    atomic_int cancel_requested = 0;
+    c2t_shell_options_t cancel_opts = {
+        .command = "sleep 10",
+        .shell_type = C2T_SHELL_AUTO,
+        .timeout_ms = 10000,
+        .cancel_requested = &cancel_requested,
+    };
+    pthread_t cancel_thread;
+    if (pthread_create(&cancel_thread, nullptr, request_shell_cancel,
+                       &cancel_requested) != 0)
+      return fail("shell cancellation helper thread failed");
+    c2t_shell_result_t cancel_res;
+    if (!c2t_shell_execute_ex(&cancel_opts, &cancel_res))
+      return fail("c2t_shell_execute_ex cancellation failed");
+    (void)pthread_join(cancel_thread, nullptr);
+    if (!cancel_res.cancelled || cancel_res.duration_ms >= 3000) {
+      c2t_shell_result_free(&cancel_res);
+      return fail("shell command was not cancelled promptly");
+    }
+    c2t_shell_result_free(&cancel_res);
+
     /* Test interactive shell session lifecycle */
     char sess_msg[2048];
     if (!c2t_shell_session_start(C2T_SHELL_AUTO, sess_msg, sizeof(sess_msg)))
@@ -2145,13 +2178,38 @@ int main(void) {
       return fail("telegram_init for live shell test failed");
 
     c2t_shell_live_reset();
+
+    /* Failed console creation must roll state back to inactive. */
+    http_post_result = 0;
+    if (c2t_shell_live_start(nullptr) || c2t_shell_live_is_active())
+      return fail("failed live shell start left mode active");
+    http_post_result = 1;
+
     if (!c2t_shell_live_start(nullptr))
       return fail("c2t_shell_live_start failed");
     if (!c2t_shell_live_is_active())
       return fail("c2t_shell_live_is_active returned 0 after start");
 
+    int posts_after_start = http_post_calls;
+    if (!c2t_shell_live_start(nullptr) || http_post_calls != posts_after_start)
+      return fail("repeated live shell start created a duplicate console");
+
+    char daemon_cwd_before[1024];
+    char daemon_cwd_after[1024];
+    if (!getcwd(daemon_cwd_before, sizeof(daemon_cwd_before)))
+      return fail("getcwd before live cd failed");
+    if (!c2t_shell_live_handle_input("cd /tmp"))
+      return fail("live shell cd failed");
+    if (!getcwd(daemon_cwd_after, sizeof(daemon_cwd_after)) ||
+        strcmp(daemon_cwd_before, daemon_cwd_after) != 0)
+      return fail("live shell cd changed daemon working directory");
+
     if (!c2t_shell_live_handle_input("echo live_terminal_ok"))
       return fail("c2t_shell_live_handle_input failed");
+
+    if (!c2t_shell_live_handle_input(
+            "head -c 10000 /dev/zero | tr '\\0' x"))
+      return fail("large live shell output handling failed");
 
     if (!c2t_shell_live_handle_callback("cb_1", "sh_live_refresh"))
       return fail("c2t_shell_live_handle_callback refresh failed");
