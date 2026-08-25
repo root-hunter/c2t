@@ -35,6 +35,13 @@
 #include <windows.h>
 #include "../win32/win32_api.h"
 
+#ifndef strcasecmp
+#define strcasecmp _stricmp
+#endif
+#ifndef strncasecmp
+#define strncasecmp _strnicmp
+#endif
+
 static void c2t_InitializeCriticalSection(
     LPCRITICAL_SECTION lpCriticalSection) {
   c2t_win32_api_init();
