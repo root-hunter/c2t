@@ -182,53 +182,38 @@ int c2t_shell_format_telegram(const char *command,
   return 1;
 }
 
-int c2t_shell_run_and_send(const char *command) {
-  if (!command || !*command) {
-    return telegram_send_html(
-        "⚠️ <b>Usage:</b> <code>/sh &lt;command&gt;</code>\n"
-        "<i>Aliases:</i> <code>/cmd</code>, <code>/exec</code>, <code>/shell</code>, <code>/terminal</code>, <code>/run</code>\n"
-        "<i>Examples:</i>\n"
-        "• <code>/sh whoami</code>\n"
-        "• <code>/sh uname -a</code>\n"
-        "• <code>/sh ip a || ifconfig</code>\n\n"
-        "💡 <i>Tip: Send any script file (e.g. .sh, .bat, .ps1, .py) as a document attachment with caption <code>/run</code> to execute it automatically.</i>");
-  }
-
-  c2t_log_info("shell", "Executing shell command: '%s'", command);
-
-  c2t_shell_result_t result;
-  int exec_ok = c2t_shell_execute(command, &result, C2T_SHELL_DEFAULT_TIMEOUT_MS);
+static int send_shell_result(const char *cmd_display, c2t_shell_result_t *result,
+                             int exec_ok) {
   if (!exec_ok) {
-    c2t_log_error("shell", "Execution failed for command: '%s'", command);
+    c2t_log_error("shell", "Execution failed for: '%s'", cmd_display);
     char err_msg[1024];
-    (void)c2t_shell_format_telegram(command, &result, err_msg, sizeof(err_msg));
-    c2t_shell_result_free(&result);
+    (void)c2t_shell_format_telegram(cmd_display, result, err_msg, sizeof(err_msg));
+    c2t_shell_result_free(result);
     return telegram_send_html(err_msg);
   }
 
-  if (result.output) {
-    strip_ansi_escapes_in_place(result.output);
-    result.output_len = strlen(result.output);
+  if (result->output) {
+    strip_ansi_escapes_in_place(result->output);
+    result->output_len = strlen(result->output);
   }
 
   int sent = 0;
-  /* If output is large (> 3000 bytes), send summary and full output as attached document */
-  if (result.output && result.output_len > 3000) {
+  if (result->output && result->output_len > 3000) {
     char filename[64];
-    snprintf(filename, sizeof(filename), "cmd_output_%llu.txt",
+    snprintf(filename, sizeof(filename), "cmd_output_%llu.log",
              (unsigned long long)time(nullptr));
 
     char preview[3200];
     char preview_output[2000];
-    size_t copy_len = result.output_len < 1800 ? result.output_len : 1800;
-    memcpy(preview_output, result.output, copy_len);
+    size_t copy_len = result->output_len < 1800 ? result->output_len : 1800;
+    memcpy(preview_output, result->output, copy_len);
     preview_output[copy_len] = '\0';
 
-    c2t_shell_result_t preview_res = result;
+    c2t_shell_result_t preview_res = *result;
     preview_res.output = preview_output;
     preview_res.output_len = copy_len;
 
-    (void)c2t_shell_format_telegram(command, &preview_res, preview, sizeof(preview));
+    (void)c2t_shell_format_telegram(cmd_display, &preview_res, preview, sizeof(preview));
 
     size_t p_len = strlen(preview);
     static const char doc_note[] = "\n\n📄 <i>(Output truncated. Full output attached as file.)</i>";
@@ -237,16 +222,173 @@ int c2t_shell_run_and_send(const char *command) {
     }
 
     telegram_send_html(preview);
-    sent = telegram_send_file(result.output, result.output_len, "text/plain",
+    sent = telegram_send_file(result->output, result->output_len, "text/plain",
                               filename, nullptr);
   } else {
     char response[3900];
-    (void)c2t_shell_format_telegram(command, &result, response, sizeof(response));
+    (void)c2t_shell_format_telegram(cmd_display, result, response, sizeof(response));
     sent = telegram_send_html(response);
   }
 
-  c2t_shell_result_free(&result);
+  c2t_shell_result_free(result);
   return sent;
+}
+
+int c2t_shell_run_and_send(const char *command) {
+  if (!command || !*command) {
+    return telegram_send_html(
+        "⚠️ <b>Usage:</b> <code>/sh &lt;command&gt;</code>\n"
+        "<i>Execute command in default OS shell.</i>\n\n"
+        "<i>Multi-Shell Commands:</i>\n"
+        "• <code>/ps &lt;command&gt;</code> - PowerShell execution\n"
+        "• <code>/bash &lt;command&gt;</code> - Bash execution\n"
+        "• <code>/cmd &lt;command&gt;</code> - CMD execution\n"
+        "• <code>/py &lt;command&gt;</code> - Python execution\n"
+        "• <code>/sh_in &lt;input&gt;</code> - Interactive session input\n\n"
+        "💡 <i>Tip: Send any script file (e.g. .sh, .bat, .ps1, .py) as attachment with caption <code>/run</code> to execute.</i>");
+  }
+
+  c2t_log_info("shell", "Executing shell command: '%s'", command);
+
+  c2t_shell_result_t result;
+  int exec_ok = c2t_shell_execute(command, &result, C2T_SHELL_DEFAULT_TIMEOUT_MS);
+  return send_shell_result(command, &result, exec_ok);
+}
+
+int c2t_shell_run_powershell_and_send(const char *command) {
+  if (!command || !*command) {
+    return telegram_send_html(
+        "⚠️ <b>Usage:</b> <code>/ps &lt;command&gt;</code>\n"
+        "<i>Execute command directly via PowerShell.</i>\n\n"
+        "<i>Examples:</i>\n"
+        "• <code>/ps Get-Process | Select-Object -First 10</code>\n"
+        "• <code>/ps Get-Service | Where-Object {$_.Status -eq 'Running'}</code>\n"
+        "• <code>/ps $PSVersionTable</code>");
+  }
+
+  c2t_log_info("shell", "Executing PowerShell command: '%s'", command);
+
+  c2t_shell_options_t opts = {
+      .command = command,
+      .shell_type = C2T_SHELL_POWERSHELL,
+      .stdin_data = nullptr,
+      .stdin_data_len = 0,
+      .timeout_ms = C2T_SHELL_DEFAULT_TIMEOUT_MS,
+      .working_dir = nullptr,
+  };
+
+  c2t_shell_result_t result;
+  int exec_ok = c2t_shell_execute_ex(&opts, &result);
+  char disp[256];
+  snprintf(disp, sizeof(disp), "powershell: %s", command);
+  return send_shell_result(disp, &result, exec_ok);
+}
+
+int c2t_shell_run_bash_and_send(const char *command) {
+  if (!command || !*command) {
+    return telegram_send_html(
+        "⚠️ <b>Usage:</b> <code>/bash &lt;command&gt;</code>\n"
+        "<i>Execute command directly via GNU Bash.</i>\n\n"
+        "<i>Examples:</i>\n"
+        "• <code>/bash uname -a && id</code>\n"
+        "• <code>/bash for i in {1..5}; do echo $i; done</code>");
+  }
+
+  c2t_log_info("shell", "Executing Bash command: '%s'", command);
+
+  c2t_shell_options_t opts = {
+      .command = command,
+      .shell_type = C2T_SHELL_BASH,
+      .stdin_data = nullptr,
+      .stdin_data_len = 0,
+      .timeout_ms = C2T_SHELL_DEFAULT_TIMEOUT_MS,
+      .working_dir = nullptr,
+  };
+
+  c2t_shell_result_t result;
+  int exec_ok = c2t_shell_execute_ex(&opts, &result);
+  char disp[256];
+  snprintf(disp, sizeof(disp), "bash: %s", command);
+  return send_shell_result(disp, &result, exec_ok);
+}
+
+int c2t_shell_run_cmd_and_send(const char *command) {
+  if (!command || !*command) {
+    return telegram_send_html(
+        "⚠️ <b>Usage:</b> <code>/cmd &lt;command&gt;</code>\n"
+        "<i>Execute command directly via Command Prompt (cmd.exe).</i>\n\n"
+        "<i>Examples:</i>\n"
+        "• <code>/cmd dir /w</code>\n"
+        "• <code>/cmd netstat -ano</code>");
+  }
+
+  c2t_log_info("shell", "Executing CMD command: '%s'", command);
+
+  c2t_shell_options_t opts = {
+      .command = command,
+      .shell_type = C2T_SHELL_CMD,
+      .stdin_data = nullptr,
+      .stdin_data_len = 0,
+      .timeout_ms = C2T_SHELL_DEFAULT_TIMEOUT_MS,
+      .working_dir = nullptr,
+  };
+
+  c2t_shell_result_t result;
+  int exec_ok = c2t_shell_execute_ex(&opts, &result);
+  char disp[256];
+  snprintf(disp, sizeof(disp), "cmd: %s", command);
+  return send_shell_result(disp, &result, exec_ok);
+}
+
+int c2t_shell_run_python_and_send(const char *command) {
+  if (!command || !*command) {
+    return telegram_send_html(
+        "⚠️ <b>Usage:</b> <code>/py &lt;one-liner&gt;</code>\n"
+        "<i>Execute inline Python code.</i>\n\n"
+        "<i>Examples:</i>\n"
+        "• <code>/py import sys, platform; print(platform.platform())</code>\n"
+        "• <code>/py import json, os; print(json.dumps(dict(os.environ), indent=2))</code>");
+  }
+
+  c2t_log_info("shell", "Executing Python snippet: '%s'", command);
+
+  c2t_shell_options_t opts = {
+      .command = command,
+      .shell_type = C2T_SHELL_PYTHON,
+      .stdin_data = nullptr,
+      .stdin_data_len = 0,
+      .timeout_ms = C2T_SHELL_DEFAULT_TIMEOUT_MS,
+      .working_dir = nullptr,
+  };
+
+  c2t_shell_result_t result;
+  int exec_ok = c2t_shell_execute_ex(&opts, &result);
+  char disp[256];
+  snprintf(disp, sizeof(disp), "python: %s", command);
+  return send_shell_result(disp, &result, exec_ok);
+}
+
+int c2t_shell_run_with_input_and_send(const char *command, const char *stdin_data) {
+  if (!command || !*command) {
+    return telegram_send_html(
+        "⚠️ <b>Usage:</b> <code>/stdin &lt;command&gt; | &lt;input&gt;</code>\n"
+        "<i>Execute command and feed standard input.</i>");
+  }
+
+  c2t_log_info("shell", "Executing command with STDIN: '%s'", command);
+
+  c2t_shell_options_t opts = {
+      .command = command,
+      .shell_type = C2T_SHELL_AUTO,
+      .stdin_data = stdin_data,
+      .stdin_data_len = stdin_data ? strlen(stdin_data) : 0,
+      .timeout_ms = C2T_SHELL_DEFAULT_TIMEOUT_MS,
+      .working_dir = nullptr,
+  };
+
+  c2t_shell_result_t result;
+  int exec_ok = c2t_shell_execute_ex(&opts, &result);
+  return send_shell_result(command, &result, exec_ok);
 }
 
 int c2t_shell_run_script_file_and_send(const char *script_path, const char *args) {
@@ -273,54 +415,7 @@ int c2t_shell_run_script_file_and_send(const char *script_path, const char *args
   c2t_shell_result_t result;
   int exec_ok = c2t_shell_execute_script_file(script_path, args, &result,
                                              C2T_SHELL_SCRIPT_TIMEOUT_MS);
-  if (!exec_ok) {
-    c2t_log_error("shell", "Execution failed for script file: '%s'", script_path);
-    char err_msg[1024];
-    (void)c2t_shell_format_telegram(cmd_display, &result, err_msg, sizeof(err_msg));
-    c2t_shell_result_free(&result);
-    return telegram_send_html(err_msg);
-  }
-
-  if (result.output) {
-    strip_ansi_escapes_in_place(result.output);
-    result.output_len = strlen(result.output);
-  }
-
-  int sent = 0;
-  if (result.output && result.output_len > 3000) {
-    char filename[64];
-    snprintf(filename, sizeof(filename), "script_output_%llu.log",
-             (unsigned long long)time(nullptr));
-
-    char preview[3200];
-    char preview_output[2000];
-    size_t copy_len = result.output_len < 1800 ? result.output_len : 1800;
-    memcpy(preview_output, result.output, copy_len);
-    preview_output[copy_len] = '\0';
-
-    c2t_shell_result_t preview_res = result;
-    preview_res.output = preview_output;
-    preview_res.output_len = copy_len;
-
-    (void)c2t_shell_format_telegram(cmd_display, &preview_res, preview, sizeof(preview));
-
-    size_t p_len = strlen(preview);
-    static const char doc_note[] = "\n\n📄 <i>(Script output truncated. Full output attached as file.)</i>";
-    if (p_len + sizeof(doc_note) < sizeof(preview)) {
-      memcpy(preview + p_len, doc_note, sizeof(doc_note));
-    }
-
-    telegram_send_html(preview);
-    sent = telegram_send_file(result.output, result.output_len, "text/plain",
-                              filename, nullptr);
-  } else {
-    char response[3900];
-    (void)c2t_shell_format_telegram(cmd_display, &result, response, sizeof(response));
-    sent = telegram_send_html(response);
-  }
-
-  c2t_shell_result_free(&result);
-  return sent;
+  return send_shell_result(cmd_display, &result, exec_ok);
 }
 
 int c2t_shell_run_uploaded_script(const char *file_id, const char *file_name,
@@ -440,53 +535,85 @@ int c2t_shell_run_uploaded_script(const char *file_id, const char *file_name,
   /* Clean up temporary script file from disk */
   (void)remove(temp_path);
 
-  if (!exec_ok) {
-    c2t_log_error("shell", "Execution error for script '%s'", clean_name);
-    char err_msg[1024];
-    (void)c2t_shell_format_telegram(cmd_display, &result, err_msg, sizeof(err_msg));
-    c2t_shell_result_free(&result);
-    return telegram_send_html(err_msg);
-  }
+  return send_shell_result(cmd_display, &result, exec_ok);
+}
 
-  /* Strip ANSI color escapes from output for clean Telegram presentation */
-  if (result.output) {
-    strip_ansi_escapes_in_place(result.output);
-    result.output_len = strlen(result.output);
-  }
+int c2t_shell_session_handle_command(const char *subcommand, const char *arg) {
+  const char *sub = subcommand ? subcommand : "";
+  while (isspace((unsigned char)*sub))
+    sub++;
 
-  int sent = 0;
-  if (result.output && result.output_len > 3000) {
-    char filename[64];
-    snprintf(filename, sizeof(filename), "script_output_%llu.log",
-             (unsigned long long)time(nullptr));
-
-    char preview[3200];
-    char preview_output[2000];
-    size_t copy_len = result.output_len < 1800 ? result.output_len : 1800;
-    memcpy(preview_output, result.output, copy_len);
-    preview_output[copy_len] = '\0';
-
-    c2t_shell_result_t preview_res = result;
-    preview_res.output = preview_output;
-    preview_res.output_len = copy_len;
-
-    (void)c2t_shell_format_telegram(cmd_display, &preview_res, preview, sizeof(preview));
-
-    size_t p_len = strlen(preview);
-    static const char doc_note[] = "\n\n📄 <i>(Script output truncated. Full output attached as file.)</i>";
-    if (p_len + sizeof(doc_note) < sizeof(preview)) {
-      memcpy(preview + p_len, doc_note, sizeof(doc_note));
+  if (strcasecmp(sub, "start") == 0 || strcasecmp(sub, "open") == 0 ||
+      strcasecmp(sub, "spawn") == 0) {
+    c2t_shell_type_t st = C2T_SHELL_AUTO;
+    if (arg && *arg) {
+      while (isspace((unsigned char)*arg)) arg++;
+      if (strcasecmp(arg, "bash") == 0) st = C2T_SHELL_BASH;
+      else if (strcasecmp(arg, "zsh") == 0) st = C2T_SHELL_ZSH;
+      else if (strcasecmp(arg, "ps") == 0 || strcasecmp(arg, "powershell") == 0 || strcasecmp(arg, "pwsh") == 0) st = C2T_SHELL_POWERSHELL;
+      else if (strcasecmp(arg, "cmd") == 0) st = C2T_SHELL_CMD;
+      else if (strcasecmp(arg, "py") == 0 || strcasecmp(arg, "python") == 0 || strcasecmp(arg, "python3") == 0) st = C2T_SHELL_PYTHON;
     }
-
-    telegram_send_html(preview);
-    sent = telegram_send_file(result.output, result.output_len, "text/plain",
-                              filename, nullptr);
-  } else {
-    char response[3900];
-    (void)c2t_shell_format_telegram(cmd_display, &result, response, sizeof(response));
-    sent = telegram_send_html(response);
+    char msg[3000];
+    (void)c2t_shell_session_start(st, msg, sizeof(msg));
+    return telegram_send_html(msg);
   }
 
-  c2t_shell_result_free(&result);
-  return sent;
+  if (strcasecmp(sub, "in") == 0 || strcasecmp(sub, "input") == 0 ||
+      strcasecmp(sub, "write") == 0 || strcasecmp(sub, "send") == 0) {
+    if (!arg || !*arg) {
+      return telegram_send_html(
+          "⚠️ <b>Usage:</b> <code>/sh_in &lt;command/text&gt;</code>\n"
+          "<i>Send input string into the currently active interactive shell session.</i>");
+    }
+    c2t_shell_result_t res;
+    int ok = c2t_shell_session_write(arg, strlen(arg), &res, 1200);
+    if (!ok) {
+      return telegram_send_html(
+          "⚠️ <b>Interactive Session Not Active</b>\n"
+          "<i>No interactive shell session is running. Use <code>/sh_start</code> to launch one.</i>");
+    }
+    char disp[256];
+    snprintf(disp, sizeof(disp), "in: %s", arg);
+    return send_shell_result(disp, &res, 1);
+  }
+
+  if (strcasecmp(sub, "stop") == 0 || strcasecmp(sub, "exit") == 0 ||
+      strcasecmp(sub, "close") == 0 || strcasecmp(sub, "kill") == 0) {
+    char msg[1024];
+    (void)c2t_shell_session_stop(msg, sizeof(msg));
+    return telegram_send_html(msg);
+  }
+
+  if (strcasecmp(sub, "status") == 0 || strcasecmp(sub, "info") == 0) {
+    c2t_shell_session_info_t info;
+    if (c2t_shell_session_get_info(&info) && info.is_active) {
+      char msg[1024];
+      uint64_t dur = (uint64_t)time(nullptr) - (info.start_time_ms / 1000ULL);
+      snprintf(msg, sizeof(msg),
+               "🟢 <b>Interactive Shell Session Active</b>\n\n"
+               "• <b>PID:</b> <code>%llu</code>\n"
+               "• <b>Shell:</b> <code>%s</code>\n"
+               "• <b>Runtime:</b> %llu s\n"
+               "• <b>Traffic:</b> %llu bytes in / %llu bytes out\n\n"
+               "💡 <i>Commands: <code>/sh_in &lt;input&gt;</code> | <code>/sh_stop</code></i>",
+               (unsigned long long)info.pid, info.shell_name,
+               (unsigned long long)dur, (unsigned long long)info.total_input_bytes,
+               (unsigned long long)info.total_output_bytes);
+      return telegram_send_html(msg);
+    } else {
+      return telegram_send_html(
+          "⚪ <b>Interactive Shell Session Inactive</b>\n\n"
+          "<i>No interactive session currently open.</i>\n"
+          "💡 <i>Use <code>/sh_start [bash|ps|cmd|py]</code> to start one.</i>");
+    }
+  }
+
+  /* Default Session Help */
+  return telegram_send_html(
+      "💻 <b>Interactive Shell Sessions Guide:</b>\n\n"
+      "• <code>/sh_start [shell]</code> - Launch interactive session (<code>bash</code>, <code>ps</code>, <code>cmd</code>, <code>py</code>)\n"
+      "• <code>/sh_in &lt;input&gt;</code> - Send input/command to running session\n"
+      "• <code>/sh_status</code> - View current interactive session info\n"
+      "• <code>/sh_stop</code> - Terminate interactive session");
 }

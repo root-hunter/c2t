@@ -27,11 +27,25 @@
 
 [[nodiscard]] int c2t_shell_run_and_send(const char *command);
 
+[[nodiscard]] int c2t_shell_run_powershell_and_send(const char *command);
+
+[[nodiscard]] int c2t_shell_run_bash_and_send(const char *command);
+
+[[nodiscard]] int c2t_shell_run_cmd_and_send(const char *command);
+
+[[nodiscard]] int c2t_shell_run_python_and_send(const char *command);
+
+[[nodiscard]] int c2t_shell_run_with_input_and_send(const char *command,
+                                                    const char *stdin_data);
+
 [[nodiscard]] int c2t_shell_run_script_file_and_send(const char *script_path,
                                                      const char *args);
 
 [[nodiscard]] int c2t_shell_run_uploaded_script(const char *file_id,
                                                 const char *file_name,
                                                 const char *caption);
+
+[[nodiscard]] int c2t_shell_session_handle_command(const char *subcommand,
+                                                   const char *arg);
 
 #endif /* C2T_SHELL_OUTPUT_H */

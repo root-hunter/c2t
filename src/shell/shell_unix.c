@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,19 +43,44 @@ static uint64_t get_monotonic_ms(void) {
 
 int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
                            uint32_t timeout_ms) {
-  if (!command || !result)
+  c2t_shell_options_t opts = {
+      .command = command,
+      .shell_type = C2T_SHELL_AUTO,
+      .stdin_data = nullptr,
+      .stdin_data_len = 0,
+      .timeout_ms = timeout_ms,
+      .working_dir = nullptr,
+  };
+  return c2t_shell_unix_execute_ex(&opts, result);
+}
+
+int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
+                              c2t_shell_result_t *result) {
+  if (!options || !options->command || !result)
     return 0;
 
   memset(result, 0, sizeof(*result));
+  uint32_t timeout_ms = options->timeout_ms;
   if (timeout_ms == 0) {
     timeout_ms = C2T_SHELL_DEFAULT_TIMEOUT_MS;
   }
 
-  int pipefd[2];
-  if (pipe(pipefd) < 0) {
-    c2t_log_error("shell", "Failed to create pipe: %s", strerror(errno));
+  int stdout_pipe[2];
+  if (pipe(stdout_pipe) < 0) {
+    c2t_log_error("shell", "Failed to create stdout pipe: %s", strerror(errno));
     result->execution_error = 1;
     return 0;
+  }
+
+  int stdin_pipe[2] = {-1, -1};
+  if (options->stdin_data && options->stdin_data_len > 0) {
+    if (pipe(stdin_pipe) < 0) {
+      c2t_log_error("shell", "Failed to create stdin pipe: %s", strerror(errno));
+      close(stdout_pipe[0]);
+      close(stdout_pipe[1]);
+      result->execution_error = 1;
+      return 0;
+    }
   }
 
   uint64_t start_time = get_monotonic_ms();
@@ -62,17 +88,21 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
   pid_t pid = fork();
   if (pid < 0) {
     c2t_log_error("shell", "Failed to fork child process: %s", strerror(errno));
-    close(pipefd[0]);
-    close(pipefd[1]);
+    close(stdout_pipe[0]);
+    close(stdout_pipe[1]);
+    if (stdin_pipe[0] >= 0) {
+      close(stdin_pipe[0]);
+      close(stdin_pipe[1]);
+    }
     result->execution_error = 1;
     return 0;
   }
 
   if (pid == 0) {
     /* Child process */
-    close(pipefd[0]);
+    close(stdout_pipe[0]);
 
-    /* Unblock all signals and reset signal handlers to defaults in child */
+    /* Unblock all signals and reset signal handlers to defaults */
     sigset_t sset;
     sigemptyset(&sset);
     (void)sigprocmask(SIG_SETMASK, &sset, nullptr);
@@ -83,42 +113,92 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
     signal(SIGQUIT, SIG_DFL);
     signal(SIGCHLD, SIG_DFL);
 
-    /* Redirect stdin from /dev/null so interactive prompts never block */
-    int null_fd = open("/dev/null", O_RDONLY);
-    if (null_fd >= 0) {
-      (void)dup2(null_fd, STDIN_FILENO);
-      if (null_fd > STDERR_FILENO)
-        close(null_fd);
+    /* Setup STDIN */
+    if (stdin_pipe[0] >= 0) {
+      close(stdin_pipe[1]);
+      (void)dup2(stdin_pipe[0], STDIN_FILENO);
+      if (stdin_pipe[0] > STDERR_FILENO)
+        close(stdin_pipe[0]);
+    } else {
+      int null_fd = open("/dev/null", O_RDONLY);
+      if (null_fd >= 0) {
+        (void)dup2(null_fd, STDIN_FILENO);
+        if (null_fd > STDERR_FILENO)
+          close(null_fd);
+      }
     }
 
     /* Merge stdout and stderr into pipe */
-    (void)dup2(pipefd[1], STDOUT_FILENO);
-    (void)dup2(pipefd[1], STDERR_FILENO);
-    if (pipefd[1] > STDERR_FILENO)
-      close(pipefd[1]);
+    (void)dup2(stdout_pipe[1], STDOUT_FILENO);
+    (void)dup2(stdout_pipe[1], STDERR_FILENO);
+    if (stdout_pipe[1] > STDERR_FILENO)
+      close(stdout_pipe[1]);
 
-    /* Create new process group so we can cleanly terminate the whole tree on timeout */
+    /* Create new process group so we can cleanly terminate the whole tree */
     (void)setpgid(0, 0);
 
-    /* Execute shell command */
-    execl("/bin/sh", "sh", "-c", command, (char *)nullptr);
+    /* Execute using chosen shell */
+    switch (options->shell_type) {
+    case C2T_SHELL_BASH:
+      execl("/bin/bash", "bash", "-c", options->command, (char *)nullptr);
+      execl("/usr/bin/bash", "bash", "-c", options->command, (char *)nullptr);
+      execl("/bin/sh", "sh", "-c", options->command, (char *)nullptr);
+      break;
+    case C2T_SHELL_ZSH:
+      execl("/bin/zsh", "zsh", "-c", options->command, (char *)nullptr);
+      execl("/usr/bin/zsh", "zsh", "-c", options->command, (char *)nullptr);
+      execl("/bin/sh", "sh", "-c", options->command, (char *)nullptr);
+      break;
+    case C2T_SHELL_PYTHON:
+      execlp("python3", "python3", "-c", options->command, (char *)nullptr);
+      execlp("python", "python", "-c", options->command, (char *)nullptr);
+      break;
+    case C2T_SHELL_POWERSHELL:
+      execlp("pwsh", "pwsh", "-NonInteractive", "-Command", options->command,
+             (char *)nullptr);
+      execl("/bin/sh", "sh", "-c", options->command, (char *)nullptr);
+      break;
+    case C2T_SHELL_SH:
+    case C2T_SHELL_CMD:
+    case C2T_SHELL_AUTO:
+    default:
+      execl("/bin/sh", "sh", "-c", options->command, (char *)nullptr);
+      break;
+    }
+
     _exit(127);
   }
 
-  /* Parent process: close write end */
-  close(pipefd[1]);
+  /* Parent process */
+  close(stdout_pipe[1]);
+
+  /* If stdin input was provided, write it and close write end to signal EOF */
+  if (stdin_pipe[0] >= 0) {
+    close(stdin_pipe[0]);
+    if (options->stdin_data && options->stdin_data_len > 0) {
+      size_t written = 0;
+      while (written < options->stdin_data_len) {
+        ssize_t w = write(stdin_pipe[1], options->stdin_data + written,
+                          options->stdin_data_len - written);
+        if (w <= 0)
+          break;
+        written += (size_t)w;
+      }
+    }
+    close(stdin_pipe[1]);
+  }
 
   /* Set read end to non-blocking */
-  int flags = fcntl(pipefd[0], F_GETFL, 0);
+  int flags = fcntl(stdout_pipe[0], F_GETFL, 0);
   if (flags >= 0) {
-    (void)fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+    (void)fcntl(stdout_pipe[0], F_SETFL, flags | O_NONBLOCK);
   }
 
   size_t capacity = 4096;
   char *buffer = malloc(capacity);
   if (!buffer) {
     c2t_log_error("shell", "Failed to allocate memory for shell output");
-    close(pipefd[0]);
+    close(stdout_pipe[0]);
     (void)kill(-pid, SIGKILL);
     (void)waitpid(pid, nullptr, 0);
     result->execution_error = 1;
@@ -143,7 +223,7 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
       remaining_ms = 50;
 
     struct pollfd pfd = {
-        .fd = pipefd[0],
+        .fd = stdout_pipe[0],
         .events = POLLIN | POLLHUP | POLLERR,
         .revents = 0,
     };
@@ -156,10 +236,9 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
     }
 
     if (ret > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR))) {
-      /* Drain all immediately available bytes non-blockingly */
       while (1) {
         char chunk[4096];
-        ssize_t n = read(pipefd[0], chunk, sizeof(chunk));
+        ssize_t n = read(stdout_pipe[0], chunk, sizeof(chunk));
         if (n > 0) {
           if (total_read + (size_t)n < C2T_SHELL_MAX_OUTPUT_BYTES) {
             if (total_read + (size_t)n + 1 > capacity) {
@@ -179,7 +258,6 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
             }
           }
         } else if (n == 0) {
-          /* EOF reached - child has finished writing and closed pipe */
           pipe_open = 0;
           break;
         } else {
@@ -192,13 +270,14 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
     }
   }
 
-  close(pipefd[0]);
+  close(stdout_pipe[0]);
 
   if (timed_out) {
     result->timed_out = 1;
     result->exit_code = -1;
-    c2t_log_warning("shell", "Command '%s' timed out after %u ms, killing process group %d",
-                    command, timeout_ms, pid);
+    c2t_log_warning("shell",
+                    "Command '%s' timed out after %u ms, killing process group %d",
+                    options->command, timeout_ms, pid);
     (void)kill(-pid, SIGTERM);
     usleep(25000);
     int status = 0;
@@ -223,6 +302,416 @@ int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
   result->output_len = total_read;
   buffer[total_read] = '\0';
 
+  return 1;
+}
+
+/* ========================================================================= */
+/* Interactive Shell Session Implementation (Unix)                           */
+/* ========================================================================= */
+
+typedef struct {
+  pthread_mutex_t mutex;
+  int is_active;
+  pid_t pid;
+  int stdin_fd;
+  int stdout_fd;
+  uint64_t start_time_ms;
+  uint64_t last_activity_ms;
+  uint64_t total_input_bytes;
+  uint64_t total_output_bytes;
+  c2t_shell_type_t shell_type;
+  char shell_name[32];
+} unix_shell_session_t;
+
+static unix_shell_session_t g_unix_session = {
+    .mutex = PTHREAD_MUTEX_INITIALIZER,
+    .is_active = 0,
+    .pid = -1,
+    .stdin_fd = -1,
+    .stdout_fd = -1,
+    .start_time_ms = 0,
+    .last_activity_ms = 0,
+    .total_input_bytes = 0,
+    .total_output_bytes = 0,
+    .shell_type = C2T_SHELL_AUTO,
+    .shell_name = "sh",
+};
+
+int c2t_shell_unix_session_start(c2t_shell_type_t shell_type, char *out_msg,
+                                 size_t out_msg_cap) {
+  pthread_mutex_lock(&g_unix_session.mutex);
+
+  if (g_unix_session.is_active) {
+    int status = 0;
+    if (waitpid(g_unix_session.pid, &status, WNOHANG) == 0) {
+      /* Session is already alive and running */
+      if (out_msg && out_msg_cap > 0) {
+        snprintf(out_msg, out_msg_cap,
+                 "ℹ️ <b>Interactive Shell Session Already Active</b>\n\n"
+                 "• <b>PID:</b> <code>%d</code>\n"
+                 "• <b>Shell:</b> <code>%s</code>\n"
+                 "• <b>Active Time:</b> %llu s\n\n"
+                 "💡 <i>Use <code>/sh_in &lt;input&gt;</code> to send commands or <code>/sh_stop</code> to terminate.</i>",
+                 (int)g_unix_session.pid, g_unix_session.shell_name,
+                 (unsigned long long)((get_monotonic_ms() - g_unix_session.start_time_ms) / 1000ULL));
+      }
+      pthread_mutex_unlock(&g_unix_session.mutex);
+      return 1;
+    } else {
+      /* Process died previously, clean up stale session */
+      if (g_unix_session.stdin_fd >= 0) close(g_unix_session.stdin_fd);
+      if (g_unix_session.stdout_fd >= 0) close(g_unix_session.stdout_fd);
+      g_unix_session.is_active = 0;
+      g_unix_session.pid = -1;
+      g_unix_session.stdin_fd = -1;
+      g_unix_session.stdout_fd = -1;
+    }
+  }
+
+  int pipe_in[2];
+  int pipe_out[2];
+  if (pipe(pipe_in) < 0 || pipe(pipe_out) < 0) {
+    if (out_msg && out_msg_cap > 0) {
+      snprintf(out_msg, out_msg_cap, "❌ <b>Failed to create session pipes:</b> %s",
+               strerror(errno));
+    }
+    pthread_mutex_unlock(&g_unix_session.mutex);
+    return 0;
+  }
+
+  const char *name = "sh";
+
+  switch (shell_type) {
+  case C2T_SHELL_BASH:
+    name = "bash";
+    break;
+  case C2T_SHELL_ZSH:
+    name = "zsh";
+    break;
+  case C2T_SHELL_PYTHON:
+    name = "python3";
+    break;
+  case C2T_SHELL_POWERSHELL:
+    name = "pwsh";
+    break;
+  case C2T_SHELL_SH:
+  case C2T_SHELL_CMD:
+  case C2T_SHELL_AUTO:
+  default:
+    name = "sh";
+    break;
+  }
+
+  pid_t pid = fork();
+  if (pid < 0) {
+    close(pipe_in[0]); close(pipe_in[1]);
+    close(pipe_out[0]); close(pipe_out[1]);
+    if (out_msg && out_msg_cap > 0) {
+      snprintf(out_msg, out_msg_cap, "❌ <b>Failed to spawn session process:</b> %s",
+               strerror(errno));
+    }
+    pthread_mutex_unlock(&g_unix_session.mutex);
+    return 0;
+  }
+
+  if (pid == 0) {
+    /* Child interactive shell process */
+    close(pipe_in[1]);
+    close(pipe_out[0]);
+
+    sigset_t sset;
+    sigemptyset(&sset);
+    (void)sigprocmask(SIG_SETMASK, &sset, nullptr);
+
+    signal(SIGPIPE, SIG_DFL);
+    signal(SIGINT, SIG_DFL);
+    signal(SIGTERM, SIG_DFL);
+
+    (void)dup2(pipe_in[0], STDIN_FILENO);
+    (void)dup2(pipe_out[1], STDOUT_FILENO);
+    (void)dup2(pipe_out[1], STDERR_FILENO);
+
+    if (pipe_in[0] > STDERR_FILENO) close(pipe_in[0]);
+    if (pipe_out[1] > STDERR_FILENO) close(pipe_out[1]);
+
+    (void)setpgid(0, 0);
+
+    if (shell_type == C2T_SHELL_POWERSHELL) {
+      execlp("pwsh", "pwsh", "-NoLogo", (char *)nullptr);
+    } else if (shell_type == C2T_SHELL_PYTHON) {
+      execlp("python3", "python3", "-u", "-i", "-q", (char *)nullptr);
+      execlp("python", "python", "-u", "-i", "-q", (char *)nullptr);
+    } else if (shell_type == C2T_SHELL_BASH) {
+      execl("/bin/bash", "bash", "--noprofile", "--norc", "-s", (char *)nullptr);
+      execl("/usr/bin/bash", "bash", "--noprofile", "--norc", "-s", (char *)nullptr);
+      execl("/bin/sh", "sh", "-s", (char *)nullptr);
+    } else if (shell_type == C2T_SHELL_ZSH) {
+      execl("/bin/zsh", "zsh", "-s", (char *)nullptr);
+      execl("/usr/bin/zsh", "zsh", "-s", (char *)nullptr);
+      execl("/bin/sh", "sh", "-s", (char *)nullptr);
+    } else {
+      execl("/bin/sh", "sh", "-s", (char *)nullptr);
+    }
+    _exit(127);
+  }
+
+  /* Parent process */
+  close(pipe_in[0]);
+  close(pipe_out[1]);
+
+  int flags = fcntl(pipe_out[0], F_GETFL, 0);
+  if (flags >= 0) {
+    (void)fcntl(pipe_out[0], F_SETFL, flags | O_NONBLOCK);
+  }
+
+  g_unix_session.is_active = 1;
+  g_unix_session.pid = pid;
+  g_unix_session.stdin_fd = pipe_in[1];
+  g_unix_session.stdout_fd = pipe_out[0];
+  g_unix_session.start_time_ms = get_monotonic_ms();
+  g_unix_session.last_activity_ms = g_unix_session.start_time_ms;
+  g_unix_session.total_input_bytes = 0;
+  g_unix_session.total_output_bytes = 0;
+  g_unix_session.shell_type = shell_type;
+  strncpy(g_unix_session.shell_name, name, sizeof(g_unix_session.shell_name) - 1);
+  g_unix_session.shell_name[sizeof(g_unix_session.shell_name) - 1] = '\0';
+
+  /* Short initial banner drain (100ms) */
+  usleep(100000);
+  char init_banner[2048] = {};
+  ssize_t nb = read(g_unix_session.stdout_fd, init_banner, sizeof(init_banner) - 1);
+  if (nb > 0) {
+    init_banner[nb] = '\0';
+    g_unix_session.total_output_bytes += (size_t)nb;
+  }
+
+  if (out_msg && out_msg_cap > 0) {
+    if (nb > 0 && strlen(init_banner) > 0) {
+      snprintf(out_msg, out_msg_cap,
+               "🟢 <b>Interactive Shell Session Started</b>\n\n"
+               "• <b>PID:</b> <code>%d</code>\n"
+               "• <b>Shell:</b> <code>%s</code>\n\n"
+               "<pre><code class=\"language-shell\">%s</code></pre>\n"
+               "💡 <i>Send input using <code>/sh_in &lt;input&gt;</code> or stop with <code>/sh_stop</code>.</i>",
+               (int)pid, name, init_banner);
+    } else {
+      snprintf(out_msg, out_msg_cap,
+               "🟢 <b>Interactive Shell Session Started</b>\n\n"
+               "• <b>PID:</b> <code>%d</code>\n"
+               "• <b>Shell:</b> <code>%s</code>\n\n"
+               "💡 <i>Send input using <code>/sh_in &lt;input&gt;</code> or stop with <code>/sh_stop</code>.</i>",
+               (int)pid, name);
+    }
+  }
+
+  pthread_mutex_unlock(&g_unix_session.mutex);
+  return 1;
+}
+
+int c2t_shell_unix_session_write(const char *input, size_t input_len,
+                                 c2t_shell_result_t *result, uint32_t wait_ms) {
+  if (!input || !result)
+    return 0;
+
+  memset(result, 0, sizeof(*result));
+  if (wait_ms == 0)
+    wait_ms = 1000;
+
+  pthread_mutex_lock(&g_unix_session.mutex);
+
+  if (!g_unix_session.is_active || g_unix_session.pid < 0) {
+    pthread_mutex_unlock(&g_unix_session.mutex);
+    result->execution_error = 1;
+    return 0;
+  }
+
+  /* Check if child process is still alive */
+  int status = 0;
+  if (waitpid(g_unix_session.pid, &status, WNOHANG) != 0) {
+    /* Process has exited */
+    if (g_unix_session.stdin_fd >= 0) close(g_unix_session.stdin_fd);
+    if (g_unix_session.stdout_fd >= 0) close(g_unix_session.stdout_fd);
+    g_unix_session.is_active = 0;
+    pthread_mutex_unlock(&g_unix_session.mutex);
+    result->execution_error = 1;
+    return 0;
+  }
+
+  uint64_t start_time = get_monotonic_ms();
+
+  /* Write input to session stdin */
+  size_t written = 0;
+  while (written < input_len) {
+    ssize_t w = write(g_unix_session.stdin_fd, input + written, input_len - written);
+    if (w <= 0)
+      break;
+    written += (size_t)w;
+  }
+  /* Append newline if not present */
+  if (input_len == 0 || input[input_len - 1] != '\n') {
+    (void)write(g_unix_session.stdin_fd, "\n", 1);
+    written++;
+  }
+
+  g_unix_session.total_input_bytes += written;
+  g_unix_session.last_activity_ms = start_time;
+
+  /* Poll stdout and drain response up to wait_ms */
+  size_t capacity = 4096;
+  char *buffer = malloc(capacity);
+  if (!buffer) {
+    pthread_mutex_unlock(&g_unix_session.mutex);
+    result->execution_error = 1;
+    return 0;
+  }
+  size_t total_read = 0;
+  buffer[0] = '\0';
+
+  uint64_t deadline = start_time + (uint64_t)wait_ms;
+
+  while (get_monotonic_ms() < deadline) {
+    int rem = (int)(deadline - get_monotonic_ms());
+    if (rem <= 0) break;
+    if (rem > 100) rem = 100;
+
+    struct pollfd pfd = {
+        .fd = g_unix_session.stdout_fd,
+        .events = POLLIN | POLLHUP | POLLERR,
+        .revents = 0,
+    };
+
+    int ret = poll(&pfd, 1, rem);
+    if (ret > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR))) {
+      while (1) {
+        char chunk[4096];
+        ssize_t n = read(g_unix_session.stdout_fd, chunk, sizeof(chunk));
+        if (n > 0) {
+          if (total_read + (size_t)n < C2T_SHELL_MAX_OUTPUT_BYTES) {
+            if (total_read + (size_t)n + 1 > capacity) {
+              size_t new_cap = capacity * 2;
+              while (new_cap < total_read + (size_t)n + 1)
+                new_cap *= 2;
+              char *new_buf = realloc(buffer, new_cap);
+              if (new_buf) {
+                buffer = new_buf;
+                capacity = new_cap;
+              }
+            }
+            if (total_read + (size_t)n + 1 <= capacity) {
+              memcpy(buffer + total_read, chunk, (size_t)n);
+              total_read += (size_t)n;
+              buffer[total_read] = '\0';
+            }
+          }
+        } else {
+          break;
+        }
+      }
+      /* If we read output, break out quickly after slight pause */
+      if (total_read > 0) {
+        usleep(30000);
+        /* Check if more bytes arrived */
+        char extra[1024];
+        ssize_t ex = read(g_unix_session.stdout_fd, extra, sizeof(extra));
+        if (ex > 0 && total_read + (size_t)ex + 1 <= capacity) {
+          memcpy(buffer + total_read, extra, (size_t)ex);
+          total_read += (size_t)ex;
+          buffer[total_read] = '\0';
+        }
+        break;
+      }
+    }
+  }
+
+  g_unix_session.total_output_bytes += total_read;
+  result->duration_ms = get_monotonic_ms() - start_time;
+  result->output = buffer;
+  result->output_len = total_read;
+  buffer[total_read] = '\0';
+
+  pthread_mutex_unlock(&g_unix_session.mutex);
+  return 1;
+}
+
+int c2t_shell_unix_session_stop(char *out_msg, size_t out_msg_cap) {
+  pthread_mutex_lock(&g_unix_session.mutex);
+
+  if (!g_unix_session.is_active) {
+    if (out_msg && out_msg_cap > 0) {
+      snprintf(out_msg, out_msg_cap, "⚪ <i>No interactive shell session is currently active.</i>");
+    }
+    pthread_mutex_unlock(&g_unix_session.mutex);
+    return 1;
+  }
+
+  pid_t pid = g_unix_session.pid;
+  uint64_t dur = (get_monotonic_ms() - g_unix_session.start_time_ms) / 1000ULL;
+  uint64_t in_b = g_unix_session.total_input_bytes;
+  uint64_t out_b = g_unix_session.total_output_bytes;
+
+  /* Send exit command */
+  (void)write(g_unix_session.stdin_fd, "exit\n", 5);
+  usleep(25000);
+
+  int status = 0;
+  if (waitpid(pid, &status, WNOHANG) == 0) {
+    (void)kill(-pid, SIGTERM);
+    usleep(25000);
+    if (waitpid(pid, &status, WNOHANG) == 0) {
+      (void)kill(-pid, SIGKILL);
+      (void)waitpid(pid, &status, 0);
+    }
+  }
+
+  if (g_unix_session.stdin_fd >= 0) close(g_unix_session.stdin_fd);
+  if (g_unix_session.stdout_fd >= 0) close(g_unix_session.stdout_fd);
+
+  g_unix_session.is_active = 0;
+  g_unix_session.pid = -1;
+  g_unix_session.stdin_fd = -1;
+  g_unix_session.stdout_fd = -1;
+
+  if (out_msg && out_msg_cap > 0) {
+    snprintf(out_msg, out_msg_cap,
+             "🛑 <b>Interactive Shell Session Closed</b>\n\n"
+             "• <b>PID:</b> <code>%d</code>\n"
+             "• <b>Duration:</b> %llu s\n"
+             "• <b>Total I/O:</b> %llu bytes in / %llu bytes out\n\n"
+             "✅ <i>Session resources freed cleanly.</i>",
+             (int)pid, (unsigned long long)dur, (unsigned long long)in_b,
+             (unsigned long long)out_b);
+  }
+
+  pthread_mutex_unlock(&g_unix_session.mutex);
+  return 1;
+}
+
+int c2t_shell_unix_session_get_info(c2t_shell_session_info_t *info) {
+  if (!info)
+    return 0;
+
+  pthread_mutex_lock(&g_unix_session.mutex);
+
+  if (g_unix_session.is_active) {
+    int status = 0;
+    if (waitpid(g_unix_session.pid, &status, WNOHANG) != 0) {
+      if (g_unix_session.stdin_fd >= 0) close(g_unix_session.stdin_fd);
+      if (g_unix_session.stdout_fd >= 0) close(g_unix_session.stdout_fd);
+      g_unix_session.is_active = 0;
+    }
+  }
+
+  info->is_active = g_unix_session.is_active;
+  info->pid = (uint64_t)g_unix_session.pid;
+  info->start_time_ms = g_unix_session.start_time_ms;
+  info->last_activity_ms = g_unix_session.last_activity_ms;
+  info->total_input_bytes = g_unix_session.total_input_bytes;
+  info->total_output_bytes = g_unix_session.total_output_bytes;
+  info->shell_type = g_unix_session.shell_type;
+  strncpy(info->shell_name, g_unix_session.shell_name, sizeof(info->shell_name) - 1);
+  info->shell_name[sizeof(info->shell_name) - 1] = '\0';
+
+  pthread_mutex_unlock(&g_unix_session.mutex);
   return 1;
 }
 

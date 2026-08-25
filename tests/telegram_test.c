@@ -2011,7 +2011,52 @@ int main(void) {
       c2t_shell_result_free(&script_res);
       return fail("c2t_shell_execute_script_file missing expected argument output");
     }
-    c2t_shell_result_free(&script_res);
+    /* Test c2t_shell_execute_ex with STDIN input */
+    c2t_shell_options_t stdin_opts = {
+#ifdef _WIN32
+        .command = "more",
+#else
+        .command = "cat",
+#endif
+        .shell_type = C2T_SHELL_AUTO,
+        .stdin_data = "c2t_piped_stdin_data\n",
+        .stdin_data_len = 21,
+        .timeout_ms = 5000,
+        .working_dir = nullptr,
+    };
+    c2t_shell_result_t stdin_res;
+    if (!c2t_shell_execute_ex(&stdin_opts, &stdin_res))
+      return fail("c2t_shell_execute_ex with stdin failed");
+    if (!stdin_res.output || !strstr(stdin_res.output, "c2t_piped_stdin_data")) {
+      c2t_shell_result_free(&stdin_res);
+      return fail("c2t_shell_execute_ex did not pass stdin correctly");
+    }
+    c2t_shell_result_free(&stdin_res);
+
+    /* Test interactive shell session lifecycle */
+    char sess_msg[2048];
+    if (!c2t_shell_session_start(C2T_SHELL_AUTO, sess_msg, sizeof(sess_msg)))
+      return fail("c2t_shell_session_start failed");
+
+    c2t_shell_session_info_t sess_info;
+    if (!c2t_shell_session_get_info(&sess_info) || !sess_info.is_active)
+      return fail("c2t_shell_session_get_info did not report active session");
+
+    c2t_shell_result_t sess_write_res;
+    if (!c2t_shell_session_write("echo sess_active_123", 20, &sess_write_res, 2000))
+      return fail("c2t_shell_session_write failed");
+    if (!sess_write_res.output || !strstr(sess_write_res.output, "sess_active_123")) {
+      c2t_shell_result_free(&sess_write_res);
+      return fail("c2t_shell_session_write missing echoed output");
+    }
+    c2t_shell_result_free(&sess_write_res);
+
+    char stop_msg[1024];
+    if (!c2t_shell_session_stop(stop_msg, sizeof(stop_msg)))
+      return fail("c2t_shell_session_stop failed");
+
+    if (!c2t_shell_session_get_info(&sess_info) || sess_info.is_active)
+      return fail("c2t_shell_session_get_info reported active after stop");
   }
 
   c2t_crypto_cleanup();

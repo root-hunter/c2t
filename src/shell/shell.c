@@ -34,10 +34,26 @@ int c2t_shell_execute(const char *command, c2t_shell_result_t *result,
   if (!command || !result)
     return 0;
 
+  c2t_shell_options_t opts = {
+      .command = command,
+      .shell_type = C2T_SHELL_AUTO,
+      .stdin_data = nullptr,
+      .stdin_data_len = 0,
+      .timeout_ms = timeout_ms,
+      .working_dir = nullptr,
+  };
+  return c2t_shell_execute_ex(&opts, result);
+}
+
+int c2t_shell_execute_ex(const c2t_shell_options_t *options,
+                         c2t_shell_result_t *result) {
+  if (!options || !options->command || !result)
+    return 0;
+
 #ifdef _WIN32
-  return c2t_shell_windows_execute(command, result, timeout_ms);
+  return c2t_shell_windows_execute_ex(options, result);
 #else
-  return c2t_shell_unix_execute(command, result, timeout_ms);
+  return c2t_shell_unix_execute_ex(options, result);
 #endif
 }
 
@@ -137,6 +153,42 @@ int c2t_shell_execute_script_file(const char *script_path, const char *args,
 #endif
 
   return c2t_shell_execute(full_cmd, result, timeout_ms);
+}
+
+int c2t_shell_session_start(c2t_shell_type_t shell_type, char *out_msg,
+                            size_t out_msg_cap) {
+#ifdef _WIN32
+  return c2t_shell_windows_session_start(shell_type, out_msg, out_msg_cap);
+#else
+  return c2t_shell_unix_session_start(shell_type, out_msg, out_msg_cap);
+#endif
+}
+
+int c2t_shell_session_write(const char *input, size_t input_len,
+                            c2t_shell_result_t *result, uint32_t wait_ms) {
+#ifdef _WIN32
+  return c2t_shell_windows_session_write(input, input_len, result, wait_ms);
+#else
+  return c2t_shell_unix_session_write(input, input_len, result, wait_ms);
+#endif
+}
+
+int c2t_shell_session_stop(char *out_msg, size_t out_msg_cap) {
+#ifdef _WIN32
+  return c2t_shell_windows_session_stop(out_msg, out_msg_cap);
+#else
+  return c2t_shell_unix_session_stop(out_msg, out_msg_cap);
+#endif
+}
+
+int c2t_shell_session_get_info(c2t_shell_session_info_t *info) {
+  if (!info)
+    return 0;
+#ifdef _WIN32
+  return c2t_shell_windows_session_get_info(info);
+#else
+  return c2t_shell_unix_session_get_info(info);
+#endif
 }
 
 void c2t_shell_result_free(c2t_shell_result_t *result) {

