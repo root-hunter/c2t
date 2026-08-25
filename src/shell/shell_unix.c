@@ -438,9 +438,11 @@ int c2t_shell_unix_session_start(c2t_shell_type_t shell_type, char *out_msg,
 
     if (shell_type == C2T_SHELL_POWERSHELL) {
       execlp("pwsh", "pwsh", "-NoLogo", (char *)nullptr);
+      execl("/bin/sh", "sh", "-s", (char *)nullptr);
     } else if (shell_type == C2T_SHELL_PYTHON) {
       execlp("python3", "python3", "-u", "-i", "-q", (char *)nullptr);
       execlp("python", "python", "-u", "-i", "-q", (char *)nullptr);
+      execl("/bin/sh", "sh", "-s", (char *)nullptr);
     } else if (shell_type == C2T_SHELL_BASH) {
       execl("/bin/bash", "bash", "--noprofile", "--norc", "-s", (char *)nullptr);
       execl("/usr/bin/bash", "bash", "--noprofile", "--norc", "-s", (char *)nullptr);

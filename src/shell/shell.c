@@ -119,9 +119,11 @@ int c2t_shell_execute_script_file(const char *script_path, const char *args,
 #else
   if (strcasecmp(ext, ".py") == 0) {
     if (*extra) {
-      snprintf(full_cmd, sizeof(full_cmd), "python3 \"%s\" %s", script_path, extra);
+      snprintf(full_cmd, sizeof(full_cmd), "python3 \"%s\" %s 2>/dev/null || python \"%s\" %s",
+               script_path, extra, script_path, extra);
     } else {
-      snprintf(full_cmd, sizeof(full_cmd), "python3 \"%s\"", script_path);
+      snprintf(full_cmd, sizeof(full_cmd), "python3 \"%s\" 2>/dev/null || python \"%s\"",
+               script_path, script_path);
     }
   } else if (strcasecmp(ext, ".pl") == 0) {
     if (*extra) {
@@ -137,10 +139,11 @@ int c2t_shell_execute_script_file(const char *script_path, const char *args,
     }
   } else if (strcasecmp(ext, ".sh") == 0 || strcasecmp(ext, ".bash") == 0 ||
              strcasecmp(ext, ".zsh") == 0) {
+    (void)chmod(script_path, 0700);
     if (*extra) {
-      snprintf(full_cmd, sizeof(full_cmd), "bash \"%s\" %s", script_path, extra);
+      snprintf(full_cmd, sizeof(full_cmd), "sh \"%s\" %s", script_path, extra);
     } else {
-      snprintf(full_cmd, sizeof(full_cmd), "bash \"%s\"", script_path);
+      snprintf(full_cmd, sizeof(full_cmd), "sh \"%s\"", script_path);
     }
   } else {
     (void)chmod(script_path, 0700);

