@@ -563,6 +563,8 @@ typedef struct {
 
 static win_shell_session_t g_win_session = {0};
 
+#define C2T_WIN_SESSION_IDLE_TIMEOUT_MS (15ULL * 60ULL * 1000ULL)
+
 static void ensure_session_cs_init(void) {
   if (!g_win_session.initialized) {
     c2t_InitializeCriticalSection(&g_win_session.cs);
@@ -570,10 +572,35 @@ static void ensure_session_cs_init(void) {
   }
 }
 
+static void check_win_session_idle_watchdog(void) {
+  if (g_win_session.is_active && g_win_session.hProcess) {
+    uint64_t now = c2t_GetTickCount64();
+    if (now > g_win_session.last_activity_ms + C2T_WIN_SESSION_IDLE_TIMEOUT_MS) {
+      c2t_log_info("shell", "Windows interactive session PID %lu timed out due to 15m inactivity",
+                   (unsigned long)g_win_session.pid);
+      if (g_win_session.hJob) {
+        c2t_TerminateJobObject(g_win_session.hJob, 1);
+        c2t_CloseHandle(g_win_session.hJob);
+      }
+      if (g_win_session.hProcess) {
+        c2t_TerminateProcess(g_win_session.hProcess, 1);
+        c2t_CloseHandle(g_win_session.hProcess);
+      }
+      if (g_win_session.hThread) c2t_CloseHandle(g_win_session.hThread);
+      if (g_win_session.hStdinWrite) c2t_CloseHandle(g_win_session.hStdinWrite);
+      if (g_win_session.hStdoutRead) c2t_CloseHandle(g_win_session.hStdoutRead);
+      memset(&g_win_session, 0, sizeof(g_win_session));
+      g_win_session.initialized = 1;
+    }
+  }
+}
+
 int c2t_shell_windows_session_start(c2t_shell_type_t shell_type, char *out_msg,
                                     size_t out_msg_cap) {
   ensure_session_cs_init();
   c2t_EnterCriticalSection(&g_win_session.cs);
+
+  check_win_session_idle_watchdog();
 
   if (g_win_session.is_active && g_win_session.hProcess) {
     DWORD exit_code = 0;
@@ -778,6 +805,8 @@ int c2t_shell_windows_session_write(const char *input, size_t input_len,
   ensure_session_cs_init();
   c2t_EnterCriticalSection(&g_win_session.cs);
 
+  check_win_session_idle_watchdog();
+
   if (!g_win_session.is_active || !g_win_session.hProcess) {
     c2t_LeaveCriticalSection(&g_win_session.cs);
     result->execution_error = 1;
@@ -931,6 +960,8 @@ int c2t_shell_windows_session_get_info(c2t_shell_session_info_t *info) {
 
   ensure_session_cs_init();
   c2t_EnterCriticalSection(&g_win_session.cs);
+
+  check_win_session_idle_watchdog();
 
   if (g_win_session.is_active && g_win_session.hProcess) {
     DWORD exit_code = 0;

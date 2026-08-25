@@ -17,6 +17,7 @@
 
 #ifndef _WIN32
 
+#define _GNU_SOURCE
 #include "shell_unix.h"
 #include "../logging/logging.h"
 
@@ -28,10 +29,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+#define C2T_SHELL_CHUNK_SIZE 8192U
+#define C2T_SESSION_IDLE_TIMEOUT_MS (15U * 60U * 1000U)
 
 static uint64_t get_monotonic_ms(void) {
   struct timespec ts;
@@ -39,6 +44,42 @@ static uint64_t get_monotonic_ms(void) {
     return ((uint64_t)ts.tv_sec * 1000ULL) + ((uint64_t)ts.tv_nsec / 1000000ULL);
   }
   return (uint64_t)time(nullptr) * 1000ULL;
+}
+
+static int create_cloexec_pipe(int pipefd[2]) {
+#if defined(__linux__) && defined(O_CLOEXEC)
+  if (pipe2(pipefd, O_CLOEXEC) == 0) {
+    return 0;
+  }
+#endif
+  if (pipe(pipefd) < 0) {
+    return -1;
+  }
+  (void)fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
+  (void)fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
+  return 0;
+}
+
+static void sanitize_child_environment_and_fds(void) {
+  /* Unblock all signals and reset signal handlers to defaults */
+  sigset_t sset;
+  sigemptyset(&sset);
+  (void)sigprocmask(SIG_SETMASK, &sset, nullptr);
+
+  signal(SIGPIPE, SIG_DFL);
+  signal(SIGINT, SIG_DFL);
+  signal(SIGTERM, SIG_DFL);
+  signal(SIGQUIT, SIG_DFL);
+  signal(SIGCHLD, SIG_DFL);
+  signal(SIGHUP, SIG_DFL);
+
+  /* Close all inherited file descriptors beyond standard streams */
+  int max_fd = (int)sysconf(_SC_OPEN_MAX);
+  if (max_fd < 32) max_fd = 1024;
+  if (max_fd > 4096) max_fd = 4096;
+  for (int fd = 3; fd < max_fd; fd++) {
+    (void)close(fd);
+  }
 }
 
 int c2t_shell_unix_execute(const char *command, c2t_shell_result_t *result,
@@ -66,7 +107,7 @@ int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
   }
 
   int stdout_pipe[2];
-  if (pipe(stdout_pipe) < 0) {
+  if (create_cloexec_pipe(stdout_pipe) < 0) {
     c2t_log_error("shell", "Failed to create stdout pipe: %s", strerror(errno));
     result->execution_error = 1;
     return 0;
@@ -74,7 +115,7 @@ int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
 
   int stdin_pipe[2] = {-1, -1};
   if (options->stdin_data && options->stdin_data_len > 0) {
-    if (pipe(stdin_pipe) < 0) {
+    if (create_cloexec_pipe(stdin_pipe) < 0) {
       c2t_log_error("shell", "Failed to create stdin pipe: %s", strerror(errno));
       close(stdout_pipe[0]);
       close(stdout_pipe[1]);
@@ -102,17 +143,6 @@ int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
     /* Child process */
     close(stdout_pipe[0]);
 
-    /* Unblock all signals and reset signal handlers to defaults */
-    sigset_t sset;
-    sigemptyset(&sset);
-    (void)sigprocmask(SIG_SETMASK, &sset, nullptr);
-
-    signal(SIGPIPE, SIG_DFL);
-    signal(SIGINT, SIG_DFL);
-    signal(SIGTERM, SIG_DFL);
-    signal(SIGQUIT, SIG_DFL);
-    signal(SIGCHLD, SIG_DFL);
-
     /* Setup STDIN */
     if (stdin_pipe[0] >= 0) {
       close(stdin_pipe[1]);
@@ -134,8 +164,16 @@ int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
     if (stdout_pipe[1] > STDERR_FILENO)
       close(stdout_pipe[1]);
 
-    /* Create new process group so we can cleanly terminate the whole tree */
+    /* Create isolated process group */
     (void)setpgid(0, 0);
+
+    /* Change directory if requested */
+    if (options->working_dir && *options->working_dir) {
+      (void)chdir(options->working_dir);
+    }
+
+    /* Sanitize descriptors and signals before exec */
+    sanitize_child_environment_and_fds();
 
     /* Execute using chosen shell */
     switch (options->shell_type) {
@@ -194,7 +232,7 @@ int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
     (void)fcntl(stdout_pipe[0], F_SETFL, flags | O_NONBLOCK);
   }
 
-  size_t capacity = 4096;
+  size_t capacity = 8192;
   char *buffer = malloc(capacity);
   if (!buffer) {
     c2t_log_error("shell", "Failed to allocate memory for shell output");
@@ -237,7 +275,7 @@ int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
 
     if (ret > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR))) {
       while (1) {
-        char chunk[4096];
+        char chunk[C2T_SHELL_CHUNK_SIZE];
         ssize_t n = read(stdout_pipe[0], chunk, sizeof(chunk));
         if (n > 0) {
           if (total_read + (size_t)n < C2T_SHELL_MAX_OUTPUT_BYTES) {
@@ -285,6 +323,9 @@ int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
       (void)kill(-pid, SIGKILL);
       (void)waitpid(pid, &status, 0);
     }
+    /* Reap any remaining orphaned children in the group */
+    while (waitpid(-pid, &status, WNOHANG) > 0) {
+    }
   } else {
     int status = 0;
     pid_t w = waitpid(pid, &status, 0);
@@ -294,6 +335,8 @@ int c2t_shell_unix_execute_ex(const c2t_shell_options_t *options,
       } else if (WIFSIGNALED(status)) {
         result->exit_code = 128 + WTERMSIG(status);
       }
+    }
+    while (waitpid(-pid, &status, WNOHANG) > 0) {
     }
   }
 
@@ -337,14 +380,36 @@ static unix_shell_session_t g_unix_session = {
     .shell_name = "sh",
 };
 
+static void check_session_idle_watchdog(void) {
+  if (g_unix_session.is_active && g_unix_session.pid > 0) {
+    uint64_t now = get_monotonic_ms();
+    if (now > g_unix_session.last_activity_ms + C2T_SESSION_IDLE_TIMEOUT_MS) {
+      c2t_log_info("shell", "Interactive session PID %d timed out due to 15m inactivity",
+                   (int)g_unix_session.pid);
+      (void)kill(-g_unix_session.pid, SIGTERM);
+      usleep(25000);
+      (void)kill(-g_unix_session.pid, SIGKILL);
+      int status = 0;
+      (void)waitpid(g_unix_session.pid, &status, WNOHANG);
+      if (g_unix_session.stdin_fd >= 0) close(g_unix_session.stdin_fd);
+      if (g_unix_session.stdout_fd >= 0) close(g_unix_session.stdout_fd);
+      g_unix_session.is_active = 0;
+      g_unix_session.pid = -1;
+      g_unix_session.stdin_fd = -1;
+      g_unix_session.stdout_fd = -1;
+    }
+  }
+}
+
 int c2t_shell_unix_session_start(c2t_shell_type_t shell_type, char *out_msg,
                                  size_t out_msg_cap) {
   pthread_mutex_lock(&g_unix_session.mutex);
 
+  check_session_idle_watchdog();
+
   if (g_unix_session.is_active) {
     int status = 0;
     if (waitpid(g_unix_session.pid, &status, WNOHANG) == 0) {
-      /* Session is already alive and running */
       if (out_msg && out_msg_cap > 0) {
         snprintf(out_msg, out_msg_cap,
                  "ℹ️ <b>Interactive Shell Session Already Active</b>\n\n"
@@ -358,7 +423,6 @@ int c2t_shell_unix_session_start(c2t_shell_type_t shell_type, char *out_msg,
       pthread_mutex_unlock(&g_unix_session.mutex);
       return 1;
     } else {
-      /* Process died previously, clean up stale session */
       if (g_unix_session.stdin_fd >= 0) close(g_unix_session.stdin_fd);
       if (g_unix_session.stdout_fd >= 0) close(g_unix_session.stdout_fd);
       g_unix_session.is_active = 0;
@@ -370,7 +434,7 @@ int c2t_shell_unix_session_start(c2t_shell_type_t shell_type, char *out_msg,
 
   int pipe_in[2];
   int pipe_out[2];
-  if (pipe(pipe_in) < 0 || pipe(pipe_out) < 0) {
+  if (create_cloexec_pipe(pipe_in) < 0 || create_cloexec_pipe(pipe_out) < 0) {
     if (out_msg && out_msg_cap > 0) {
       snprintf(out_msg, out_msg_cap, "❌ <b>Failed to create session pipes:</b> %s",
                strerror(errno));
@@ -419,14 +483,6 @@ int c2t_shell_unix_session_start(c2t_shell_type_t shell_type, char *out_msg,
     close(pipe_in[1]);
     close(pipe_out[0]);
 
-    sigset_t sset;
-    sigemptyset(&sset);
-    (void)sigprocmask(SIG_SETMASK, &sset, nullptr);
-
-    signal(SIGPIPE, SIG_DFL);
-    signal(SIGINT, SIG_DFL);
-    signal(SIGTERM, SIG_DFL);
-
     (void)dup2(pipe_in[0], STDIN_FILENO);
     (void)dup2(pipe_out[1], STDOUT_FILENO);
     (void)dup2(pipe_out[1], STDERR_FILENO);
@@ -435,6 +491,8 @@ int c2t_shell_unix_session_start(c2t_shell_type_t shell_type, char *out_msg,
     if (pipe_out[1] > STDERR_FILENO) close(pipe_out[1]);
 
     (void)setpgid(0, 0);
+
+    sanitize_child_environment_and_fds();
 
     if (shell_type == C2T_SHELL_POWERSHELL) {
       execlp("pwsh", "pwsh", "-NoLogo", (char *)nullptr);
@@ -521,6 +579,8 @@ int c2t_shell_unix_session_write(const char *input, size_t input_len,
 
   pthread_mutex_lock(&g_unix_session.mutex);
 
+  check_session_idle_watchdog();
+
   if (!g_unix_session.is_active || g_unix_session.pid < 0) {
     pthread_mutex_unlock(&g_unix_session.mutex);
     result->execution_error = 1;
@@ -530,7 +590,6 @@ int c2t_shell_unix_session_write(const char *input, size_t input_len,
   /* Check if child process is still alive */
   int status = 0;
   if (waitpid(g_unix_session.pid, &status, WNOHANG) != 0) {
-    /* Process has exited */
     if (g_unix_session.stdin_fd >= 0) close(g_unix_session.stdin_fd);
     if (g_unix_session.stdout_fd >= 0) close(g_unix_session.stdout_fd);
     g_unix_session.is_active = 0;
@@ -549,7 +608,6 @@ int c2t_shell_unix_session_write(const char *input, size_t input_len,
       break;
     written += (size_t)w;
   }
-  /* Append newline if not present */
   if (input_len == 0 || input[input_len - 1] != '\n') {
     (void)write(g_unix_session.stdin_fd, "\n", 1);
     written++;
@@ -558,7 +616,6 @@ int c2t_shell_unix_session_write(const char *input, size_t input_len,
   g_unix_session.total_input_bytes += written;
   g_unix_session.last_activity_ms = start_time;
 
-  /* Poll stdout and drain response up to wait_ms */
   size_t capacity = 4096;
   char *buffer = malloc(capacity);
   if (!buffer) {
@@ -609,10 +666,8 @@ int c2t_shell_unix_session_write(const char *input, size_t input_len,
           break;
         }
       }
-      /* If we read output, break out quickly after slight pause */
       if (total_read > 0) {
         usleep(30000);
-        /* Check if more bytes arrived */
         char extra[1024];
         ssize_t ex = read(g_unix_session.stdout_fd, extra, sizeof(extra));
         if (ex > 0 && total_read + (size_t)ex + 1 <= capacity) {
@@ -651,7 +706,6 @@ int c2t_shell_unix_session_stop(char *out_msg, size_t out_msg_cap) {
   uint64_t in_b = g_unix_session.total_input_bytes;
   uint64_t out_b = g_unix_session.total_output_bytes;
 
-  /* Send exit command */
   (void)write(g_unix_session.stdin_fd, "exit\n", 5);
   usleep(25000);
 
@@ -663,6 +717,8 @@ int c2t_shell_unix_session_stop(char *out_msg, size_t out_msg_cap) {
       (void)kill(-pid, SIGKILL);
       (void)waitpid(pid, &status, 0);
     }
+  }
+  while (waitpid(-pid, &status, WNOHANG) > 0) {
   }
 
   if (g_unix_session.stdin_fd >= 0) close(g_unix_session.stdin_fd);
@@ -693,6 +749,8 @@ int c2t_shell_unix_session_get_info(c2t_shell_session_info_t *info) {
     return 0;
 
   pthread_mutex_lock(&g_unix_session.mutex);
+
+  check_session_idle_watchdog();
 
   if (g_unix_session.is_active) {
     int status = 0;
