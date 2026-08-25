@@ -184,13 +184,6 @@ static BOOL c2t_TerminateJobObject(HANDLE hJob, UINT uExitCode) {
   return FALSE;
 }
 
-static DWORD c2t_ResumeThread(HANDLE hThread) {
-  c2t_win32_api_init();
-  if (g_c2t_win32.ResumeThread)
-    return g_c2t_win32.ResumeThread(hThread);
-  return (DWORD)-1;
-}
-
 static void c2t_InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
   c2t_win32_api_init();
   if (g_c2t_win32.InitializeCriticalSection)
@@ -282,7 +275,7 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
   case C2T_SHELL_SH:
   case C2T_SHELL_AUTO:
   default:
-    snprintf(full_cmd, full_cmd_len, "%s /c %s", comspec, options->command);
+    snprintf(full_cmd, full_cmd_len, "\"%s\" /c %s", comspec, options->command);
     break;
   }
 
@@ -315,13 +308,6 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
     }
   }
 
-  if (!hStdIn) {
-    HANDLE dummy_w = NULL;
-    if (c2t_CreatePipe(&hStdIn, &dummy_w, &sa, 0)) {
-      c2t_CloseHandle(dummy_w);
-    }
-  }
-
   STARTUPINFOA si;
   memset(&si, 0, sizeof(si));
   si.cb = sizeof(si);
@@ -344,10 +330,6 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
   }
 
   DWORD creation_flags = CREATE_NO_WINDOW;
-  if (g_c2t_win32.ResumeThread) {
-    creation_flags |= CREATE_SUSPENDED;
-  }
-
   uint64_t start_time = c2t_GetTickCount64();
 
   BOOL created = c2t_CreateProcessA(
@@ -384,10 +366,6 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
 
   if (hJob) {
     c2t_AssignProcessToJobObject(hJob, pi.hProcess);
-  }
-
-  if (creation_flags & CREATE_SUSPENDED) {
-    c2t_ResumeThread(pi.hThread);
   }
 
   size_t capacity = 4096;

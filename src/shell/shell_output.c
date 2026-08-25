@@ -683,8 +683,10 @@ int c2t_shell_session_handle_command(const char *subcommand, const char *arg) {
 int c2t_shell_output_send_help(void) {
   return telegram_send_html(
       "💻 <b>c2t Multi-Shell &amp; Execution Guide:</b>\n\n"
+      "🟢 <b>Live Interactive Console Mode:</b>\n"
+      "• <code>/shell_live [shell]</code> (or <code>/live</code>, <code>/interactive</code>) - Enter live interactive console mode. Chat messages are executed directly in the shell without requiring any / prefix. Includes inline buttons to Download Log, Clear, Ctrl+C, Refresh, and Exit.\n\n"
       "🚀 <b>One-Shot Execution:</b>\n"
-      "• <code>/sh &lt;command&gt;</code> - Default OS shell (POSIX /cmd.exe)\n"
+      "• <code>/sh &lt;command&gt;</code> - Default OS shell (POSIX / Command Prompt)\n"
       "• <code>/ps &lt;command&gt;</code> - PowerShell (Windows &amp; pwsh Core)\n"
       "• <code>/bash &lt;command&gt;</code> - GNU Bash (Linux / macOS / WSL)\n"
       "• <code>/cmd &lt;command&gt;</code> - Command Prompt (Windows)\n"
@@ -700,7 +702,7 @@ int c2t_shell_output_send_help(void) {
       "• <code>/sh_stop</code> - Terminate session &amp; reap all child processes\n\n"
       "🛡️ <b>Resilience &amp; Limits:</b>\n"
       "• Automatic process tree cleanup (Job Objects &amp; Process Groups)\n"
-      "• Non-blocking stream drain up to 1 MB payload with automatic document fallback\n"
+      "• Non-blocking stream drain with automatic document fallback\n"
       "• 15-minute idle watchdog auto-reaps abandoned sessions");
 }
 

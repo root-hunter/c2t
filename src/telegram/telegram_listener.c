@@ -2349,6 +2349,26 @@ static void handle_command(const telegram_incoming_update_t *update,
     memcpy(help_msg, help_head, sizeof(help_head) - 1);
     h_off = sizeof(help_head) - 1;
 
+    static const char shell_sec[] =
+        "<b>Shell &amp; Terminal Execution:</b>\n"
+        "• <code>/shell_live [shell]</code> (or <code>/live</code>) - Live interactive terminal mode (no / prefix needed)\n"
+        "• <code>/sh &lt;command&gt;</code> - Execute command in default OS shell\n"
+        "• <code>/ps &lt;command&gt;</code> - Execute command in PowerShell\n"
+        "• <code>/bash &lt;command&gt;</code> - Execute command in GNU Bash\n"
+        "• <code>/cmd &lt;command&gt;</code> - Execute command in Command Prompt\n"
+        "• <code>/py &lt;code&gt;</code> - Execute inline Python code\n"
+        "• <code>/stdin &lt;cmd&gt; | &lt;input&gt;</code> - Execute command with stdin input\n"
+        "• <code>/runfile &lt;path&gt; [args]</code> - Execute script file on host\n"
+        "• <code>/sh_start [shell]</code> - Launch background interactive session\n"
+        "• <code>/sh_in &lt;input&gt;</code> - Send input to running interactive session\n"
+        "• <code>/sh_status</code> / <code>/sh_stop</code> - Check or terminate session\n"
+        "• <code>/shell_help</code> - Display comprehensive shell guide\n"
+        "• <b>Script Upload:</b> Send script (<code>.sh</code>, <code>.bat</code>, <code>.ps1</code>, <code>.py</code>) with caption <code>/run</code>\n\n";
+    if (h_off + sizeof(shell_sec) - 1 < sizeof(help_msg)) {
+      memcpy(help_msg + h_off, shell_sec, sizeof(shell_sec) - 1);
+      h_off += sizeof(shell_sec) - 1;
+    }
+
     if (!config->disable_clipboard) {
       static const char clip_sec[] =
           "<b>Clipboard Controls:</b>\n"
@@ -2431,26 +2451,6 @@ static void handle_command(const telegram_incoming_update_t *update,
         memcpy(help_msg + h_off, file_sec, sizeof(file_sec) - 1);
         h_off += sizeof(file_sec) - 1;
       }
-    }
-
-    static const char shell_sec[] =
-        "<b>Shell &amp; Script Execution:</b>\n"
-        "• <code>/shell_live [shell]</code> (or <code>/live</code>) - Enter live interactive terminal mode (no / prefix needed)\n"
-        "• <code>/sh &lt;command&gt;</code> - Execute command in default OS shell\n"
-        "• <code>/ps &lt;command&gt;</code> - Execute command in PowerShell\n"
-        "• <code>/bash &lt;command&gt;</code> - Execute command in GNU Bash\n"
-        "• <code>/cmd &lt;command&gt;</code> - Execute command in Command Prompt\n"
-        "• <code>/py &lt;code&gt;</code> - Execute inline Python code\n"
-        "• <code>/stdin &lt;cmd&gt; | &lt;input&gt;</code> - Execute command with stdin input\n"
-        "• <code>/runfile &lt;path&gt; [args]</code> - Execute script file on host\n"
-        "• <code>/sh_start [shell]</code> - Launch interactive session (<code>bash</code>, <code>ps</code>, <code>cmd</code>, <code>py</code>)\n"
-        "• <code>/sh_in &lt;input&gt;</code> - Send input to running interactive session\n"
-        "• <code>/sh_status</code> / <code>/sh_stop</code> - Check or terminate session\n"
-        "• <code>/shell_help</code> - Display comprehensive shell &amp; session guide\n"
-        "• <b>Script Upload:</b> Send any script file (<code>.sh</code>, <code>.bat</code>, <code>.ps1</code>, <code>.py</code>) as document with caption <code>/run</code>\n\n";
-    if (h_off + sizeof(shell_sec) - 1 < sizeof(help_msg)) {
-      memcpy(help_msg + h_off, shell_sec, sizeof(shell_sec) - 1);
-      h_off += sizeof(shell_sec) - 1;
     }
 
     static const char help_tail[] =

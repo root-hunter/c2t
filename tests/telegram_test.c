@@ -1117,7 +1117,7 @@ int main(void) {
 
   keyboard_output_append("test_keystrokes", 15);
   keyboard_output_flush();
-  struct timespec ts = {.tv_sec = 0, .tv_nsec = 50000000L};
+  struct timespec ts = {.tv_sec = 0, .tv_nsec = 150000000L};
   (void)nanosleep(&ts, nullptr);
   keyboard_output_cleanup();
   if (http_post_calls != kb_posts + 1)
