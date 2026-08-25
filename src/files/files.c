@@ -1139,12 +1139,17 @@ int c2t_file_list_directory(const char *path_str, char *output,
       return 0;
   }
 
+  c2t_log_info("files", "Listing directory: '%s' (sanitized: '%s')",
+               target, clean_path);
+
   int res = 0;
 #ifdef _WIN32
   res = list_dir_windows(clean_path, output, capacity);
 #else
   res = list_dir_posix(clean_path, output, capacity);
 #endif
+  c2t_log_info("files", "Directory listing for '%s' returned status=%d",
+               clean_path, res);
   free(clean_path);
   return res;
 }
@@ -1857,6 +1862,12 @@ static int scan_explorer_directory(const char *dir_path) {
   if (s_explorer_item_count > 1) {
     qsort(s_explorer_items, s_explorer_item_count, sizeof(c2t_explorer_item_t), compare_explorer_items);
   }
+
+  c2t_log_info("files", "Scanned explorer directory '%s': %llu items (%llu dirs, %llu files, %llu bytes)",
+               s_explorer_dir, (unsigned long long)s_explorer_item_count,
+               (unsigned long long)s_explorer_dir_count,
+               (unsigned long long)s_explorer_file_count,
+               (unsigned long long)s_explorer_total_bytes);
   return 1;
 }
 
@@ -2127,6 +2138,9 @@ int c2t_file_explorer_show(const char *path, int page, int64_t edit_msg_id) {
   char keyboard_json[2048];
   build_explorer_keyboard_json(keyboard_json, sizeof(keyboard_json), page, total_pages);
 
+  c2t_log_info("files", "Rendering File Explorer for '%s' (page %d/%d, edit_id=%lld)",
+               s_explorer_dir, page + 1, total_pages, (long long)edit_msg_id);
+
   if (edit_msg_id > 0) {
     if (telegram_edit_message_html(edit_msg_id, html, keyboard_json)) {
       s_explorer_msg_id = edit_msg_id;
@@ -2145,6 +2159,9 @@ int c2t_file_explorer_show(const char *path, int page, int64_t edit_msg_id) {
 int c2t_file_explorer_handle_callback(const char *callback_query_id, const char *callback_data) {
   if (!callback_data || strncmp(callback_data, "fl_", 3) != 0)
     return 0;
+
+  c2t_log_info("files", "File Explorer callback received: '%s' (query ID: %s)",
+               callback_data, callback_query_id ? callback_query_id : "");
 
   if (strcmp(callback_data, "fl_close") == 0) {
     (void)telegram_answer_callback_query(callback_query_id, "❌ File Explorer closed");

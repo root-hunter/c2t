@@ -212,17 +212,24 @@ int c2t_shell_live_start(const char *shell_name) {
 #endif
   }
 
+  c2t_log_info("live_shell", "Starting interactive live shell (requested: '%s')...",
+               (shell_name && *shell_name) ? shell_name : "default");
+
   c2t_shell_session_info_t info;
   if (!c2t_shell_session_get_info(&info) || !info.is_active) {
     char start_msg[2048] = {0};
     if (!c2t_shell_session_start(st, start_msg, sizeof(start_msg))) {
+      c2t_log_error("live_shell", "Failed to launch interactive shell session backend");
       telegram_send_html("❌ <b>Failed to launch interactive shell session.</b>");
       return 0;
     }
+    c2t_log_info("live_shell", "Launched interactive shell session backend successfully");
   }
 
   if (c2t_shell_session_get_info(&info) && info.is_active) {
     snprintf(s_shell_title, sizeof(s_shell_title), "%s", info.shell_name);
+    c2t_log_info("live_shell", "Live shell active with title '%s' (PID %llu)",
+                 s_shell_title, (unsigned long long)info.pid);
   } else {
     snprintf(s_shell_title, sizeof(s_shell_title), "Default OS Shell");
   }
@@ -241,6 +248,8 @@ int c2t_shell_live_start(const char *shell_name) {
     if (c2t_shell_session_write("", 0, &init_res, 300) && init_res.output && *init_res.output) {
       strip_ansi_in_place(init_res.output);
       append_to_screen(init_res.output);
+      c2t_log_debug("live_shell", "Initial shell prompt drained: %llu bytes",
+                    (unsigned long long)init_res.output_len);
     }
     c2t_shell_result_free(&init_res);
   }
@@ -252,6 +261,8 @@ int c2t_shell_live_start(const char *shell_name) {
   int ok = telegram_send_html_keyboard_get_id(msg_html, s_live_keyboard_active, &msg_id);
   if (ok && msg_id > 0) {
     s_live_message_id = msg_id;
+    c2t_log_info("live_shell", "Live interactive console message created (ID: %lld)",
+                 (long long)msg_id);
   }
 
   (void)telegram_send_message_draft(209, "🟢 Live Shell Active: Send any command directly in chat...");
@@ -293,12 +304,16 @@ int c2t_shell_live_handle_input(const char *input_text) {
   snprintf(prompt_line, sizeof(prompt_line), "\n$ %s\n", p);
   append_to_screen(prompt_line);
 
+  c2t_log_info("live_shell", "Executing live shell command: '%s'", p);
+
   /* Send input into active shell session */
   c2t_shell_result_t res;
   memset(&res, 0, sizeof(res));
   int write_ok = c2t_shell_session_write(p, strlen(p), &res, 1200);
 
   if (write_ok) {
+    c2t_log_info("live_shell", "Command '%s' finished in %llu ms (output: %llu bytes)",
+                 p, (unsigned long long)res.duration_ms, (unsigned long long)res.output_len);
     if (res.output && *res.output) {
       strip_ansi_in_place(res.output);
       append_to_screen(res.output);
@@ -321,6 +336,7 @@ int c2t_shell_live_handle_input(const char *input_text) {
       (void)telegram_send_html(reply_buf);
     }
   } else {
+    c2t_log_warning("live_shell", "Command '%s' failed: session closed or child process exited", p);
     append_to_screen("[Process exited or session closed]\n");
     atomic_store(&s_live_active, 0);
     telegram_send_html("❌ <b>Session Process Exited</b>\n<i>The interactive shell process terminated. Use <code>/shell_live</code> to start a new session.</i>");
@@ -346,12 +362,17 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
   if (!callback_data)
     return 0;
 
+  c2t_log_info("live_shell", "Live shell callback received: '%s' (query ID: %s)",
+               callback_data, callback_query_id ? callback_query_id : "");
+
   if (strcmp(callback_data, "sh_live_log") == 0) {
     (void)telegram_answer_callback_query(callback_query_id, "📥 Generating full terminal log...");
     if (s_full_history_len > 0) {
       char filename[64];
       snprintf(filename, sizeof(filename), "terminal_session_%llu.log",
                (unsigned long long)time(nullptr));
+      c2t_log_info("live_shell", "Sending terminal session log (%llu bytes) as '%s'",
+                   (unsigned long long)s_full_history_len, filename);
       return telegram_send_file(s_full_history, s_full_history_len, "text/plain",
                                 filename, nullptr);
     } else {
@@ -365,6 +386,7 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
     char banner[128];
     snprintf(banner, sizeof(banner), "=== Terminal Cleared ===\n");
     append_to_screen(banner);
+    c2t_log_info("live_shell", "Terminal screen cleared by user");
 
     char msg_html[4000] = {0};
     render_live_message(msg_html, sizeof(msg_html), c2t_shell_live_is_active());
@@ -378,6 +400,7 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
   if (strcmp(callback_data, "sh_live_ctrlc") == 0) {
     (void)telegram_answer_callback_query(callback_query_id, "🛑 Ctrl+C sent (SIGINT)");
     append_to_screen("\n^C\n");
+    c2t_log_info("live_shell", "Sending Ctrl+C (SIGINT) to interactive shell");
     c2t_shell_result_t res;
     memset(&res, 0, sizeof(res));
     static const char sigint_buf[] = "\x03\r\n";
@@ -399,6 +422,7 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
 
   if (strcmp(callback_data, "sh_live_refresh") == 0) {
     (void)telegram_answer_callback_query(callback_query_id, "🔄 Refreshed");
+    c2t_log_info("live_shell", "Terminal refresh requested");
     c2t_shell_result_t res;
     memset(&res, 0, sizeof(res));
     (void)c2t_shell_session_write("", 0, &res, 400);
@@ -419,12 +443,14 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
 
   if (strcmp(callback_data, "sh_live_exit") == 0) {
     (void)telegram_answer_callback_query(callback_query_id, "🚪 Exited live mode");
+    c2t_log_info("live_shell", "Exiting live shell mode via inline button");
     (void)c2t_shell_live_stop();
     return 1;
   }
 
   if (strcmp(callback_data, "sh_live_reopen") == 0) {
     (void)telegram_answer_callback_query(callback_query_id, "🟢 Re-opening live shell...");
+    c2t_log_info("live_shell", "Re-opening live shell via inline button");
     return c2t_shell_live_start(nullptr);
   }
 
@@ -432,6 +458,8 @@ int c2t_shell_live_handle_callback(const char *callback_query_id,
 }
 
 int c2t_shell_live_stop(void) {
+  c2t_log_info("live_shell", "Stopping live interactive mode (session recorded: %llu bytes)",
+               (unsigned long long)s_full_history_len);
   atomic_store(&s_live_active, 0);
 
   char msg_html[4000] = {0};
