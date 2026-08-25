@@ -686,6 +686,12 @@ int c2t_shell_live_handle_input(const char *input_text) {
                    "⚡ <b>$ %s</b> (Exit: %d)\n<i>(Executed with no output)</i>", esc_cmd, res.exit_code);
         }
         (void)telegram_send_html(reply_buf);
+      } else {
+        char fallback_buf[384];
+        snprintf(fallback_buf, sizeof(fallback_buf),
+                 "⚡ <b>$ %s</b> (Exit: %d)\n<i>[Output logged to terminal buffer]</i>",
+                 esc_cmd, res.exit_code);
+        (void)telegram_send_html(fallback_buf);
       }
       free(esc_out);
       free(reply_buf);
