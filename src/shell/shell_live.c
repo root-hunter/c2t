@@ -119,28 +119,13 @@ static size_t escape_terminal_html(const char *src, char *dst, size_t dst_cap) {
     return 0;
 
   size_t d = 0;
-  size_t s = 0;
-
-  while (src[s] && d + 8 < dst_cap) {
-    size_t chunk_start = s;
-    while (src[s] && src[s] != '<' && src[s] != '>' && src[s] != '&' &&
-           src[s] != '"' && (unsigned char)src[s] >= 32) {
-      s++;
-    }
-
-    size_t chunk_len = s - chunk_start;
-    if (chunk_len > 0) {
-      if (d + chunk_len >= dst_cap - 8) {
-        chunk_len = dst_cap - 8 - d;
-      }
-      memcpy(dst + d, src + chunk_start, chunk_len);
-      d += chunk_len;
-      if (!src[s] || d + 8 >= dst_cap)
-        break;
-    }
-
-    unsigned char c = (unsigned char)src[s++];
-    if (c == '<') {
+  for (size_t s = 0; src[s] && d + 8 < dst_cap; s++) {
+    unsigned char c = (unsigned char)src[s];
+    if (c == '\r') {
+      if (src[s + 1] == '\n')
+        continue;
+      dst[d++] = '\n';
+    } else if (c == '<') {
       memcpy(dst + d, "&lt;", 4);
       d += 4;
     } else if (c == '>') {
@@ -152,7 +137,7 @@ static size_t escape_terminal_html(const char *src, char *dst, size_t dst_cap) {
     } else if (c == '"') {
       memcpy(dst + d, "&quot;", 6);
       d += 6;
-    } else if (c == '\n' || c == '\t') {
+    } else if (c >= 32 || c == '\n' || c == '\t') {
       dst[d++] = (char)c;
     }
   }

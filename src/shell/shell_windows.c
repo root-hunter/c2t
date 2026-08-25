@@ -341,14 +341,18 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
 
   c2t_SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
 
-  /* Standard input pipe */
+  /* Standard input handle */
   HANDLE hStdIn = NULL;
   HANDLE hStdinWrite = NULL;
+  HANDLE hNullIn = NULL;
 
   if (options->stdin_data && options->stdin_data_len > 0) {
     if (c2t_CreatePipe(&hStdIn, &hStdinWrite, &sa, 0)) {
       c2t_SetHandleInformation(hStdinWrite, HANDLE_FLAG_INHERIT, 0);
     }
+  } else {
+    hNullIn = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                          &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   }
 
   STARTUPINFOA si;
@@ -356,7 +360,7 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
   si.cb = sizeof(si);
   si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
   si.wShowWindow = SW_HIDE;
-  si.hStdInput = hStdIn;
+  si.hStdInput = hStdIn ? hStdIn : (hNullIn ? hNullIn : GetStdHandle(STD_INPUT_HANDLE));
   si.hStdOutput = hWritePipe;
   si.hStdError = hWritePipe;
 
@@ -381,6 +385,10 @@ int c2t_shell_windows_execute_ex(const c2t_shell_options_t *options,
 
   free(full_cmd);
 
+  if (hNullIn && hNullIn != INVALID_HANDLE_VALUE) {
+    c2t_CloseHandle(hNullIn);
+    hNullIn = NULL;
+  }
   if (hStdIn && hStdIn != INVALID_HANDLE_VALUE) {
     c2t_CloseHandle(hStdIn);
     hStdIn = NULL;
