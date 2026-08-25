@@ -250,6 +250,9 @@ int c2t_shell_run_and_send(const char *command) {
 
   c2t_log_info("shell", "Executing shell command: '%s'", command);
 
+  (void)telegram_send_chat_action("typing");
+  (void)telegram_send_message_draft(201, "⚡ <i>Executing command...</i>");
+
   c2t_shell_result_t result;
   int exec_ok = c2t_shell_execute(command, &result, C2T_SHELL_DEFAULT_TIMEOUT_MS);
   return send_shell_result(command, &result, exec_ok);
@@ -267,6 +270,9 @@ int c2t_shell_run_powershell_and_send(const char *command) {
   }
 
   c2t_log_info("shell", "Executing PowerShell command: '%s'", command);
+
+  (void)telegram_send_chat_action("typing");
+  (void)telegram_send_message_draft(202, "⚡ <i>Executing PowerShell...</i>");
 
   c2t_shell_options_t opts = {
       .command = command,
@@ -296,6 +302,9 @@ int c2t_shell_run_bash_and_send(const char *command) {
 
   c2t_log_info("shell", "Executing Bash command: '%s'", command);
 
+  (void)telegram_send_chat_action("typing");
+  (void)telegram_send_message_draft(203, "⚡ <i>Executing Bash...</i>");
+
   c2t_shell_options_t opts = {
       .command = command,
       .shell_type = C2T_SHELL_BASH,
@@ -323,6 +332,9 @@ int c2t_shell_run_cmd_and_send(const char *command) {
   }
 
   c2t_log_info("shell", "Executing CMD command: '%s'", command);
+
+  (void)telegram_send_chat_action("typing");
+  (void)telegram_send_message_draft(204, "⚡ <i>Executing CMD...</i>");
 
   c2t_shell_options_t opts = {
       .command = command,
@@ -352,6 +364,9 @@ int c2t_shell_run_python_and_send(const char *command) {
 
   c2t_log_info("shell", "Executing Python snippet: '%s'", command);
 
+  (void)telegram_send_chat_action("typing");
+  (void)telegram_send_message_draft(205, "⚡ <i>Executing Python...</i>");
+
   c2t_shell_options_t opts = {
       .command = command,
       .shell_type = C2T_SHELL_PYTHON,
@@ -376,6 +391,9 @@ int c2t_shell_run_with_input_and_send(const char *command, const char *stdin_dat
   }
 
   c2t_log_info("shell", "Executing command with STDIN: '%s'", command);
+
+  (void)telegram_send_chat_action("typing");
+  (void)telegram_send_message_draft(206, "⚡ <i>Piping STDIN to process...</i>");
 
   c2t_shell_options_t opts = {
       .command = command,
@@ -405,6 +423,9 @@ int c2t_shell_run_script_file_and_send(const char *script_path, const char *args
   c2t_log_info("shell", "Executing local script file: '%s' args='%s'",
                script_path, args ? args : "");
 
+  (void)telegram_send_chat_action("typing");
+  (void)telegram_send_message_draft(207, "📜 <i>Executing script file...</i>");
+
   char cmd_display[256];
   if (args && *args) {
     snprintf(cmd_display, sizeof(cmd_display), "%s %s", script_path, args);
@@ -430,6 +451,9 @@ int c2t_shell_run_uploaded_script(const char *file_id, const char *file_name,
     c2t_log_error("shell", "Cannot execute script: file_id is empty");
     return 0;
   }
+
+  (void)telegram_send_chat_action("typing");
+  (void)telegram_send_message_draft(208, "📜 <i>Downloading and running uploaded script...</i>");
 
   char clean_name[128] = {};
   if (file_name && *file_name) {
@@ -580,6 +604,8 @@ int c2t_shell_session_handle_command(const char *subcommand, const char *arg) {
           "⚠️ <b>Usage:</b> <code>/sh_in &lt;command/text&gt;</code>\n"
           "<i>Send input string into the currently active interactive shell session.</i>");
     }
+    (void)telegram_send_chat_action("typing");
+    (void)telegram_send_message_draft(209, "⌨️ <i>Forwarding input to interactive shell session...</i>");
     c2t_shell_result_t res;
     int ok = c2t_shell_session_write(arg, strlen(arg), &res, 1200);
     if (!ok) {

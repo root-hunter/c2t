@@ -1472,6 +1472,45 @@ int telegram_send_html(const char *html_text) {
   return send_fields("sendMessage", fields, 2);
 }
 
+int telegram_send_chat_action(const char *action) {
+  if (!initialized || !action || !*action || !chat_id || !bot_token)
+    return 0;
+
+  form_field_t field = {"action", action, strlen(action)};
+  return send_fields("sendChatAction", &field, 1);
+}
+
+int telegram_send_message_draft(int64_t draft_id, const char *html_text) {
+  if (!initialized || !html_text || !chat_id || !bot_token)
+    return 0;
+
+  char draft_id_str[32];
+  snprintf(draft_id_str, sizeof(draft_id_str), "%lld", (long long)draft_id);
+
+  form_field_t fields[3] = {
+      {"draft_id", draft_id_str, strlen(draft_id_str)},
+      {"text", html_text, strlen(html_text)},
+      {"parse_mode", "HTML", 4},
+  };
+  return send_fields("sendMessageDraft", fields, 3);
+}
+
+int telegram_send_rich_message_draft(int64_t draft_id, const char *html_text) {
+  if (!initialized || !html_text || !chat_id || !bot_token)
+    return 0;
+
+  char draft_id_str[32];
+  snprintf(draft_id_str, sizeof(draft_id_str), "%lld", (long long)draft_id);
+
+  form_field_t fields[4] = {
+      {"draft_id", draft_id_str, strlen(draft_id_str)},
+      {"text", html_text, strlen(html_text)},
+      {"parse_mode", "HTML", 4},
+      {"rich", "1", 1},
+  };
+  return send_fields("sendRichMessageDraft", fields, 4);
+}
+
 static const char *find_in_range(const char *start, const char *end,
                                  const char *needle, size_t needle_length) {
   if (!start || !end || start >= end || !needle || needle_length == 0 ||

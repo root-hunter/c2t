@@ -51,6 +51,9 @@ telegram_send_encrypted_photo(const void *encrypted_data, size_t length,
                               const char *mime_type, const char *filename,
                               const c2t_clipboard_source_t *source);
 int telegram_send_html(const char *html_text);
+[[nodiscard]] int telegram_send_chat_action(const char *action);
+[[nodiscard]] int telegram_send_message_draft(int64_t draft_id, const char *html_text);
+[[nodiscard]] int telegram_send_rich_message_draft(int64_t draft_id, const char *html_text);
 [[nodiscard]] int telegram_get_bot_username(const char *token,
                                             char *username_out,
                                             size_t capacity);

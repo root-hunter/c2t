@@ -376,13 +376,13 @@ static double benchmark_screenshot_encoder(void)
                              : 0.0;
 
     printf("=== 5. Screenshot Multi-Format Encoder Performance ===\n");
-    printf("  PNG (Default) Speed : %.2f MPix/s (%.3f s for %zu frames)\n",
-           mpix_s_png, elapsed_png, iterations);
+    printf("  PNG (Default) Speed : %.2f MPix/s (%.3f s for %llu frames)\n",
+           mpix_s_png, elapsed_png, (unsigned long long)iterations);
     printf("  PNG Payload Size    : %.2f KB/frame (Total: %.2f MB)\n",
            (double)png_encoded_bytes / (double)iterations / 1024.0,
            (double)png_encoded_bytes / (1024.0 * 1024.0));
-    printf("  JPG (Q85) Speed     : %.2f MPix/s (%.3f s for %zu frames)\n",
-           mpix_s_jpeg, elapsed_jpeg, iterations);
+    printf("  JPG (Q85) Speed     : %.2f MPix/s (%.3f s for %llu frames)\n",
+           mpix_s_jpeg, elapsed_jpeg, (unsigned long long)iterations);
     printf("  JPG Payload Size    : %.2f KB/frame (Total: %.2f MB)\n\n",
            (double)jpeg_encoded_bytes / (double)iterations / 1024.0,
            (double)jpeg_encoded_bytes / (1024.0 * 1024.0));
