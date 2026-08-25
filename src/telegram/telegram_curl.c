@@ -336,7 +336,6 @@ int telegram_http_post_response(const char *token, const char *method,
   long status = 0;
   if (result == CURLE_OK)
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-  free(fallback_resp.data);
   if (result != CURLE_OK || status < 200 || status >= 300) {
     c2t_log_error("https",
                   "Telegram request failed: method=%s, "

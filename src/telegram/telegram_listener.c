@@ -2573,6 +2573,7 @@ static DWORD WINAPI async_command_worker(LPVOID arg) {
     handle_command(&ctx->update, ctx->chat_id_buf, ctx->username_buf);
     free(ctx);
   }
+  telegram_http_thread_cleanup();
   return 0;
 }
 #else
@@ -2582,6 +2583,7 @@ static void *async_command_worker(void *arg) {
     handle_command(&ctx->update, ctx->chat_id_buf, ctx->username_buf);
     free(ctx);
   }
+  telegram_http_thread_cleanup();
   return nullptr;
 }
 #endif
