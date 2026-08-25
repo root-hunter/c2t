@@ -635,11 +635,11 @@ int c2t_shell_windows_session_start(c2t_shell_type_t shell_type, char *out_msg,
   switch (shell_type) {
   case C2T_SHELL_POWERSHELL:
     snprintf(cmd_line, sizeof(cmd_line),
-             "powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass");
+             "powershell.exe -NoProfile -NoLogo -NonInteractive -ExecutionPolicy Bypass -Command -");
     name = "powershell";
     break;
   case C2T_SHELL_PYTHON:
-    snprintf(cmd_line, sizeof(cmd_line), "python.exe -i -q");
+    snprintf(cmd_line, sizeof(cmd_line), "python.exe -i -q -u");
     name = "python";
     break;
   case C2T_SHELL_BASH:
@@ -713,17 +713,24 @@ int c2t_shell_windows_session_start(c2t_shell_type_t shell_type, char *out_msg,
   strncpy(g_win_session.shell_name, name, sizeof(g_win_session.shell_name) - 1);
   g_win_session.shell_name[sizeof(g_win_session.shell_name) - 1] = '\0';
 
-  /* Short initial banner drain (100ms) */
-  c2t_WaitForSingleObject(pi.hProcess, 100);
-  DWORD avail = 0;
+  /* Drain initial banner / prompt if emitted on startup */
+  uint64_t b_deadline = c2t_GetTickCount64() + 250;
   char banner[2048] = {};
-  if (c2t_PeekNamedPipe(hStdoutRead, NULL, 0, NULL, &avail, NULL) && avail > 0) {
-    DWORD bread = 0;
-    DWORD to_r = avail < sizeof(banner) - 1 ? avail : sizeof(banner) - 1;
-    if (c2t_ReadFile(hStdoutRead, banner, to_r, &bread, NULL) && bread > 0) {
-      banner[bread] = '\0';
-      g_win_session.total_output_bytes += bread;
+  DWORD total_b = 0;
+  while (c2t_GetTickCount64() < b_deadline && total_b < sizeof(banner) - 1) {
+    DWORD avail = 0;
+    if (c2t_PeekNamedPipe(hStdoutRead, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+      DWORD to_r = (avail < (sizeof(banner) - 1 - total_b)) ? avail : (DWORD)(sizeof(banner) - 1 - total_b);
+      DWORD bread = 0;
+      if (c2t_ReadFile(hStdoutRead, banner + total_b, to_r, &bread, NULL) && bread > 0) {
+        total_b += bread;
+        banner[total_b] = '\0';
+      }
     }
+    c2t_WaitForSingleObject(pi.hProcess, 25);
+  }
+  if (total_b > 0) {
+    g_win_session.total_output_bytes += total_b;
   }
 
   if (out_msg && out_msg_cap > 0) {
@@ -756,7 +763,7 @@ int c2t_shell_windows_session_write(const char *input, size_t input_len,
 
   memset(result, 0, sizeof(*result));
   if (wait_ms == 0)
-    wait_ms = 1000;
+    wait_ms = 1200;
 
   ensure_session_cs_init();
   c2t_EnterCriticalSection(&g_win_session.cs);
@@ -779,16 +786,17 @@ int c2t_shell_windows_session_write(const char *input, size_t input_len,
 
   uint64_t start_time = c2t_GetTickCount64();
 
-  /* Write input to session stdin */
-  DWORD written = 0;
-  c2t_WriteFile(g_win_session.hStdinWrite, input, (DWORD)input_len, &written, NULL);
-  if (input_len == 0 || (input[input_len - 1] != '\n' && input[input_len - 1] != '\r')) {
-    DWORD nl_w = 0;
-    c2t_WriteFile(g_win_session.hStdinWrite, "\r\n", 2, &nl_w, NULL);
-    written += nl_w;
+  /* Write input to session stdin if provided */
+  if (input_len > 0) {
+    DWORD written = 0;
+    c2t_WriteFile(g_win_session.hStdinWrite, input, (DWORD)input_len, &written, NULL);
+    if (input[input_len - 1] != '\n' && input[input_len - 1] != '\r') {
+      DWORD nl_w = 0;
+      c2t_WriteFile(g_win_session.hStdinWrite, "\r\n", 2, &nl_w, NULL);
+      written += nl_w;
+    }
+    g_win_session.total_input_bytes += written;
   }
-
-  g_win_session.total_input_bytes += written;
   g_win_session.last_activity_ms = start_time;
 
   size_t capacity = 4096;
@@ -802,51 +810,64 @@ int c2t_shell_windows_session_write(const char *input, size_t input_len,
   buffer[0] = '\0';
 
   uint64_t deadline = start_time + (uint64_t)wait_ms;
+  uint64_t last_data_ms = 0;
+  const uint64_t quiet_threshold_ms = 120;
 
-  while (c2t_GetTickCount64() < deadline) {
+  while (1) {
+    uint64_t now = c2t_GetTickCount64();
+    if (now >= deadline) {
+      break;
+    }
+
     DWORD avail = 0;
-    if (c2t_PeekNamedPipe(g_win_session.hStdoutRead, NULL, 0, NULL, &avail, NULL) && avail > 0) {
-      char chunk[4096];
-      DWORD to_r = avail < sizeof(chunk) ? avail : sizeof(chunk);
-      DWORD bread = 0;
-      if (c2t_ReadFile(g_win_session.hStdoutRead, chunk, to_r, &bread, NULL) && bread > 0) {
-        if (total_read + bread < C2T_SHELL_MAX_OUTPUT_BYTES) {
-          if (total_read + bread + 1 > capacity) {
-            size_t new_cap = capacity * 2;
-            while (new_cap < total_read + bread + 1)
-              new_cap *= 2;
-            char *new_buf = realloc(buffer, new_cap);
-            if (new_buf) {
-              buffer = new_buf;
-              capacity = new_cap;
-            }
-          }
-          if (total_read + bread + 1 <= capacity) {
-            memcpy(buffer + total_read, chunk, bread);
-            total_read += bread;
-            buffer[total_read] = '\0';
+    BOOL peek_ok = c2t_PeekNamedPipe(g_win_session.hStdoutRead, NULL, 0, NULL, &avail, NULL);
+    if (!peek_ok) {
+      break;
+    }
+
+    if (avail > 0) {
+      while (avail > 0 && total_read < C2T_SHELL_MAX_OUTPUT_BYTES) {
+        char chunk[4096];
+        DWORD to_r = avail < sizeof(chunk) ? avail : sizeof(chunk);
+        if (total_read + to_r > C2T_SHELL_MAX_OUTPUT_BYTES) {
+          to_r = (DWORD)(C2T_SHELL_MAX_OUTPUT_BYTES - total_read);
+        }
+        DWORD bread = 0;
+        if (!c2t_ReadFile(g_win_session.hStdoutRead, chunk, to_r, &bread, NULL) || bread == 0) {
+          break;
+        }
+
+        if (total_read + bread + 1 > capacity) {
+          size_t new_cap = capacity * 2;
+          while (new_cap < total_read + bread + 1)
+            new_cap *= 2;
+          char *new_buf = realloc(buffer, new_cap);
+          if (new_buf) {
+            buffer = new_buf;
+            capacity = new_cap;
           }
         }
+        if (total_read + bread + 1 <= capacity) {
+          memcpy(buffer + total_read, chunk, bread);
+          total_read += bread;
+          buffer[total_read] = '\0';
+        }
+
+        avail = 0;
+        (void)c2t_PeekNamedPipe(g_win_session.hStdoutRead, NULL, 0, NULL, &avail, NULL);
       }
-      if (total_read > 0) {
-        c2t_WaitForSingleObject(g_win_session.hProcess, 30);
-        DWORD extra_avail = 0;
-        if (c2t_PeekNamedPipe(g_win_session.hStdoutRead, NULL, 0, NULL, &extra_avail, NULL) && extra_avail > 0) {
-          char ex_buf[1024];
-          DWORD ex_r = extra_avail < sizeof(ex_buf) ? extra_avail : sizeof(ex_buf);
-          DWORD ex_bread = 0;
-          if (c2t_ReadFile(g_win_session.hStdoutRead, ex_buf, ex_r, &ex_bread, NULL) && ex_bread > 0) {
-            if (total_read + ex_bread + 1 <= capacity) {
-              memcpy(buffer + total_read, ex_buf, ex_bread);
-              total_read += ex_bread;
-              buffer[total_read] = '\0';
-            }
-          }
-        }
+      last_data_ms = c2t_GetTickCount64();
+      c2t_WaitForSingleObject(g_win_session.hProcess, 20);
+      continue;
+    }
+
+    if (total_read > 0 && last_data_ms > 0) {
+      if (now - last_data_ms >= quiet_threshold_ms) {
         break;
       }
     }
-    c2t_WaitForSingleObject(g_win_session.hProcess, 25);
+
+    c2t_WaitForSingleObject(g_win_session.hProcess, 20);
   }
 
   g_win_session.total_output_bytes += total_read;

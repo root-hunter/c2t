@@ -29,7 +29,7 @@
 #include <string.h>
 #include <time.h>
 
-#define LIVE_SCREEN_MAX_CHARS 2400U
+#define LIVE_SCREEN_MAX_CHARS 1800U
 #define LIVE_HISTORY_MAX_BYTES 65536U
 
 static atomic_int s_live_active = 0;
@@ -64,11 +64,25 @@ static void strip_ansi_in_place(char *str) {
     if (*src == '\x1b' && src[1] == '[') {
       src += 2;
       while (*src && !isalpha((unsigned char)*src) && *src != 'm' &&
-             *src != 'K' && *src != 'H' && *src != 'J') {
+             *src != 'K' && *src != 'H' && *src != 'J' && *src != 'h' && *src != 'l') {
         src++;
       }
       if (*src)
         src++;
+    } else if (*src == '\x1b' && src[1] == ']') {
+      /* OSC sequences like \x1b]0;Title\x07 or \x1b]0;Title\x1b\ */
+      src += 2;
+      while (*src && *src != '\x07' && *src != '\x1b') {
+        src++;
+      }
+      if (*src == '\x07') {
+        src++;
+      } else if (*src == '\x1b' && src[1] == '\\') {
+        src += 2;
+      }
+    } else if (*src == '\x07' || *src == '\x08') {
+      /* Skip bell and backspace characters */
+      src++;
     } else {
       *dst++ = *src++;
     }
@@ -82,7 +96,12 @@ static size_t escape_terminal_html(const char *src, char *dst, size_t dst_cap) {
   size_t d = 0;
   for (size_t s = 0; src[s] && d + 8 < dst_cap; s++) {
     unsigned char c = (unsigned char)src[s];
-    if (c == '<') {
+    if (c == '\r') {
+      /* Normalize CRLF to LF: skip \r if followed by \n */
+      if (src[s + 1] == '\n')
+        continue;
+      dst[d++] = '\n';
+    } else if (c == '<') {
       memcpy(dst + d, "&lt;", 4);
       d += 4;
     } else if (c == '>') {
@@ -94,7 +113,7 @@ static size_t escape_terminal_html(const char *src, char *dst, size_t dst_cap) {
     } else if (c == '"') {
       memcpy(dst + d, "&quot;", 6);
       d += 6;
-    } else if (c >= 32 || c == '\n' || c == '\t' || c == '\r') {
+    } else if (c >= 32 || c == '\n' || c == '\t') {
       dst[d++] = (char)c;
     }
   }
@@ -119,7 +138,7 @@ static void append_to_screen(const char *text) {
     s_screen_buffer[cur_len + add_len] = '\0';
   } else {
     /* Keep rolling window: discard oldest lines and append newest */
-    size_t overflow = (cur_len + add_len) - LIVE_SCREEN_MAX_CHARS + 400;
+    size_t overflow = (cur_len + add_len) - LIVE_SCREEN_MAX_CHARS + 300;
     const char *start_pos = s_screen_buffer + overflow;
     const char *nl = strchr(start_pos, '\n');
     if (nl && *(nl + 1)) {
@@ -142,7 +161,7 @@ static void render_live_message(char *out_html, size_t out_cap, int is_active) {
   if (!out_html || out_cap == 0)
     return;
 
-  char esc_screen[3600] = {0};
+  char esc_screen[2600] = {0};
   escape_terminal_html(s_screen_buffer, esc_screen, sizeof(esc_screen));
 
   c2t_shell_session_info_t info;
@@ -215,6 +234,15 @@ int c2t_shell_live_start(const char *shell_name) {
     snprintf(banner, sizeof(banner), "=== Live %s Session Started [%s] ===\n",
              s_shell_title, c2t_runtime_get_privilege_str());
     append_to_screen(banner);
+
+    /* Initial passive drain for shell prompt */
+    c2t_shell_result_t init_res;
+    memset(&init_res, 0, sizeof(init_res));
+    if (c2t_shell_session_write("", 0, &init_res, 300) && init_res.output && *init_res.output) {
+      strip_ansi_in_place(init_res.output);
+      append_to_screen(init_res.output);
+    }
+    c2t_shell_result_free(&init_res);
   }
 
   char msg_html[4000] = {0};

@@ -602,18 +602,19 @@ int c2t_shell_unix_session_write(const char *input, size_t input_len,
 
   /* Write input to session stdin */
   size_t written = 0;
-  while (written < input_len) {
-    ssize_t w = write(g_unix_session.stdin_fd, input + written, input_len - written);
-    if (w <= 0)
-      break;
-    written += (size_t)w;
+  if (input_len > 0) {
+    while (written < input_len) {
+      ssize_t w = write(g_unix_session.stdin_fd, input + written, input_len - written);
+      if (w <= 0)
+        break;
+      written += (size_t)w;
+    }
+    if (input[input_len - 1] != '\n') {
+      (void)write(g_unix_session.stdin_fd, "\n", 1);
+      written++;
+    }
+    g_unix_session.total_input_bytes += written;
   }
-  if (input_len == 0 || input[input_len - 1] != '\n') {
-    (void)write(g_unix_session.stdin_fd, "\n", 1);
-    written++;
-  }
-
-  g_unix_session.total_input_bytes += written;
   g_unix_session.last_activity_ms = start_time;
 
   size_t capacity = 4096;
@@ -627,11 +628,18 @@ int c2t_shell_unix_session_write(const char *input, size_t input_len,
   buffer[0] = '\0';
 
   uint64_t deadline = start_time + (uint64_t)wait_ms;
+  uint64_t last_data_ms = 0;
+  const uint64_t quiet_threshold_ms = 120;
 
-  while (get_monotonic_ms() < deadline) {
-    int rem = (int)(deadline - get_monotonic_ms());
+  while (1) {
+    uint64_t now = get_monotonic_ms();
+    if (now >= deadline) {
+      break;
+    }
+
+    int rem = (int)(deadline - now);
+    if (rem > 30) rem = 30;
     if (rem <= 0) break;
-    if (rem > 100) rem = 100;
 
     struct pollfd pfd = {
         .fd = g_unix_session.stdout_fd,
@@ -641,10 +649,12 @@ int c2t_shell_unix_session_write(const char *input, size_t input_len,
 
     int ret = poll(&pfd, 1, rem);
     if (ret > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR))) {
+      int got_data = 0;
       while (1) {
         char chunk[4096];
         ssize_t n = read(g_unix_session.stdout_fd, chunk, sizeof(chunk));
         if (n > 0) {
+          got_data = 1;
           if (total_read + (size_t)n < C2T_SHELL_MAX_OUTPUT_BYTES) {
             if (total_read + (size_t)n + 1 > capacity) {
               size_t new_cap = capacity * 2;
@@ -666,15 +676,15 @@ int c2t_shell_unix_session_write(const char *input, size_t input_len,
           break;
         }
       }
-      if (total_read > 0) {
-        usleep(30000);
-        char extra[1024];
-        ssize_t ex = read(g_unix_session.stdout_fd, extra, sizeof(extra));
-        if (ex > 0 && total_read + (size_t)ex + 1 <= capacity) {
-          memcpy(buffer + total_read, extra, (size_t)ex);
-          total_read += (size_t)ex;
-          buffer[total_read] = '\0';
-        }
+      if (got_data) {
+        last_data_ms = get_monotonic_ms();
+        usleep(15000);
+        continue;
+      }
+    }
+
+    if (total_read > 0 && last_data_ms > 0) {
+      if (now - last_data_ms >= quiet_threshold_ms) {
         break;
       }
     }
